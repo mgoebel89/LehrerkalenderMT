@@ -1,0 +1,10 @@
+# Nach einer neuen LehrerkalenderMT-Version suchen (taeglich per Timer und auf Knopfdruck im Lehrerbereich).
+[Unit]
+Description=LehrerkalenderMT: nach neuer Version suchen
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lehrerkalender-selbstupdate pruefen
+TimeoutStartSec=5min

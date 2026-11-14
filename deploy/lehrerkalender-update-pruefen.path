@@ -1,0 +1,10 @@
+# Knopf "Jetzt pruefen" im Lehrerbereich: der Webdienst legt /var/lib/lehrerkalender/update/pruefen an.
+[Unit]
+Description=LehrerkalenderMT: Pruefung auf Knopfdruck
+
+[Path]
+PathExists=/var/lib/lehrerkalender/update/pruefen
+Unit=lehrerkalender-update-pruefen.service
+
+[Install]
+WantedBy=multi-user.target

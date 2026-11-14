@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Konto anlegen · Lehrerkalender MT</title>
+<link rel="stylesheet" href="/static/stil.css">
+<link rel="icon" href="/static/symbol.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="kopf">
+  <a class="marke" href="/"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 10 L10 0 L10 10 Z"/></svg>Lehrerkalender MT</a></header>
+<div class="mitte">
+  <form class="karte" id="einladung">
+    <h1 class="dreieck">Konto anlegen</h1>
+    <p class="leise">Mit dem Einladungscode, den du vom Admin bekommen hast. Danach meldest du dich mit Kürzel und Passwort an.</p>
+    <label class="feld">Einladungscode<input id="code" name="code" autocomplete="off" autocapitalize="characters" placeholder="KAL-7Q4M-2XRD" required></label>
+    <label class="feld">Kürzel<input id="kuerzel" name="kuerzel" autocomplete="username" autocapitalize="none" required>
+      <span class="hilfe">2 bis 8 Kleinbuchstaben oder Ziffern, z. B. dein Schulkürzel</span></label>
+    <label class="feld">Name<input id="name" name="name" autocomplete="name" required></label>
+    <label class="feld">Passwort<input id="passwort" name="passwort" type="password" autocomplete="new-password" minlength="8" required>
+      <span class="hilfe">mindestens 8 Zeichen</span></label>
+    <div class="fehlertext" id="fehler" role="alert"></div>
+    <button class="haupt" type="submit">Konto anlegen</button>
+  </form>
+</div>
+<script src="/static/gemeinsam.js"></script>
+<script src="/static/einladung.js"></script>
+</body>
+</html>

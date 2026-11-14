@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Anmelden · Lehrerkalender MT</title>
+<link rel="stylesheet" href="/static/stil.css">
+<link rel="icon" href="/static/symbol.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="kopf">
+  <a class="marke" href="/"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 10 L10 0 L10 10 Z"/></svg>Lehrerkalender MT</a></header>
+<div class="mitte">
+  <form class="karte" id="anmelden">
+    <h1 class="dreieck">Anmelden</h1>
+    <p class="leise">Mit deinem Kürzel und Passwort. Noch kein Konto? Mit dem Einladungscode vom Admin <a href="/einladung">hier ein Konto anlegen</a>.</p>
+    <label class="feld">Kürzel<input id="kuerzel" name="kuerzel" autocomplete="username" autocapitalize="none" required></label>
+    <label class="feld">Passwort<input id="passwort" name="passwort" type="password" autocomplete="current-password" required></label>
+    <div class="fehlertext" id="fehler" role="alert"></div>
+    <button class="haupt" type="submit">Anmelden</button>
+  </form>
+  <form class="karte" id="code-form" hidden>
+    <h1 class="dreieck">Zweiter Schritt</h1>
+    <p class="leise">Bitte den 6-stelligen Code aus deiner Authenticator-App eingeben. Ohne Handy geht auch einer deiner Ersatzcodes.</p>
+    <label class="feld">Code<input id="code" name="code" autocomplete="one-time-code" inputmode="numeric" required></label>
+    <div class="fehlertext" id="code-fehler" role="alert"></div>
+    <button class="haupt" type="submit">Bestätigen</button>
+  </form>
+</div>
+<script src="/static/gemeinsam.js"></script>
+<script src="/static/anmelden.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# Zertifikat fuer HTTPS pruefen und bei Bedarf erneuern (laeuft per lehrerkalender-tls.timer jede Woche)
+[Unit]
+Description=LehrerkalenderMT HTTPS-Zertifikat erneuern
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lehrerkalender-tls --neustart

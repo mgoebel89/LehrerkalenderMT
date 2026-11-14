@@ -1,0 +1,14 @@
+# Firewall von Lehrerkalender MT (Regeln: /etc/lehrerkalender/firewall.nft). Abschalten: systemctl disable --now lehrerkalender-firewall
+[Unit]
+Description=Lehrerkalender MT Firewall (von aussen nur Webseite und SSH)
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/lehrerkalender/firewall.nft
+ExecStop=/usr/sbin/nft delete table inet lehrerkalender
+
+[Install]
+WantedBy=multi-user.target

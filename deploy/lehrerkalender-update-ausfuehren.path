@@ -1,0 +1,10 @@
+# Knopf "Jetzt aktualisieren" im Lehrerbereich: der Webdienst legt /var/lib/lehrerkalender/update/ausfuehren an.
+[Unit]
+Description=LehrerkalenderMT: Update auf Knopfdruck
+
+[Path]
+PathExists=/var/lib/lehrerkalender/update/ausfuehren
+Unit=lehrerkalender-update-ausfuehren.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+#!/usr/sbin/nft -f
+# Lehrerkalender MT: Firewall im Container (install.sh legt sie als /etc/lehrerkalender/firewall.nft ab, lehrerkalender-firewall.service
+# laedt sie beim Start). Von aussen nur Webseite (443, dazu 80 fuer Umleitung und /ca.crt) und SSH.
+# Ausgehende Verbindungen (Updates, Kalender-Abos) und ihre Antworten bleiben frei.
+# Eigene Tabelle: andere Regeln im Container bleiben unberuehrt.
+table inet lehrerkalender
+delete table inet lehrerkalender
+table inet lehrerkalender {
+	chain eingang {
+		type filter hook input priority filter; policy drop;
+		iif "lo" accept
+		ct state established,related accept
+		ct state invalid drop
+		meta l4proto { icmp, ipv6-icmp } accept
+		tcp dport { 22, 80, 443 } accept
+	}
+	chain weiter {
+		type filter hook forward priority filter; policy drop;
+	}
+}

@@ -1,0 +1,51 @@
+/* Lehrerkalender MT: Ergaenzungen zu stil.css (aus dem Lernbuero uebernommen). */
+
+/* Seitenleiste: Bereiche, die erst in spaeteren Stufen kommen */
+nav.seite .nav-spaeter { display: flex; gap: 10px; align-items: center; padding: 9px 12px; border-radius: var(--r); color: var(--leise);
+  font-weight: 500; font-size: .95em; opacity: .7; cursor: default; }
+nav.seite .nav-spaeter .chip { margin-left: auto; }
+nav.seite .etikett { display: block; }
+@media (max-width: 760px) { nav.seite .nav-spaeter, nav.seite .etikett { display: none; } }
+
+/* Umschalter (Reiter innerhalb einer Seite) */
+.segment { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--linie-stark); border-radius: var(--r); overflow: hidden; background: var(--karte); justify-self: start; }
+.segment button { border: none; border-radius: 0; min-height: 38px; }
+.segment button + button { border-left: 1px solid var(--linie-stark); }
+.segment button.an { background: var(--blau-hell); color: var(--blau); }
+
+/* Tabellenzeilen, die ein Overlay oeffnen */
+table.liste tr.klickbar { cursor: pointer; }
+table.liste tr.klickbar:hover td { background: var(--blau-hell); }
+table.liste tr.klickbar:focus-visible { outline: 2px solid var(--blau-mittel); outline-offset: -2px; }
+.karte.aus { opacity: .7; }
+
+/* Stufen als Knoepfe */
+.chip-knopf { min-height: 30px; padding: 2px 12px; border-radius: 999px; font-size: .85em; font-weight: 600; }
+
+/* Einrichtungsliste auf der Startseite */
+.einrichtung-liste { display: grid; gap: 2px; }
+.einrichtung-liste a { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--r); text-decoration: none; color: var(--text); }
+.einrichtung-liste a:hover { background: var(--knopf); }
+.einrichtung-liste a .symbol { color: #9a6400; }
+.einrichtung-liste a.ok { color: var(--leise); }
+.einrichtung-liste a.ok .symbol { color: #5c6a00; }
+
+/* Zeitraster bearbeiten */
+.raster-zeile { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto 120px auto; gap: 8px; align-items: center; }
+@media (max-width: 560px) { .raster-zeile { grid-template-columns: 1fr 1fr; } .raster-zeile > :first-child { grid-column: 1 / -1; } .raster-zeile > span { display: none; } }
+
+/* Notenschluessel */
+.notenband { display: flex; height: 22px; border-radius: 6px; overflow: hidden; font-size: .72rem; font-weight: 700; color: #fff; }
+.notenband span { display: flex; align-items: center; justify-content: center; min-width: 14px; }
+table.grenzen { border-collapse: collapse; font-size: .9rem; }
+table.grenzen td, table.grenzen th { padding: 3px 8px; border-bottom: 1px solid var(--linie); text-align: left; }
+table.grenzen th { font-size: .66rem; text-transform: uppercase; letter-spacing: .07em; color: var(--leise); }
+table.grenzen input { width: 70px; min-height: 32px; padding: 3px 6px; text-align: right; font-family: var(--mono); }
+table.grenzen td.bis { color: var(--leise); }
+
+/* Ersatzcodes */
+.ersatzcodes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; font-size: 1.05rem; font-weight: 700;
+  background: var(--knopf); border-radius: 10px 4px 4px 4px; padding: 12px 16px; letter-spacing: .06em; }
+
+/* Tippflaechen auf Touchgeraeten */
+@media (pointer: coarse) { button, .knopf, select, input { min-height: 44px; } table.grenzen input { min-height: 40px; } }

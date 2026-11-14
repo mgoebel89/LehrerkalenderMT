@@ -1,0 +1,204 @@
+"""Datenbank (SQLite): Verbindung, Schema-Migrationen, Zeit und Protokoll (Bauweise wie Lernbuero MT).
+
+Jede Aenderung an gemeinsamen Grunddaten landet zusaetzlich als Zeile in `protokoll` (nur anhaengen, nie aendern), damit
+der Admin sieht, wer wann was geaendert hat.
+"""
+import datetime
+import json
+import os
+import sqlite3
+
+try:
+    from zoneinfo import ZoneInfo
+    ZONE = ZoneInfo("Europe/Berlin")
+except Exception:   # Windows ohne tzdata (lokales Testen): Ortszeit des Rechners
+    ZONE = None
+
+DATEINAME = "lehrerkalender.sqlite"
+
+
+def jetzt():
+    """Aktuelle Zeit in Berlin als ISO-Text ohne Zeitzone, sekundengenau (so steht sie in der Datenbank)."""
+    t = datetime.datetime.now(ZONE) if ZONE else datetime.datetime.now()
+    return t.replace(tzinfo=None, microsecond=0).isoformat()
+
+
+def heute():
+    return datetime.date.fromisoformat(jetzt()[:10])
+
+
+def verbinden(pfad):
+    con = sqlite3.connect(pfad, timeout=10, isolation_level=None)   # Autocommit; Transaktionen mit transaktion()
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys = ON")
+    con.execute("PRAGMA busy_timeout = 10000")
+    return con
+
+
+class transaktion:
+    """with transaktion(con): ... -> BEGIN IMMEDIATE / COMMIT, bei Fehler ROLLBACK."""
+
+    def __init__(self, con):
+        self.con = con
+
+    def __enter__(self):
+        self.con.execute("BEGIN IMMEDIATE")
+        return self.con
+
+    def __exit__(self, art, wert, spur):
+        self.con.execute("COMMIT" if art is None else "ROLLBACK")
+        return False
+
+
+MIGRATIONEN = [
+    # 1: Stufe A: Konten mit Einladung und zweitem Faktor, Grunddaten (Bildungsgaenge, Stufen, Lernfelder/Module,
+    #    Zeitraster, Ferien, Klassen), Notenschluessel, Protokoll
+    """
+    CREATE TABLE einstellung (schluessel TEXT PRIMARY KEY, wert TEXT NOT NULL);
+    CREATE TABLE lehrkraft (
+        id INTEGER PRIMARY KEY,
+        kuerzel TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        rolle TEXT NOT NULL CHECK (rolle IN ('admin', 'lehrkraft')),
+        pw TEXT NOT NULL,
+        pw_vorlaeufig INTEGER NOT NULL DEFAULT 1,
+        gesperrt INTEGER NOT NULL DEFAULT 0,
+        stand INTEGER NOT NULL DEFAULT 1,
+        totp TEXT NOT NULL DEFAULT '',
+        totp_zuletzt INTEGER NOT NULL DEFAULT 0,
+        ersatzcodes TEXT NOT NULL DEFAULT '[]',
+        erstellt TEXT NOT NULL);
+    CREATE TABLE abgemeldet (signatur TEXT PRIMARY KEY, ablauf INTEGER NOT NULL);
+    CREATE TABLE einladung (
+        id INTEGER PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        rolle TEXT NOT NULL CHECK (rolle IN ('admin', 'lehrkraft')),
+        gueltig_bis TEXT NOT NULL,
+        notiz TEXT NOT NULL DEFAULT '',
+        erstellt TEXT NOT NULL,
+        erstellt_von INTEGER REFERENCES lehrkraft(id),
+        eingeloest TEXT,
+        eingeloest_von INTEGER REFERENCES lehrkraft(id));
+    CREATE TABLE bildungsgang (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        kuerzel TEXT NOT NULL DEFAULT '',
+        einheit TEXT NOT NULL DEFAULT 'lernfeld' CHECK (einheit IN ('lernfeld', 'modul')),
+        aktiv INTEGER NOT NULL DEFAULT 1,
+        reihenfolge INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE stufe (
+        id INTEGER PRIMARY KEY,
+        bildungsgang_id INTEGER NOT NULL REFERENCES bildungsgang(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        reihenfolge INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (bildungsgang_id, name));
+    CREATE TABLE lernfeld (
+        id INTEGER PRIMARY KEY,
+        bildungsgang_id INTEGER NOT NULL REFERENCES bildungsgang(id) ON DELETE CASCADE,
+        stufe_id INTEGER REFERENCES stufe(id) ON DELETE SET NULL,
+        nummer TEXT NOT NULL,
+        name TEXT NOT NULL,
+        stunden INTEGER NOT NULL DEFAULT 0,
+        aktiv INTEGER NOT NULL DEFAULT 1,
+        UNIQUE (bildungsgang_id, nummer));
+    CREATE TABLE lernfeld_anteil (
+        lernfeld_id INTEGER NOT NULL REFERENCES lernfeld(id) ON DELETE CASCADE,
+        stufe_id INTEGER NOT NULL REFERENCES stufe(id) ON DELETE CASCADE,
+        stunden INTEGER NOT NULL,
+        PRIMARY KEY (lernfeld_id, stufe_id));
+    CREATE TABLE zeitblock (
+        id INTEGER PRIMARY KEY,
+        bildungsgang_id INTEGER REFERENCES bildungsgang(id) ON DELETE CASCADE,
+        bezeichnung TEXT NOT NULL,
+        beginn TEXT NOT NULL,
+        ende TEXT NOT NULL);
+    CREATE TABLE ferien (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        von TEXT NOT NULL,
+        bis TEXT NOT NULL,
+        quelle TEXT NOT NULL DEFAULT 'hand' CHECK (quelle IN ('hand', 'abo')));
+    CREATE TABLE notenschluessel (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        system TEXT NOT NULL CHECK (system IN ('tendenz', 'zehntel', 'punkte')),
+        art TEXT NOT NULL CHECK (art IN ('konferenz', 'eigen')),
+        bildungsgang_id INTEGER REFERENCES bildungsgang(id) ON DELETE SET NULL,
+        besitzer_id INTEGER REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        grenzen TEXT NOT NULL,
+        erstellt TEXT NOT NULL,
+        geaendert TEXT NOT NULL);
+    CREATE UNIQUE INDEX ein_konferenzschluessel ON notenschluessel (bildungsgang_id) WHERE art = 'konferenz';
+    CREATE TABLE klasse (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        bildungsgang_id INTEGER NOT NULL REFERENCES bildungsgang(id),
+        stufe_id INTEGER REFERENCES stufe(id) ON DELETE SET NULL,
+        notenschluessel_id INTEGER REFERENCES notenschluessel(id) ON DELETE SET NULL,
+        aktiv INTEGER NOT NULL DEFAULT 1,
+        erstellt TEXT NOT NULL);
+    CREATE TABLE protokoll (
+        id INTEGER PRIMARY KEY,
+        zeit TEXT NOT NULL,
+        wer TEXT NOT NULL,
+        art TEXT NOT NULL,
+        daten TEXT NOT NULL DEFAULT '{}')
+    """,
+]
+
+
+def migrieren(con):
+    """Bringt das Schema auf den neuesten Stand (PRAGMA user_version = Anzahl angewandter Migrationen).
+    Ein Eintrag als Tupel (OHNE_FK, sql) baut eine Tabelle neu auf: dafuer ist die Fremdschluessel-Pruefung kurz aus,
+    danach muss PRAGMA foreign_key_check leer sein, sonst wird alles zurueckgerollt."""
+    stand = con.execute("PRAGMA user_version").fetchone()[0]
+    for nummer in range(stand, len(MIGRATIONEN)):
+        eintrag = MIGRATIONEN[nummer]
+        ohne_fk = isinstance(eintrag, tuple)
+        sql = eintrag[1] if ohne_fk else eintrag
+        if ohne_fk:
+            con.execute("PRAGMA foreign_keys = OFF")
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            for befehl in sql.split(";"):
+                if befehl.strip():
+                    con.execute(befehl)
+            if ohne_fk and con.execute("PRAGMA foreign_key_check").fetchall():
+                raise RuntimeError("Migration %d: Fremdschluessel verletzt" % (nummer + 1))
+            con.execute("PRAGMA user_version = %d" % (nummer + 1))
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+        finally:
+            if ohne_fk:
+                con.execute("PRAGMA foreign_keys = ON")
+
+
+def pfad(daten_dir):
+    return os.path.join(daten_dir, DATEINAME)
+
+
+def oeffnen(daten_dir):
+    """Datenbank im Datenordner oeffnen und migrieren."""
+    os.makedirs(daten_dir, exist_ok=True)
+    con = verbinden(pfad(daten_dir))
+    con.execute("PRAGMA journal_mode = WAL")
+    migrieren(con)
+    return con
+
+
+def protokoll(con, wer, art, **daten):
+    """Haengt eine Zeile ans Aenderungsprotokoll. wer: Kuerzel (oder 'system')."""
+    con.execute("INSERT INTO protokoll (zeit, wer, art, daten) VALUES (?, ?, ?, ?)",
+                (jetzt(), wer, art, json.dumps(daten, ensure_ascii=False)))
+
+
+def einstellung(con, schluessel, vorgabe=None):
+    zeile = con.execute("SELECT wert FROM einstellung WHERE schluessel = ?", (schluessel,)).fetchone()
+    return zeile[0] if zeile else vorgabe
+
+
+def einstellung_setzen(con, schluessel, wert):
+    con.execute("INSERT INTO einstellung (schluessel, wert) VALUES (?, ?) "
+                "ON CONFLICT (schluessel) DO UPDATE SET wert = excluded.wert", (schluessel, wert))
