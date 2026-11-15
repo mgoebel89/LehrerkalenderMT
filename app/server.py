@@ -720,6 +720,30 @@ def api_wieder_oeffnen(h, con, daten, pid):
     h.antwort(200, pruefungen.ergebnis(con, k["id"], int(pid)))
 
 
+def api_unterricht(h, con, daten):
+    """Fuer den Pruefungsdialog: Gruppen der Klasse, gehaltene Bloecke an einem Tag und Hinweise zu den Terminen
+    (termine als JSON in der Abfrage: [{gruppe_id, datum, beginn}] bzw. datum + beginn fuer "zusammen")."""
+    k = h.konto(con)
+    kid = _ganzzahl(h.abfrage("klasse") or "")
+    gruppen = [g for g in stundenplan.gruppen(con, k["id"]) if g["klasse_id"] == kid]
+    datum = h.abfrage("datum")
+    antwort = {"gruppen": gruppen, "bloecke": [], "hinweise": []}
+    try:
+        if datum:
+            datetime.date.fromisoformat(datum)
+            antwort["bloecke"] = planung.unterricht_am(con, k["id"], kid, datum)
+        liste = json.loads(h.abfrage("termine") or "[]")
+        namen = {g["id"]: g["name"] for g in gruppen}
+        liste = [{"gruppe_id": t.get("gruppe_id"), "gruppe": namen.get(t.get("gruppe_id"), ""), "datum": t.get("datum"), "beginn": t.get("beginn")}
+                 for t in liste if isinstance(t, dict) and t.get("datum")]
+        for t in liste:
+            datetime.date.fromisoformat(t["datum"])
+        antwort["hinweise"] = pruefungen.termin_hinweise(con, k["id"], kid, liste)
+    except (ValueError, TypeError, AttributeError):
+        raise Fehler(400, "Ungültige Angaben.")
+    h.antwort(200, antwort)
+
+
 def api_pruefung_hinweise(h, con, daten):
     k = h.konto(con)
     h.antwort(200, {"hinweise": pruefungen.hinweise(con, k["id"])})
@@ -842,6 +866,7 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/vorlage/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.vorlage_loeschen(con, k["id"], i))),
     ("GET", r"/api/pruefungen", api_pruefungen),
     ("GET", r"/api/pruefungen/hinweise", api_pruefung_hinweise),
+    ("GET", r"/api/pruefungen/unterricht", api_unterricht),
     ("POST", r"/api/pruefung", _pr_schritt(lambda con, k, d, _: pruefungen.pruefung_speichern(con, k["id"], d))),
     ("GET", r"/api/pruefung/" + ID, api_pruefung),
     ("POST", r"/api/pruefung/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.pruefung_speichern(con, k["id"], d, i))),

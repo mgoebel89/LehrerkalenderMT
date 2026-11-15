@@ -171,6 +171,8 @@ const Planung = (() => {
       p.summe.ueberlauf ? el('span', { class: 'chip rot', text: p.summe.ueberlauf + ' Bl passen nicht mehr' }) : null,
       p.summe.ist_offen ? el('span', { class: 'chip gelb', title: 'Gehaltene Stunden ohne Ist-Bestätigung' }, L.symbol('offen'), p.summe.ist_offen + ' ohne Ist') : null,
       p.spuren.length ? el('span', { class: 'chip', title: 'Diese Lernfelder haben eigene Blöcke im Stundenplan', text: 'eigene Blöcke: ' + p.spuren.map(x => x.nummer).join(', ') }) : null,
+      s && s.gruppen && s.gruppen.length ? el('span', { class: 'chip gr', title: 'Gruppenstunden am selben Tag bekommen denselben Stoff und zählen zusammen als ein Schritt der Klasse. ' +
+        p.summe.geteilt + ' Schritte im Schuljahr sind geteilt.', text: s.gruppen.join(' + ') + ' · ' + p.summe.geteilt + ' geteilt' }) : null,
       el('span', { class: 'rechts' },
         el('div', { class: 'segment', role: 'group', 'aria-label': 'Ansicht' },
           [['bloecke', 'Doppelstunden'], ['tage', 'Tage'], ['schuljahr', 'Schuljahr']].map(([a, t]) =>
@@ -272,9 +274,10 @@ const Planung = (() => {
         tagText(g.datum), g.neueWoche ? el('span', { class: 'kw', text: ' KW ' + g.kw }) : null)));
     const kopf2 = el('tr', {}, gruppen.map(g => g.typ === 'ferien' ? null : g.spalten.map((c, n) => el('th', {
       class: 'zeit' + (n === 0 ? ' tag-start' : '') + wochenKlasse(g) + (c.nutzbar ? '' : ' aus'),
-      title: L.tag(c.datum, true) + ' ' + c.beginn + (c.nutzbar ? (c.art !== 'regulaer' ? ' · ' + (c.art === 'zusatz' ? 'Zusatzstunde' : 'verschoben') : '')
+      title: L.tag(c.datum, true) + ' ' + c.beginn + (c.gruppe ? ' · ' + c.gruppe + (c.zweit ? ' (gleicher Stoff wie die Gruppe davor)' : '') : '')
+        + (c.nutzbar ? (c.art !== 'regulaer' ? ' · ' + (c.art === 'zusatz' ? 'Zusatzstunde' : 'verschoben') : '')
         : ' · ' + (c.zustand === 'ausfall' ? 'fällt aus' : c.zustand === 'vertreten' ? 'vertreten' : 'verschoben') + (c.grund ? ': ' + c.grund : '')) },
-    c.beginn))));
+    c.beginn, c.gruppe ? el('span', { class: 'gr-kurz', text: c.gruppe }) : null))));
     const zellen = r => gruppen.map(g => g.typ === 'ferien' ? el('td', { class: 'ferien-sp' + (g.f.marke ? ' marke' : '') }) : g.spalten.map((c, n) => {
       const t = r.t;
       const td = el('td', { class: 't' + (n === 0 ? ' tag-start' : '') + wochenKlasse(g) + (c.datum === p.heute ? ' heute' : '') + (c.nutzbar ? ' kann' : ' aus') });
@@ -332,7 +335,7 @@ const Planung = (() => {
     const ausserhalb = w => (z.ende && w.montag > z.ende) || (z.beginn && plusTage(w.montag, 4) < z.beginn);
     const zellen = r => {
       const jeWoche = {};
-      p.bloecke.forEach(b => { if (r.passt(b)) { const m = montagVon(b.datum); jeWoche[m] = (jeWoche[m] || 0) + 1; } });
+      p.bloecke.forEach(b => { if (!b.zweit && r.passt(b)) { const m = montagVon(b.datum); jeWoche[m] = (jeWoche[m] || 0) + 1; } });
       return p.wochen.map(w => {
       const n = jeWoche[w.montag] || 0;
       const td = el('td', { class: 't kw kann' + (w.montag === jetzt ? ' diese-woche' : '') + (w.frei ? ' ferien' : '') + (ausserhalb(w) ? ' aus' : ''),

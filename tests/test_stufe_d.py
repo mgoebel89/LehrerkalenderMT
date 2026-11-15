@@ -189,5 +189,49 @@ class Pruefungen(MitPruefung):
             pruefungen.bewertung_setzen(self.con, self.lid, pid, sid, {"werte": {"k1": 7}})
 
 
+class GetrenntSchreiben(MitPruefung):
+    def test_termine_je_gruppe_und_hinweise(self):
+        grunddaten.zeitraster_speichern(self.con, None, [{"bezeichnung": "1. Block", "beginn": "07:45", "ende": "09:15"},
+                                                         {"bezeichnung": "2. Block", "beginn": "09:30", "ende": "11:00"}])
+        v = stundenplan.versionen(self.con, self.lid)[0]["id"]
+        g1 = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.kl, "name": "Gr. 1"})
+        g2 = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.kl, "name": "Gr. 2"})
+        for beginn, ende, g in (("07:45", "09:15", g1), ("09:30", "11:00", g2)):
+            stundenplan.feld_setzen(self.con, self.lid, v, {"wochentag": 3, "beginn": beginn, "ende": ende,
+                                                            "eintraege": [{"klasse_id": self.kl, "gruppe_id": g}]})
+        h = pruefungen.termin_hinweise(self.con, self.lid, self.kl, [{"gruppe_id": None, "datum": "2026-11-18", "beginn": "07:45"}])
+        self.assertIn("nur Gr. 1", h[0])
+        h = pruefungen.termin_hinweise(self.con, self.lid, self.kl, [{"gruppe_id": None, "datum": "2026-11-17", "beginn": "07:45"}])
+        self.assertIn("keinen Unterricht", h[0])
+        self.assertEqual(pruefungen.termin_hinweise(self.con, self.lid, self.kl, [{"datum": "2026-11-16", "beginn": "07:45"}]), [])
+        pid = pruefungen.pruefung_speichern(self.con, self.lid, self.strang(
+            titel="Klassenarbeit", form="termin", teilung="getrennt", bloecke=1, erfassung="gesamt", max_punkte=50,
+            termine=[{"gruppe_id": g2, "datum": "2026-11-18", "beginn": "09:30"}, {"gruppe_id": g1, "datum": "2026-11-18", "beginn": "07:45"}]))
+        p = pruefungen.ergebnis(self.con, self.lid, pid)["pruefung"]
+        self.assertEqual([(t["gruppe"], t["beginn"]) for t in p["termine"]], [("Gr. 1", "07:45"), ("Gr. 2", "09:30")])
+        self.assertEqual((p["datum"], p["beginn"], p["teilung"], p["hinweise"]), ("2026-11-18", "07:45", "getrennt", []))
+        plan = planung.plan(self.con, self.lid, self.kl, None, self.sj, jetzt="2026-11-15T12:00:00")
+        ka = next(t for t in plan["themen"] if t["pruefung_id"] == pid)
+        self.assertEqual((ka["von"], ka["nadel"], ka["zugeteilt"]), ("2026-11-18", "ok", 1))     # beide Gruppen = ein Schritt
+        self.assertEqual([b["thema_id"] for b in plan["bloecke"] if b["datum"] == "2026-11-18"], [ka["id"], ka["id"]])
+        # vertauschte Gruppen: Hinweis
+        pruefungen.pruefung_speichern(self.con, self.lid, {"titel": "Klassenarbeit", "form": "termin", "teilung": "getrennt", "erfassung": "gesamt",
+                                                           "max_punkte": 50, "termine": [{"gruppe_id": g2, "datum": "2026-11-18", "beginn": "07:45"},
+                                                                                         {"gruppe_id": g1, "datum": "2026-11-18", "beginn": "09:30"}]}, pid)
+        self.assertIn("laut Stundenplan Gr. 1", pruefungen.ergebnis(self.con, self.lid, pid)["pruefung"]["hinweise"][0])
+        with self.assertRaises(pruefungen.PruefungFehler):                # ein Termin reicht nicht
+            pruefungen.pruefung_speichern(self.con, self.lid, self.strang(titel="X", form="termin", teilung="getrennt", erfassung="gesamt",
+                                                                          max_punkte=10, termine=[{"gruppe_id": g1, "datum": "2026-11-18", "beginn": "07:45"}]))
+        with self.assertRaises(stundenplan.StundenplanFehler):            # Gruppe mit Pruefungstermin
+            stundenplan.gruppe_loeschen(self.con, self.lid, g1)
+
+    def test_offene_ist_sieht_spaetere_pruefung(self):
+        planung.thema_speichern(self.con, self.lid, self.strang(titel="SPS", bloecke=10))
+        pruefungen.pruefung_speichern(self.con, self.lid, self.strang(titel="KA", form="termin", datum="2026-12-04", beginn="07:45",
+                                                                      erfassung="gesamt", max_punkte=10))
+        offen = planung.offene_ist(self.con, self.lid, jetzt="2026-11-24T12:00:00")
+        self.assertEqual({o["thema"] for o in offen}, {"SPS"})        # die Arbeit am 04.12. rutscht nicht nach vorn
+
+
 if __name__ == "__main__":
     unittest.main()

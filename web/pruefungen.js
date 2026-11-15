@@ -79,7 +79,11 @@ const Pruefungen = (() => {
   }
 
   function wannText(p) {
-    if (p.form === 'termin') return tagKurz(p.datum) + ' · ' + p.beginn + (p.bloecke > 1 ? ' · ' + p.bloecke + ' Blöcke' : '');
+    const umfang = p.bloecke > 1 ? ' · ' + p.bloecke + ' Blöcke' : '';
+    if (p.form === 'termin' && p.teilung === 'getrennt' && p.termine && p.termine.length) {
+      return 'getrennt: ' + p.termine.map(t => t.gruppe + ' ' + tagKurz(t.datum) + ' ' + t.beginn).join(', ') + umfang;
+    }
+    if (p.form === 'termin') return tagKurz(p.datum) + ' · ' + p.beginn + umfang;
     return 'Fenster ' + tagKurz(p.fenster_von) + ' – ' + tagKurz(p.fenster_bis) + ' (Frist)';
   }
 
@@ -89,6 +93,7 @@ const Pruefungen = (() => {
     return el('a', { class: 'karte klassenkarte', href: '#pruefung-' + p.id },
       el('div', { class: 'zeile' }, L.symbol('pruefung'), el('h3', { text: p.titel }), el('span', { class: 'rechts' }, el('span', { class: 'chip ' + standFarbe, text: standText }))),
       el('div', { class: 'leise klein', text: p.artname + ' · ' + ERFASSUNG[p.erfassung] + ' · ' + wannText(p) }),
+      p.hinweise && p.hinweise.length ? el('div', { class: 'chip gelb klein', title: p.hinweise.join('\n'), text: 'Termin prüfen: ' + p.hinweise[0] }) : null,
       el('div', { class: 'zeile klein' },
         el('span', { text: st.bewertet + ' von ' + st.schueler + ' bewertet' }),
         st.schnitt !== null ? el('span', { class: 'chip blau', text: 'Ø ' + fmt(st.schnitt, 2) }) : null,
@@ -114,9 +119,64 @@ const Pruefungen = (() => {
     const bloecke = el('input', { type: 'number', min: 1, max: 20, value: p ? p.bloecke : 1, style: 'width:90px' });
     const von = el('input', { type: 'date', value: p && p.fenster_von ? p.fenster_von : '' });
     const bis = el('input', { type: 'date', value: p && p.fenster_bis ? p.fenster_bis : '' });
-    const teilTermin = el('div', { class: 'felder zwei' }, L.feld('Tag', datum), L.feld('Erster Block', block), L.feld('Umfang in Blöcken', bloecke, 'belegt die Blöcke in der Planung'));
+    // Gruppen der Klasse: zusammen schreiben (ein Termin) oder getrennt (Termin je Gruppe)
+    const U = await L.api('GET', '/api/pruefungen/unterricht?klasse=' + kid);
+    const gruppen = U.gruppen;
+    let teilung = p ? p.teilung : (vorgabe && vorgabe.gruppe_id && gruppen.length > 1 ? 'getrennt' : 'zusammen');
+    const startTag = (p && p.datum) || (vorgabe && vorgabe.datum) || '';
+    const gruppenTermine = gruppen.map(g => {
+      const alt = p && p.termine ? p.termine.find(t => t.gruppe_id === g.id) : null;
+      const gDatum = el('input', { type: 'date', value: alt ? alt.datum : startTag, 'aria-label': 'Tag für ' + g.name });
+      const gBlock = el('select', { 'aria-label': 'Block für ' + g.name }, bloeckeDerKlasse(kid).map(b => el('option', { value: b.beginn, text: b.bezeichnung + ' · ' + b.beginn,
+        selected: (alt ? alt.beginn : vorgabe && vorgabe.gruppe_id === g.id ? vorgabe.beginn : null) === b.beginn ? true : null })));
+      return { g, gDatum, gBlock, gesetzt: !!alt || !!(vorgabe && vorgabe.gruppe_id === g.id) };
+    });
+    // Block der Gruppe an ihrem Tag aus dem Stundenplan vorschlagen
+    async function blockVorschlagen(t, immer) {
+      if (!t.gDatum.value) return;
+      try {
+        const x = await L.api('GET', '/api/pruefungen/unterricht?klasse=' + kid + '&datum=' + t.gDatum.value);
+        const b = x.bloecke.find(y => y.gruppe_id === t.g.id);
+        if (b && (immer || !t.gesetzt)) t.gBlock.value = b.beginn;
+      } catch (e) { /* Hinweis kommt aus pruefen() */ }
+      pruefen();
+    }
+    gruppenTermine.forEach(t => {
+      t.gDatum.addEventListener('change', () => { t.gesetzt = false; blockVorschlagen(t, true); });
+      t.gBlock.addEventListener('change', () => { t.gesetzt = true; pruefen(); });
+    });
+    const teilZusammen = el('div', { class: 'felder zwei' }, L.feld('Tag', datum), L.feld('Erster Block', block));
+    const teilGetrennt = el('div', { class: 'stapel', style: 'gap:6px' }, gruppenTermine.map(t =>
+      el('div', { class: 'zeile', style: 'flex-wrap:nowrap' }, el('span', { class: 'chip gr', style: 'min-width:70px', text: t.g.name }), t.gDatum, t.gBlock)),
+      el('p', { class: 'leise klein', text: 'Gruppen am selben Tag schreiben in ihren zusammengehörenden Stunden; die Planung belegt den Tag des ersten Termins.' }));
+    const hinweisOrt = el('div', { class: 'banner warnung klein', hidden: true });
+    let pruefLauf = 0;
+    async function pruefen() {
+      const lauf = ++pruefLauf;
+      const termine = form !== 'termin' ? [] : teilung === 'getrennt'
+        ? gruppenTermine.map(t => ({ gruppe_id: t.g.id, datum: t.gDatum.value, beginn: t.gBlock.value }))
+        : [{ gruppe_id: null, datum: datum.value, beginn: block.value }];
+      let h = [];
+      try {
+        if (termine.some(t => t.datum)) h = (await L.api('GET', '/api/pruefungen/unterricht?klasse=' + kid + '&termine=' + encodeURIComponent(JSON.stringify(termine)))).hinweise;
+      } catch (e) { h = []; }
+      if (lauf !== pruefLauf) return;
+      L.setzen(hinweisOrt, h.map(x => el('div', { text: x })));
+      hinweisOrt.hidden = !h.length;
+    }
+    datum.addEventListener('change', pruefen);
+    block.addEventListener('change', pruefen);
+    const zeigeTeilung = w => { teilung = w; teilZusammen.hidden = w !== 'zusammen'; teilGetrennt.hidden = w !== 'getrennt';
+      if (w === 'getrennt') gruppenTermine.forEach(t => { if (!t.gDatum.value && datum.value) t.gDatum.value = datum.value; if (!t.gesetzt) blockVorschlagen(t); });
+      pruefen(); };
+    const segTeilung = gruppen.length > 1 ? segment([['zusammen', 'Klasse zusammen'], ['getrennt', 'Getrennt nach Gruppen']], teilung, zeigeTeilung) : null;
+    if (gruppen.length < 2) teilung = 'zusammen';
+    const teilTermin = el('div', { class: 'stapel', style: 'gap:8px' }, segTeilung, teilZusammen, teilGetrennt,
+      el('div', { class: 'felder zwei' }, L.feld('Umfang in Blöcken', bloecke, 'belegt die Blöcke in der Planung')), hinweisOrt);
+    teilZusammen.hidden = teilung !== 'zusammen';
+    teilGetrennt.hidden = teilung !== 'getrennt';
     const teilFenster = el('div', { class: 'felder zwei' }, L.feld('Fenster ab', von), L.feld('Frist (spätestens)', bis, 'belegt keine Blöcke'));
-    const segForm = segment([['termin', 'Fester Termin'], ['fenster', 'Fenster mit Frist']], form, w => { form = w; teilTermin.hidden = w !== 'termin'; teilFenster.hidden = w !== 'fenster'; });
+    const segForm = segment([['termin', 'Fester Termin'], ['fenster', 'Fenster mit Frist']], form, w => { form = w; teilTermin.hidden = w !== 'termin'; teilFenster.hidden = w !== 'fenster'; pruefen(); });
     teilTermin.hidden = form !== 'termin';
     teilFenster.hidden = form !== 'fenster';
     // Erfassung
@@ -155,6 +215,8 @@ const Pruefungen = (() => {
       R.schluessel.map(s => el('option', { value: s.id, text: s.name + ' · ' + s.systemname + (s.art === 'eigen' ? ' · eigener' : ''),
         selected: p && p.notenschluessel_id === s.id ? true : null })));
     const stand = el('select', {}, ['geplant', 'angekuendigt', 'durchgefuehrt'].map(w => el('option', { value: w, text: STAND[w][0], selected: p && p.stand === w ? true : null })));
+    if (teilung === 'getrennt' && !p) gruppenTermine.forEach(t => { if (!t.gesetzt) blockVorschlagen(t); });
+    pruefen();
     const r = await L.dialog({
       titel: p ? 'Prüfung bearbeiten' : 'Neue Prüfung', breit: true,
       inhalt: el('div', { class: 'stapel', style: 'gap:12px' },
@@ -166,6 +228,7 @@ const Pruefungen = (() => {
         p ? el('div', {}, L.nebenknopf('Prüfung löschen …', () => loeschen(p))) : null),
       speichern: () => L.api('POST', p ? '/api/pruefung/' + p.id : '/api/pruefung', Object.assign(p ? {} : { klasse_id: vorgabe.klasse_id, gruppe_id: vorgabe.gruppe_id, schuljahr_id: vorgabe.schuljahr_id }, {
         titel: titel.value, art: art.value, lernfeld_id: lf.value || null, form, datum: datum.value, beginn: block.value, bloecke: Number(bloecke.value),
+        teilung, termine: teilung === 'getrennt' ? gruppenTermine.map(t => ({ gruppe_id: t.g.id, datum: t.gDatum.value, beginn: t.gBlock.value })) : undefined,
         fenster_von: von.value, fenster_bis: bis.value, erfassung, notenschluessel_id: schl.value || null, stand: stand.value,
         aufgaben: erfassung === 'aufgaben' ? aufgaben.map(a => ({ key: a.key, name: a.name.value, max: a.max.value })) : undefined,
         max_punkte: erfassung === 'gesamt' ? maxPunkte.value : undefined,
@@ -227,6 +290,7 @@ const Pruefungen = (() => {
         segment([['bewerten', 'Bewerten'], ['auswertung', 'Auswertung']], reiter, w => { reiter = w; detailZeichnen(); }),
         kopfStatistik(st)),
       fertig ? el('div', { class: 'banner', text: 'Abgeschlossen: Der Notenschlüssel ist festgehalten, Bewertungen sind gesperrt. „Wieder öffnen“ hebt das auf.' }) : null,
+      p.hinweise && p.hinweise.length ? el('div', { class: 'banner warnung' }, p.hinweise.map(h => el('div', { text: h }))) : null,
       rumpf);
     zeichneRumpf(rumpf);
   }

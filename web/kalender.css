@@ -318,3 +318,8 @@ a.z-knopf:hover span:last-child { text-decoration: underline; }
 .lp td.t.diese-woche.heute { background-color: #d3e7f7; }
 .m-woche { width: 14px; height: 12px; display: inline-block; background: #cfe4f5; border-bottom: 3px solid var(--blau); }
 .wp-b .th .ls { color: var(--leise); }
+
+/* Gruppen: geteilte Schritte, holt nach */
+.lp-tage th.zeit .gr-kurz { display: block; font-size: .5rem; font-family: var(--schrift); color: var(--blau); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 44px; margin: 0 auto; }
+.wp-b .nachholen { color: #9a6400; font-weight: 600; display: inline-flex; gap: 3px; align-items: center; }
+.banner.klein { font-size: .82rem; padding: 6px 10px; }

@@ -101,6 +101,9 @@ const Stunde = (() => {
         teile.push(abschnitt('plan', 'Thema aus der Planung', null, [
           el('div', {}, el('b', { text: t.titel }), el('span', { class: 'leise', text: ' · Block ' + t.teil + ' von ' + t.von }),
             t.ls ? el('span', { class: 'leise', text: ' · LS ' + t.ls + (t.ls_von > 1 ? ' (' + t.ls_teil + '/' + t.ls_von + ')' : '') }) : null),
+          S.geteilt && S.geteilt.length ? el('p', { class: 'leise klein', text: 'Gleicher Stoff wie bei ' + S.geteilt.join(', ') + ' am selben Tag – zusammen ein Schritt der Klasse.' }) : null,
+          S.nachholen && S.nachholen.length ? el('div', { class: 'banner warnung klein' }, S.nachholen.map(n =>
+            el('div', { text: n.gruppe + ' fehlte am ' + L.tag(n.datum, true) + ' – holt nach: ' + n.thema + (n.ls ? ' · ' + n.ls : '') }))) : null,
           t.hinweis ? el('p', { class: 'klein hinweis-text', text: t.hinweis }) : null,
           el('div', { class: 'ampel-wahl', role: 'group', 'aria-label': 'Ist-Stand' }, IST.map(([w, text, farbe, hilfe]) =>
             el('button', { type: 'button', class: S.ist === w ? 'an' : null, title: hilfe, 'aria-pressed': S.ist === w ? 'true' : 'false',

@@ -203,20 +203,61 @@ class Planung(MitPlanung):
         self.assertEqual([l["titel"] for l in self.plan()["themen"][0]["ls"]], ["LS B", "LS A"])
 
     def test_straenge_und_wochenplan_thema(self):
+        """Eine Themenfolge je Klasse; G1 und G2 am selben Tag bilden einen Schritt (denselben Stoff)."""
         g1 = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.k24, "name": "Gr. 1"})
+        g2 = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.k24, "name": "Gr. 2"})
         stundenplan.feld_setzen(self.con, self.lid, self.v, {"wochentag": 3, "beginn": "07:45", "ende": "09:15",
                                                              "eintraege": [{"klasse_id": self.k24, "gruppe_id": g1}]})
-        namen = [s["name"] for s in planung.straenge(self.con, self.lid, self.sj)]
-        self.assertEqual(namen, ["BSMT 24a · ganze Klasse", "BSMT 24a · Gr. 1"])
+        stundenplan.feld_setzen(self.con, self.lid, self.v, {"wochentag": 3, "beginn": "09:30", "ende": "11:00",
+                                                             "eintraege": [{"klasse_id": self.k24, "gruppe_id": g2}]})
+        st = planung.straenge(self.con, self.lid, self.sj)
+        self.assertEqual([(s["name"], s["gruppe_id"], s["gruppen"]) for s in st], [("BSMT 24a", None, ["Gr. 1", "Gr. 2"])])
         planung.thema_speichern(self.con, self.lid, self.strang(titel="Theorie", bloecke=1))
-        planung.thema_speichern(self.con, self.lid, self.strang(gruppe_id=g1, titel="Labor", bloecke=2))
+        planung.thema_speichern(self.con, self.lid, self.strang(gruppe_id=g1, titel="Labor", bloecke=2))   # Gruppe wird ignoriert
         w = planung.themen_der_woche(self.con, self.lid, stundenplan.woche(self.con, self.lid, D("2026-11-16"), "2026-11-15T12:00:00"))
-        self.assertEqual([(b["datum"], b["thema"]["titel"] if b["thema"] else None) for b in w["bloecke"]],
-                         [("2026-11-16", "Theorie"), ("2026-11-18", "Labor"), ("2026-11-20", None)])
-        with self.assertRaises(stundenplan.StundenplanFehler):        # Gruppe mit Planung
-            stundenplan.gruppe_loeschen(self.con, self.lid, g1)
+        self.assertEqual([(b["datum"], b["beginn"], b["thema"]["titel"] if b["thema"] else None, b["thema"]["teil"] if b["thema"] else None)
+                          for b in w["bloecke"]],
+                         [("2026-11-16", "07:45", "Theorie", 1), ("2026-11-18", "07:45", "Labor", 1), ("2026-11-18", "09:30", "Labor", 1),
+                          ("2026-11-20", "07:45", "Labor", 2)])
+        p = self.plan()
+        # 4 Wochen je 3 Schritte (Mo, Mi gepaart, Fr), Brueckentag Fr 27.11. faellt weg
+        self.assertEqual((p["summe"]["bloecke"], p["summe"]["geteilt"]), (11, 4))
+        self.assertEqual([b["zweit"] for b in p["bloecke"][:4]], [False, False, True, False])
+        s = planung.stunde(self.con, self.lid, "2026-11-18", "09:30", jetzt="2026-11-15T12:00:00")
+        self.assertEqual((s["thema"]["titel"], s["geteilt"]), ("Labor", ["Gr. 1"]))
+        self.assertEqual((s["vorige"]["datum"], s["naechste"]["datum"]), ("2026-11-16", "2026-11-20"))   # nicht die G1-Stunde davor
         with self.assertRaises(planung.PlanungFehler):                # fremdes Thema
             planung.thema_loeschen(self.con, self.r["id"], self.plan()["themen"][0]["id"])
+
+    def test_ausfall_einer_gruppe_holt_nach(self):
+        g1 = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.k24, "name": "Gr. 1"})
+        g2 = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.k24, "name": "Gr. 2"})
+        for beginn, ende, g in (("07:45", "09:15", g1), ("09:30", "11:00", g2)):
+            stundenplan.feld_setzen(self.con, self.lid, self.v, {"wochentag": 3, "beginn": beginn, "ende": ende,
+                                                                 "eintraege": [{"klasse_id": self.k24, "gruppe_id": g}]})
+        planung.thema_speichern(self.con, self.lid, self.strang(titel="Theorie", bloecke=1))
+        planung.thema_speichern(self.con, self.lid, self.strang(titel="Labor", bloecke=3))
+        stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "ausfall", "datum": "2026-11-18", "beginn": "09:30", "grund": "krank"})
+        p = self.plan()
+        self.assertEqual(p["summe"]["bloecke"], 11)                   # G1 hatte den Schritt allein: der Plan laeuft weiter
+        mi = [b for b in p["bloecke"] if b["datum"] == "2026-11-18"]
+        self.assertEqual([(b["beginn"], b["thema_id"] is not None, b["zweit"]) for b in mi], [("07:45", True, False)])
+        naechste_g2 = next(b for b in p["bloecke"] if b["datum"] == "2026-11-25" and b["beginn"] == "09:30")
+        self.assertEqual([(n["datum"], n["gruppe"], n["thema"]) for n in naechste_g2["nachholen"]], [("2026-11-18", "Gr. 2", "Labor")])
+        # Faellt G1 aus, wird G2 nicht mit dem 2. G1-Block gepaart (gibt es nicht) und haelt den Schritt allein
+        stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "ausfall", "datum": "2026-11-25", "beginn": "07:45", "grund": "Messe"})
+        p = self.plan()
+        mi = [b for b in p["bloecke"] if b["datum"] == "2026-11-25"]
+        self.assertEqual([(b["beginn"], b["zweit"]) for b in mi], [("09:30", False)])
+
+    def test_schritte_bilden(self):
+        def b(datum, beginn, g=None):
+            return {"datum": datum, "beginn": beginn, "gruppe_id": g}
+        bl = [b("d1", "1"), b("d2", "1", 1), b("d2", "2", 1), b("d2", "3", 2), b("d2", "4", 2), b("d3", "1", 1)]
+        self.assertEqual(planung.schritte_bilden(bl), [[0], [1, 3], [2, 4], [5]])
+        # 1. G1-Block faellt aus: der 2. G1-Block gehoert zum 2. G2-Block
+        bl = [b("d2", "2", 1), b("d2", "3", 2), b("d2", "4", 2)]
+        self.assertEqual(planung.schritte_bilden(bl, [b("d2", "1", 1)]), [[0, 2], [1]])
 
 
 class FliessenMitIst(Fliessen):

@@ -392,6 +392,24 @@ MIGRATIONEN = [
     UPDATE baustein SET art = 'thema' WHERE art = 'ls' AND eltern_id IS NULL;
     UPDATE baustein SET art = 'ls' WHERE art = 'thema' AND eltern_id IS NOT NULL
     """,
+    # 12: Gruppen sind keine eigenen Planungsstraenge mehr: eine Themenfolge je Klasse, Gruppenstunden desselben Tages
+    #     bilden gemeinsam einen Schritt. Bisherige Gruppen-Themen und -Pruefungen werden verworfen (so entschieden).
+    #     Pruefungen schreiben zusammen (ein Termin) oder getrennt (Termin je Gruppe in pruefung_termin).
+    """
+    DELETE FROM plan_ls WHERE thema_id IN (SELECT id FROM plan_thema WHERE gruppe_id IS NOT NULL
+        OR pruefung_id IN (SELECT id FROM pruefung WHERE gruppe_id IS NOT NULL));
+    DELETE FROM plan_thema WHERE gruppe_id IS NOT NULL OR pruefung_id IN (SELECT id FROM pruefung WHERE gruppe_id IS NOT NULL);
+    DELETE FROM bewertung WHERE pruefung_id IN (SELECT id FROM pruefung WHERE gruppe_id IS NOT NULL);
+    DELETE FROM pruefung WHERE gruppe_id IS NOT NULL;
+    ALTER TABLE pruefung ADD COLUMN teilung TEXT NOT NULL DEFAULT 'zusammen';
+    CREATE TABLE pruefung_termin (
+        id INTEGER PRIMARY KEY,
+        pruefung_id INTEGER NOT NULL REFERENCES pruefung(id) ON DELETE CASCADE,
+        gruppe_id INTEGER NOT NULL REFERENCES gruppe(id) ON DELETE CASCADE,
+        datum TEXT NOT NULL,
+        beginn TEXT NOT NULL,
+        UNIQUE (pruefung_id, gruppe_id))
+    """,
 ]
 
 

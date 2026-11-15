@@ -398,7 +398,8 @@ def gruppe_loeschen(con, lid, gid):
         raise StundenplanFehler("Diese Gruppe gibt es nicht.")
     if con.execute("SELECT 1 FROM stundenplan_eintrag WHERE gruppe_id = ? UNION SELECT 1 FROM aenderung WHERE gruppe_id = ? "
                    "UNION SELECT 1 FROM plan_thema WHERE gruppe_id = ? UNION SELECT 1 FROM ist WHERE gruppe_id = ? "
-                   "UNION SELECT 1 FROM pruefung WHERE gruppe_id = ?", (gid, gid, gid, gid, gid)).fetchone():
+                   "UNION SELECT 1 FROM pruefung WHERE gruppe_id = ? UNION SELECT 1 FROM pruefung_termin WHERE gruppe_id = ?",
+                   (gid, gid, gid, gid, gid, gid)).fetchone():
         raise StundenplanFehler("Die Gruppe steht noch im Stundenplan, in einer Änderung oder in der Planung. Bitte dort zuerst entfernen.")
     con.execute("DELETE FROM gruppe WHERE id = ?", (gid,))
 

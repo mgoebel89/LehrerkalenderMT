@@ -392,10 +392,9 @@ def _pruefung(con, lid, pid):
 
 
 def _strang(con, lid, daten):
+    """Klasse und Schuljahr; eine Pruefung gilt immer fuer die Klasse (getrennt schreiben = Termine je Gruppe)."""
     kid = _klasse(con, _id(daten.get("klasse_id")))
-    gid = _id(daten.get("gruppe_id"))
-    if gid is not None:
-        stundenplan._gruppe_pruefen(con, lid, kid, gid)
+    gid = None
     sid = _id(daten.get("schuljahr_id"))
     if sid is None or con.execute("SELECT 1 FROM schuljahr WHERE id = ?", (sid,)).fetchone() is None:
         raise PruefungFehler("Bitte ein Schuljahr wählen.")
@@ -415,10 +414,17 @@ def pruefung_speichern(con, lid, daten, pid=None):
     form = daten.get("form") if daten.get("form") in ("termin", "fenster") else "termin"
     datum = beginn = von = bis = None
     bloecke = 1
+    teilung = "zusammen"
+    termine = []
     if form == "termin":
-        datum = stundenplan._datum(daten.get("datum"), "den Tag der Prüfung").isoformat()
-        beginn = stundenplan._uhrzeit(daten.get("beginn"), "den Block")
         bloecke = int(_zahl(daten.get("bloecke") or 1, "Blöcke", 1, 20))
+        teilung = "getrennt" if daten.get("teilung") == "getrennt" else "zusammen"
+        if teilung == "getrennt":
+            termine = _termine_pruefen(con, lid, kid, daten.get("termine"))
+            datum, beginn = termine[0]["datum"], termine[0]["beginn"]   # der erste Termin belegt die Planung
+        else:
+            datum = stundenplan._datum(daten.get("datum"), "den Tag der Prüfung").isoformat()
+            beginn = stundenplan._uhrzeit(daten.get("beginn"), "den Block")
     else:
         von = stundenplan._datum(daten.get("fenster_von"), "den Beginn des Fensters").isoformat()
         bis = stundenplan._datum(daten.get("fenster_bis"), "die Frist").isoformat()
@@ -463,20 +469,80 @@ def pruefung_speichern(con, lid, daten, pid=None):
         raise PruefungFehler("Das Lernfeld gehört nicht zum Bildungsgang der Klasse.")
     stand = daten.get("stand") if daten.get("stand") in STAENDE[:3] else (alt["stand"] if alt and alt["stand"] != "ausgewertet" else "geplant")
     werte = (titel, art, form, datum, beginn, bloecke, von, bis, erfassung, json.dumps(struktur, ensure_ascii=False), max_punkte,
-             nsid, lfid, db.jetzt())
+             nsid, lfid, teilung, db.jetzt())
     if alt is None:
         pid = con.execute("INSERT INTO pruefung (titel, art, form, datum, beginn, bloecke, fenster_von, fenster_bis, erfassung, struktur, "
-                          "max_punkte, notenschluessel_id, lernfeld_id, geaendert, lehrkraft_id, klasse_id, gruppe_id, schuljahr_id, stand, "
-                          "erstellt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                          "max_punkte, notenschluessel_id, lernfeld_id, teilung, geaendert, lehrkraft_id, klasse_id, gruppe_id, schuljahr_id, "
+                          "stand, erstellt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                           werte + (lid, kid, gid, sid, stand, db.jetzt())).lastrowid
     else:
         if alt["stand"] == "ausgewertet" and (erfassung != alt["erfassung"] or json.dumps(struktur, ensure_ascii=False) != alt["struktur"]):
             raise PruefungFehler("Die Prüfung ist abgeschlossen. Bitte zuerst wieder öffnen.")
         con.execute("UPDATE pruefung SET titel = ?, art = ?, form = ?, datum = ?, beginn = ?, bloecke = ?, fenster_von = ?, fenster_bis = ?, "
-                    "erfassung = ?, struktur = ?, max_punkte = ?, notenschluessel_id = ?, lernfeld_id = ?, geaendert = ?, stand = ? WHERE id = ?",
-                    werte + (stand if alt["stand"] != "ausgewertet" else "ausgewertet", pid))
+                    "erfassung = ?, struktur = ?, max_punkte = ?, notenschluessel_id = ?, lernfeld_id = ?, teilung = ?, geaendert = ?, stand = ? "
+                    "WHERE id = ?", werte + (stand if alt["stand"] != "ausgewertet" else "ausgewertet", pid))
+    con.execute("DELETE FROM pruefung_termin WHERE pruefung_id = ?", (pid,))
+    for t in termine:
+        con.execute("INSERT INTO pruefung_termin (pruefung_id, gruppe_id, datum, beginn) VALUES (?, ?, ?, ?)",
+                    (pid, t["gruppe_id"], t["datum"], t["beginn"]))
     _planung_abgleichen(con, lid, pid)
     return pid
+
+
+def _termine_pruefen(con, lid, kid, termine):
+    """Termine je Gruppe beim getrennten Schreiben: [{gruppe_id, datum, beginn}], mindestens zwei Gruppen der Klasse,
+    jede hoechstens einmal. Rueckgabe sortiert nach Datum und Beginn."""
+    if not isinstance(termine, list) or len([t for t in termine if isinstance(t, dict)]) < 2:
+        raise PruefungFehler("Getrennt schreiben braucht einen Termin je Gruppe (mindestens zwei).")
+    ergebnis, gesehen = [], set()
+    for t in termine:
+        if not isinstance(t, dict):
+            continue
+        gid = _id(t.get("gruppe_id"))
+        if gid is None:
+            raise PruefungFehler("Bitte bei jedem Termin die Gruppe wählen.")
+        stundenplan._gruppe_pruefen(con, lid, kid, gid)
+        if gid in gesehen:
+            raise PruefungFehler("Jede Gruppe hat nur einen Termin.")
+        gesehen.add(gid)
+        ergebnis.append({"gruppe_id": gid, "datum": stundenplan._datum(t.get("datum"), "den Tag der Prüfung").isoformat(),
+                         "beginn": stundenplan._uhrzeit(t.get("beginn"), "den Block")})
+    ergebnis.sort(key=lambda t: (t["datum"], t["beginn"]))
+    return ergebnis
+
+
+def termine(con, p):
+    """Termine einer Pruefung: zusammen = einer fuer die Klasse, getrennt = je Gruppe. [{gruppe_id, gruppe, datum, beginn}]"""
+    if p["form"] != "termin":
+        return []
+    if p["teilung"] != "getrennt":
+        return [{"gruppe_id": None, "gruppe": "", "datum": p["datum"], "beginn": p["beginn"]}]
+    return [dict(z) for z in con.execute("SELECT t.gruppe_id, g.name AS gruppe, t.datum, t.beginn FROM pruefung_termin t "
+                                          "JOIN gruppe g ON g.id = t.gruppe_id WHERE t.pruefung_id = ? ORDER BY t.datum, t.beginn",
+                                          (p["id"],))]
+
+
+def termin_hinweise(con, lid, kid, liste):
+    """Hinweise zu Terminen ohne passenden Unterricht: kein Unterricht der Klasse zu dieser Zeit, andere Gruppe als
+    gewaehlt, bzw. nur eine Gruppe, obwohl die Klasse zusammen schreibt; getrennte Termine an verschiedenen Tagen."""
+    from . import planung
+    hinweise_ = []
+    for t in liste:
+        if not t.get("datum") or not t.get("beginn"):
+            continue
+        bl = planung.unterricht_am(con, lid, kid, t["datum"])
+        treffer = next((b for b in bl if b["beginn"] == t["beginn"]), None)
+        wer = t["gruppe"] + ": " if t.get("gruppe") else ""
+        tag = stundenplan._tag_text(datetime.date.fromisoformat(t["datum"]))
+        if treffer is None:
+            hinweise_.append(wer + "Am %s um %s hast du keinen Unterricht in dieser Klasse." % (tag, t["beginn"]))
+        elif t.get("gruppe_id") and treffer["gruppe_id"] and treffer["gruppe_id"] != t["gruppe_id"]:
+            hinweise_.append(wer + "Am %s um %s hast du laut Stundenplan %s." % (tag, t["beginn"], treffer["gruppe"]))
+        elif not t.get("gruppe_id") and treffer["gruppe_id"]:
+            hinweise_.append("Am %s um %s hast du nur %s – schreibt die Klasse wirklich zusammen?" % (tag, t["beginn"], treffer["gruppe"]))
+    if len({t.get("datum") for t in liste}) > 1:
+        hinweise_.append("Die Gruppen schreiben an verschiedenen Tagen; in der Planung belegt die Prüfung den Tag des ersten Termins.")
+    return hinweise_
 
 
 def _planung_abgleichen(con, lid, pid):
@@ -505,18 +571,21 @@ def pruefung_loeschen(con, lid, pid):
     con.execute("DELETE FROM pruefung WHERE id = ?", (pid,))   # Bewertungen und Planungs-Thema gehen mit
 
 
-def _aus_zeile(z):
+def _aus_zeile(z, con=None, lid=None):
     p = dict(z)
     p["struktur"] = json.loads(p["struktur"])
     p["artname"] = ARTEN.get(p["art"], p["art"])
+    if con is not None:
+        p["termine"] = termine(con, p)
+        p["hinweise"] = termin_hinweise(con, lid, p["klasse_id"], p["termine"]) if p["stand"] in ("geplant", "angekuendigt") else []
     return p
 
 
 def pruefungen(con, lid, kid, gid, sid):
     """Pruefungen eines Strangs mit kurzer Statistik (bewertet/Schnitt), nach Termin sortiert."""
     liste = []
-    for z in con.execute("SELECT * FROM pruefung WHERE lehrkraft_id = ? AND klasse_id = ? AND COALESCE(gruppe_id, 0) = ? AND schuljahr_id = ?",
-                         (lid, kid, gid or 0, sid)).fetchall():
+    for z in con.execute("SELECT * FROM pruefung WHERE lehrkraft_id = ? AND klasse_id = ? AND schuljahr_id = ?",
+                         (lid, kid, sid)).fetchall():
         e = ergebnis(con, lid, z["id"])
         p = e["pruefung"]
         p["statistik"] = e["statistik"]
@@ -590,14 +659,11 @@ def _ganze_note(system, n):
 
 def ergebnis(con, lid, pid):
     """Alles zur Bewertung einer Pruefung: Pruefung, Schluessel, Schueler mit Werten, Prozent, Note, Rechenweg, Statistik."""
-    p = _aus_zeile(_pruefung(con, lid, pid))
+    p = _aus_zeile(_pruefung(con, lid, pid), con, lid)
     schluessel, herkunft = schluessel_fuer(con, lid, p)
     bew = {z["schueler_id"]: z for z in con.execute("SELECT * FROM bewertung WHERE pruefung_id = ?", (pid,))}
     zeilen = []
-    gruppe = p["gruppe_id"]
     for s in schueler(con, lid, p["klasse_id"]):
-        if gruppe and s["gruppe_id"] != gruppe:
-            continue
         b = bew.get(s["id"])
         if not s["aktiv"] and not b:
             continue
