@@ -132,9 +132,19 @@ def vorlage_setzen(con, art, inhalt, name=""):
     _karte.cache.clear()
 
 
+def _wert(x):
+    """Indirekte PDF-Objekte aufloesen (aeltere pypdf-Versionen liefern /Annots, /Fields, /Kids als Verweis)."""
+    return x.get_object() if hasattr(x, "get_object") else x
+
+
+def _liste(x):
+    x = _wert(x)
+    return list(x) if x else []
+
+
 def _widgets(reader):
     aus = []
-    for a in reader.pages[0].get("/Annots") or []:
+    for a in _liste(reader.pages[0].get("/Annots")):
         o = a.get_object()
         if o.get("/Subtype") != "/Widget":
             continue
@@ -230,14 +240,14 @@ def _knopf_staende(writer, staende):
     if acro is None:
         return
     from pypdf.generic import NameObject
-    for f in acro.get_object().get("/Fields") or []:
+    for f in _liste(_wert(acro).get("/Fields")):
         obj = f.get_object()
         name = obj.get("/T")
         if name is None or str(name) not in staende:
             continue
         ziel = staende[str(name)]
         obj[NameObject("/V")] = NameObject(ziel)
-        kinder = obj.get("/Kids")
+        kinder = _liste(obj.get("/Kids"))
         if kinder:
             for kid in kinder:
                 k = kid.get_object()
@@ -253,7 +263,7 @@ def _automatische_groesse(writer, namen):
     if not namen:
         return
     from pypdf.generic import NameObject, TextStringObject
-    for a in writer.pages[0].get("/Annots") or []:
+    for a in _liste(writer.pages[0].get("/Annots")):
         o = a.get_object()
         eltern = o.get("/Parent")
         nm = o.get("/T") or (eltern.get_object().get("/T") if eltern else None)
