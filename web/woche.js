@@ -50,6 +50,7 @@ const Woche = (() => {
       el('button', { type: 'button', 'aria-label': 'Vorige Woche', onclick: () => blattern(-7) }, L.symbol('links')),
       el('b', { text: titelText }),
       el('span', { class: 'chip', title: 'A/B-Woche nach Kalenderwoche', text: W.ab + '-Woche' }),
+      W.sonderplan ? el('span', { class: 'chip blau', title: 'In dieser Woche gilt (teilweise) ein Sonderplan' }, L.symbol('kalender'), W.sonderplan) : null,
       el('button', { type: 'button', 'aria-label': 'Nächste Woche', onclick: () => blattern(7) }, L.symbol('rechts')),
       el('button', { type: 'button', onclick: () => { montag = null; mobilTag = null; laden(); } }, L.symbol('heute'), 'Heute'),
       W.bloecke.some(b => !b.zustand && b.thema && !b.ist && (b.datum < W.heute || (b.datum === W.heute && b.ende <= new Date().toTimeString().slice(0, 5))))

@@ -172,9 +172,8 @@ def straenge(con, lid, schuljahr_id):
     sj = _schuljahr(con, schuljahr_id)
     liste = stundenplan.versionen(con, lid)
     paare = set()
-    for i, v in enumerate(liste):
-        bis = liste[i + 1]["ab"] if i + 1 < len(liste) else "9999-12-31"
-        if v["ab"] <= sj["ende"] and bis > sj["beginn"]:
+    for v in liste:
+        if v["ab"] <= sj["ende"] and (v["bis"] or "9999-12-31") >= sj["beginn"]:
             paare |= {(e["klasse_id"], e["gruppe_id"]) for e in v["eintraege"]}
     anzahl = {}
     for z in con.execute("SELECT klasse_id, gruppe_id, COUNT(*) AS n FROM plan_thema WHERE lehrkraft_id = ? AND schuljahr_id = ? "

@@ -113,6 +113,33 @@ class Stundenplan(MitStundenplan):
         with self.assertRaises(stundenplan.StundenplanFehler):
             stundenplan.version_anlegen(self.con, self.lid, {"ab": "2027-02-01"})
 
+    def test_sonderplan_einfuehrungswoche(self):
+        # Sonderplan nur Mo-Fr 16.-20.11.: Grundstufe vollzeit (hier BSMT 22b), die anderen Klassen fallen weg
+        s = stundenplan.version_anlegen(self.con, self.lid, {"ab": "2026-11-16", "bis": "2026-11-20", "name": "Einführungswoche"})
+        for tag in (1, 2, 3):
+            for b, e in (("07:45", "09:15"), ("09:30", "11:00"), ("11:30", "13:00")):
+                self.feld(s, tag, b, e, [{"klasse_id": self.k22}])
+        w = self.woche("2026-11-16")
+        self.assertEqual({b["klasse"]["name"] for b in w["bloecke"]}, {"BSMT 22b"})
+        self.assertEqual(len(w["bloecke"]), 9)
+        self.assertEqual(w["sonderplan"], "Einführungswoche")
+        danach = self.woche("2026-11-23")                                   # danach wieder der normale Plan
+        self.assertIn("BSMT 24a", {b["klasse"]["name"] for b in danach["bloecke"]})
+        self.assertIsNone(danach["sonderplan"])
+        # Sonderplan darf am selben Tag beginnen wie eine normale Version, aber Sonderplaene ueberschneiden sich nicht
+        stundenplan.version_anlegen(self.con, self.lid, {"ab": "2026-11-16", "name": "2. Version"})
+        with self.assertRaises(stundenplan.StundenplanFehler):
+            stundenplan.version_anlegen(self.con, self.lid, {"ab": "2026-11-19", "bis": "2026-11-24"})
+        with self.assertRaises(stundenplan.StundenplanFehler):
+            stundenplan.version_anlegen(self.con, self.lid, {"ab": "2026-11-30", "bis": "2026-11-27"})
+        vs = stundenplan.versionen(self.con, self.lid)
+        self.assertEqual([(v["ab"], v["bis"], v["sonder"]) for v in vs],
+                         [("2026-08-01", "2026-11-15", False), ("2026-11-16", "2026-11-20", True), ("2026-11-16", None, False)])
+
+    def test_rueckwirkend_auf_schuljahresbeginn(self):
+        stundenplan.version_aendern(self.con, self.lid, self.v1, {"ab": "2026-07-01", "name": "ab Schuljahresbeginn"})
+        self.assertEqual(stundenplan.versionen(self.con, self.lid)[0]["ab"], "2026-07-01")
+
     def test_ferien_und_feiertage_sind_frei(self):
         with db.transaktion(self.con):
             grunddaten.ferien_anlegen(self.con, {"name": "Herbstferien", "von": "2026-10-12", "bis": "2026-10-23"})

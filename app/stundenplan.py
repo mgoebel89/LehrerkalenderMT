@@ -209,33 +209,56 @@ def versionen(con, lid):
                       "klasse_id": e["klasse_id"], "gruppe_id": e["gruppe_id"], "lernfeld_id": e["lernfeld_id"], "woche": e["woche"]}
                      for e in con.execute("SELECT * FROM stundenplan_eintrag WHERE version_id = ? ORDER BY wochentag, beginn, woche",
                                           (v["id"],))]
-        liste.append({"id": v["id"], "ab": v["ab"], "name": v["name"], "eintraege": eintraege})
-    for i, v in enumerate(liste):
-        nach = liste[i + 1]["ab"] if i + 1 < len(liste) else None
+        liste.append({"id": v["id"], "ab": v["ab"], "name": v["name"], "eintraege": eintraege,
+                      "sonder": bool(v["sonder_bis"]), "bis": v["sonder_bis"]})
+    normale = [v for v in liste if not v["sonder"]]
+    for i, v in enumerate(normale):   # eine normale Version gilt bis zum Tag vor der naechsten normalen
+        nach = normale[i + 1]["ab"] if i + 1 < len(normale) else None
         v["bis"] = (datetime.date.fromisoformat(nach) - datetime.timedelta(days=1)).isoformat() if nach else None
     return liste
 
 
 def gueltige_version(liste, datum):
-    """Die Version, die am Datum gilt (liste aufsteigend nach ab), oder None."""
+    """Die Version, die am Datum gilt (liste aufsteigend nach ab), oder None. Ein Sonderplan, in dessen Zeitraum das
+    Datum liegt, geht dem normalen Plan vor."""
+    iso = datum.isoformat()
+    for v in liste:
+        if v["sonder"] and v["ab"] <= iso <= v["bis"]:
+            return v
     gefunden = None
     for v in liste:
-        if v["ab"] <= datum.isoformat():
+        if not v["sonder"] and v["ab"] <= iso:
             gefunden = v
     return gefunden
 
 
+def _version_zeitraum_pruefen(con, lid, ab, bis, vid=None):
+    """Normale Versionen: hoechstens eine je Startdatum. Sonderplaene: bis >= ab, keine Ueberschneidung untereinander."""
+    if bis is None:
+        if con.execute("SELECT 1 FROM stundenplan_version WHERE lehrkraft_id = ? AND ab = ? AND sonder_bis IS NULL AND id != ?",
+                       (lid, ab, vid or -1)).fetchone():
+            raise StundenplanFehler("Ab diesem Datum gibt es schon eine Version.")
+        return
+    if bis < ab:
+        raise StundenplanFehler("Das Ende des Sonderplans liegt vor seinem Beginn.")
+    anderer = con.execute("SELECT name, ab, sonder_bis FROM stundenplan_version WHERE lehrkraft_id = ? AND sonder_bis IS NOT NULL "
+                          "AND ab <= ? AND sonder_bis >= ? AND id != ?", (lid, bis, ab, vid or -1)).fetchone()
+    if anderer:
+        raise StundenplanFehler("Der Zeitraum überschneidet sich mit dem Sonderplan %s." % (anderer["name"] or anderer["ab"]))
+
+
 def version_anlegen(con, lid, daten):
-    """Neue Version ab einem Datum, leer oder als Kopie einer eigenen Version (kopie_von)."""
+    """Neue Version ab einem Datum, leer oder als Kopie einer eigenen Version (kopie_von). Mit bis: Sonderplan, der nur
+    von ab bis bis gilt (z. B. Einfuehrungswoche) und dort den normalen Plan ersetzt."""
     ab = _datum(daten.get("ab"), "das Datum, ab dem die Version gilt").isoformat()
+    bis = _datum(daten.get("bis"), "das Ende des Sonderplans").isoformat() if daten.get("bis") else None
     name = _text(daten.get("name"), 60)
-    if con.execute("SELECT 1 FROM stundenplan_version WHERE lehrkraft_id = ? AND ab = ?", (lid, ab)).fetchone():
-        raise StundenplanFehler("Ab diesem Datum gibt es schon eine Version.")
+    _version_zeitraum_pruefen(con, lid, ab, bis)
     quelle = _id(daten.get("kopie_von"))
     if quelle is not None:
         _version(con, lid, quelle)
-    vid = con.execute("INSERT INTO stundenplan_version (lehrkraft_id, ab, name, erstellt) VALUES (?, ?, ?, ?)",
-                      (lid, ab, name, db.jetzt())).lastrowid
+    vid = con.execute("INSERT INTO stundenplan_version (lehrkraft_id, ab, sonder_bis, name, erstellt) VALUES (?, ?, ?, ?, ?)",
+                      (lid, ab, bis, name, db.jetzt())).lastrowid
     if quelle is not None:
         con.execute("INSERT INTO stundenplan_eintrag (version_id, wochentag, beginn, ende, klasse_id, gruppe_id, lernfeld_id, woche) "
                     "SELECT ?, wochentag, beginn, ende, klasse_id, gruppe_id, lernfeld_id, woche FROM stundenplan_eintrag "
@@ -244,11 +267,13 @@ def version_anlegen(con, lid, daten):
 
 
 def version_aendern(con, lid, vid, daten):
-    _version(con, lid, vid)
+    alt = _version(con, lid, vid)
     ab = _datum(daten.get("ab"), "das Datum, ab dem die Version gilt").isoformat()
-    if con.execute("SELECT 1 FROM stundenplan_version WHERE lehrkraft_id = ? AND ab = ? AND id != ?", (lid, ab, vid)).fetchone():
-        raise StundenplanFehler("Ab diesem Datum gibt es schon eine Version.")
-    con.execute("UPDATE stundenplan_version SET ab = ?, name = ? WHERE id = ?", (ab, _text(daten.get("name"), 60), vid))
+    bis = None
+    if alt["sonder_bis"]:   # ein Sonderplan bleibt ein Sonderplan
+        bis = _datum(daten.get("bis"), "das Ende des Sonderplans").isoformat()
+    _version_zeitraum_pruefen(con, lid, ab, bis, vid)
+    con.execute("UPDATE stundenplan_version SET ab = ?, sonder_bis = ?, name = ? WHERE id = ?", (ab, bis, _text(daten.get("name"), 60), vid))
 
 
 def version_loeschen(con, lid, vid):
@@ -640,6 +665,8 @@ def woche(con, lid, montag, jetzt=None):
         "termine": [t for t in termine if t["art"] != "merker"], "merker": merker,
         "farben": {str(k): f for k, f in farben(alle_klassen, klassen).items()},
         "hat_stundenplan": bool(liste),
+        "sonderplan": next((v["name"] or "Sonderplan" for v in liste if v["sonder"] and v["ab"] <= freitag.isoformat()
+                            and v["bis"] >= montag.isoformat()), None),
         "klassen": [{"id": k["id"], "name": k["name"],
                      "bloecke": [r["beginn"] + "-" + r["ende"] for r in raster_der_klasse(con, k["id"], cache)]}
                     for k in klassen.values() if k["aktiv"]],
@@ -670,7 +697,7 @@ def editor(con, lid, heute=None):
             "farben": {str(k): f for k, f in farben({e["klasse_id"] for v in liste for e in v["eintraege"]}, klassen).items()},
             "ab": ab_woche(woche_von, a_woche_regel(con)), "ab_naechste": woche_von != heute, "a_woche": a_woche_regel(con),
             "heute": heute.isoformat(),
-            "gilt_jetzt": jetzt_gueltig["id"] if jetzt_gueltig else None}
+            "gilt_jetzt": jetzt_gueltig["id"] if jetzt_gueltig else None, "schuljahre": grunddaten.schuljahre(con)}
 
 
 # --- Zeitraster geaendert: Eintraege nachziehen ---

@@ -29,7 +29,8 @@ const Stundenplan = (() => {
   const zeitraumText = k => !k ? '' : (k.beginn ? 'ab ' + L.tag(k.beginn).trim().slice(3) + ' ' : '') + (k.ende ? 'bis ' + L.tag(k.ende).trim().slice(3) : '');
   const gruppenName = gid => (E.gruppen.find(g => g.id === gid) || { name: '?' }).name;
   const farbe = id => E.farben[String(id)] || 'var(--leise)';
-  const versionText = v => 'ab ' + L.tag(v.ab, true).slice(3) + (v.name ? ' · ' + v.name : '') + (v.id === E.gilt_jetzt ? ' (gilt jetzt)' : '');
+  const versionText = v => (v.sonder ? 'Sonderplan ' + L.tag(v.ab).trim().slice(3) + '–' + L.tag(v.bis, true).slice(3) : 'ab ' + L.tag(v.ab, true).slice(3))
+    + (v.name ? ' · ' + v.name : '') + (v.id === E.gilt_jetzt ? ' (gilt jetzt)' : '');
 
   function zeichnen() {
     const teile = [];
@@ -42,16 +43,22 @@ const Stundenplan = (() => {
     }
     const v = version();
     const auswahl = el('select', { 'aria-label': 'Version', onchange: () => { gewaehlt = Number(auswahl.value); zeichnen(); } },
-      E.versionen.map(x => el('option', { value: x.id, text: versionText(x), selected: x.id === gewaehlt ? true : null })));
+      E.versionen.filter(x => !x.sonder).map(x => el('option', { value: x.id, text: versionText(x), selected: x.id === gewaehlt ? true : null })),
+      E.versionen.some(x => x.sonder) ? el('optgroup', { label: 'Sonderpläne' }, E.versionen.filter(x => x.sonder).map(x =>
+        el('option', { value: x.id, text: versionText(x), selected: x.id === gewaehlt ? true : null }))) : null);
     teile.push(el('div', { class: 'zeile' },
       L.feld('Version', auswahl),
       el('span', { class: 'rechts' },
         el('button', { type: 'button', onclick: () => gruppenVerwalten() }, L.symbol('klassen'), 'Gruppen'),
         el('button', { type: 'button', onclick: tagKopieren }, L.symbol('kopie'), 'Tag kopieren'),
         el('button', { type: 'button', onclick: () => versionNeu(v) }, L.symbol('plus'), 'Neue Version aus dieser'),
-        el('button', { type: 'button', class: 'leicht', 'aria-label': 'Version bearbeiten', title: 'Version bearbeiten', onclick: () => versionBearbeiten(v) }, L.symbol('stift')),
+        el('button', { type: 'button', onclick: () => versionBearbeiten(v) }, L.symbol('stift'), v.sonder ? 'Sonderplan bearbeiten' : 'Version bearbeiten'),
+        el('button', { type: 'button', onclick: () => sonderplanNeu(v.sonder ? null : v) }, L.symbol('kalender'), 'Sonderplan …'),
         el('span', { class: 'chip', title: 'A-Woche = ' + E.a_woche + ' Kalenderwoche (legt der Admin fest)' }, L.symbol('kalender'), (E.ab_naechste ? 'Kommende Woche: ' : 'Diese Woche: ') + E.ab + '-Woche'))));
-    teile.push(el('p', { class: 'leise klein', text: v.bis ? 'Gilt vom ' + L.tag(v.ab, true) + ' bis ' + L.tag(v.bis, true) + '.' : 'Gilt ab ' + L.tag(v.ab, true) + ' bis auf Weiteres.' }));
+    teile.push(v.sonder
+      ? el('div', { class: 'banner' }, el('b', { text: 'Sonderplan: ' }), 'gilt nur vom ' + L.tag(v.ab, true) + ' bis ' + L.tag(v.bis, true) +
+        ' und in dieser Zeit statt deines normalen Stundenplans. Klassen, die hier fehlen, haben in dieser Zeit keinen Unterricht bei dir.')
+      : el('p', { class: 'leise klein', text: v.bis ? 'Gilt vom ' + L.tag(v.ab, true) + ' bis ' + L.tag(v.bis, true) + '.' : 'Gilt ab ' + L.tag(v.ab, true) + ' bis auf Weiteres.' }));
     teile.push(el('div', { class: 'rollbar' }, raster(v)));
     teile.push(el('p', { class: 'klein leise', text: 'Ein Tipp auf „+“ oder einen Eintrag: Klasse wählen, jede Woche oder je eine Klasse für A- und B-Woche. Die Zeiten kommen aus dem Zeitraster des Bildungsgangs der Klasse; Zeilen mit Kürzel (z. B. FT) gehören zu einem eigenen Raster.' }));
     L.setzen(ort, teile);
@@ -186,6 +193,20 @@ const Stundenplan = (() => {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
+  // Schuljahr, das heute laeuft oder als naechstes beginnt (fuer den Knopf "Schuljahresbeginn")
+  function aktuellesSchuljahr() {
+    const heute = L.heute();
+    return E.schuljahre.find(j => j.beginn <= heute && heute <= j.ende) || E.schuljahre.find(j => j.beginn > heute) || E.schuljahre[E.schuljahre.length - 1];
+  }
+
+  // Datumsfeld mit Knopf "Schuljahresbeginn" (falls der Kalender des Browsers nicht mitspielt, geht auch Eintippen)
+  function abFeld(eingabe, beschriftung) {
+    const sj = aktuellesSchuljahr();
+    return el('div', { class: 'stapel', style: 'gap:6px' }, L.feld(beschriftung || 'Gilt ab', eingabe),
+      sj ? el('div', {}, el('button', { type: 'button', class: 'klein', onclick: () => { eingabe.value = sj.beginn; eingabe.dispatchEvent(new Event('change')); } },
+        L.symbol('kalender'), 'Schuljahresbeginn (' + L.tag(sj.beginn, true) + ')')) : null);
+  }
+
   function ersteVersion() {
     const ab = el('input', { type: 'date', value: montagHeute() });
     const name = el('input', { maxlength: 60, placeholder: 'z. B. 1. Halbjahr 2026/27' });
@@ -194,8 +215,8 @@ const Stundenplan = (() => {
       try { await schritt('/api/stundenplan/version', { ab: ab.value, name: name.value }); zeichnen(); } catch (e) { L.meldung(e.message, true); }
     } },
     el('h2', {}, L.symbol('spalten'), 'Stundenplan anlegen'),
-    el('p', { class: 'leise klein', text: 'Dein Grundstundenplan gilt ab einem Datum. Zum Halbjahr legst du später eine neue Version aus dieser an; vergangene Wochen behalten den alten Plan.' }),
-    el('div', { class: 'felder zwei' }, L.feld('Gilt ab', ab), L.feld('Name', name, 'freiwillig')),
+    el('p', { class: 'leise klein', text: 'Dein Grundstundenplan gilt ab einem Datum, gern auch rückwirkend ab Schuljahresbeginn. Zum Halbjahr legst du später eine neue Version aus dieser an; vergangene Wochen behalten den alten Plan.' }),
+    el('div', { class: 'felder zwei' }, abFeld(ab), L.feld('Name', name, 'freiwillig')),
     el('div', {}, el('button', { type: 'submit', class: 'haupt' }, L.symbol('plus'), 'Anlegen')));
   }
 
@@ -206,29 +227,60 @@ const Stundenplan = (() => {
       titel: 'Neue Version aus dieser', knopf: 'Anlegen',
       inhalt: el('div', { class: 'stapel', style: 'gap:10px' },
         el('p', { class: 'leise klein', text: 'Kopiert alle Einträge von „' + versionText(v) + '“. Bis zum neuen Datum gilt die alte Version weiter.' }),
-        el('div', { class: 'felder zwei' }, L.feld('Gilt ab', ab), L.feld('Name', name, 'freiwillig'))),
+        el('div', { class: 'felder zwei' }, abFeld(ab), L.feld('Name', name, 'freiwillig'))),
       speichern: () => schritt('/api/stundenplan/version', { ab: ab.value, name: name.value, kopie_von: v.id }),
+    });
+    if (r) zeichnen();
+  }
+
+  // Sonderplan: gilt nur von-bis und dort statt des normalen Plans (z. B. Einfuehrungswoche: nur die Grundstufen)
+  async function sonderplanNeu(v) {
+    const ab = el('input', { type: 'date' });
+    const bis = el('input', { type: 'date' });
+    const name = el('input', { maxlength: 60, value: 'Einführungswoche' });
+    const normale = E.versionen.filter(x => !x.sonder);
+    const vorlage = el('select', {}, el('option', { value: '', text: 'leer beginnen' }),
+      normale.map(x => el('option', { value: x.id, text: 'Kopie von „' + versionText(x) + '“', selected: v && x.id === v.id ? true : null })));
+    ab.addEventListener('change', () => {   // Ende vorschlagen: Freitag derselben Woche
+      if (!ab.value || bis.value) return;
+      const d = new Date(ab.value + 'T12:00:00');
+      d.setDate(d.getDate() + Math.max(0, 5 - ((d.getDay() + 6) % 7) - 1));
+      bis.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    });
+    const r = await L.dialog({
+      titel: 'Sonderplan anlegen', knopf: 'Anlegen',
+      inhalt: el('div', { class: 'stapel', style: 'gap:10px' },
+        el('p', { class: 'leise klein', text: 'Ein Sonderplan gilt nur in seinem Zeitraum und dort statt deines normalen Stundenplans, z. B. in der Einführungswoche: Du trägst nur die Grundstufen ein (gern vollzeit), deine anderen Klassen haben in dieser Zeit keinen Unterricht bei dir. Danach gilt automatisch wieder der normale Plan.' }),
+        L.feld('Name', name),
+        el('div', { class: 'felder zwei' }, abFeld(ab, 'von'), L.feld('bis', bis, 'letzter Tag')),
+        L.feld('Vorlage', vorlage, 'Kopie: alle Einträge der gewählten Version, dann anpassen')),
+      speichern: () => schritt('/api/stundenplan/version', { ab: ab.value, bis: bis.value, name: name.value, kopie_von: vorlage.value || null }),
     });
     if (r) zeichnen();
   }
 
   async function versionBearbeiten(v) {
     const ab = el('input', { type: 'date', value: v.ab });
+    const bis = el('input', { type: 'date', value: v.sonder ? v.bis : '' });
     const name = el('input', { maxlength: 60, value: v.name });
     const r = await L.dialog({
-      titel: 'Version bearbeiten',
+      titel: v.sonder ? 'Sonderplan bearbeiten' : 'Version bearbeiten',
       inhalt: el('div', { class: 'stapel', style: 'gap:12px' },
-        el('div', { class: 'felder zwei' }, L.feld('Gilt ab', ab), L.feld('Name', name, 'freiwillig')),
-        el('div', {}, L.nebenknopf('Version löschen …', () => versionLoeschen(v)))),
-      speichern: () => schritt('/api/stundenplan/version/' + v.id, { ab: ab.value, name: name.value }),
+        v.sonder
+          ? el('div', { class: 'felder zwei' }, abFeld(ab, 'von'), L.feld('bis', bis))
+          : el('div', { class: 'felder zwei' }, abFeld(ab), L.feld('Name', name, 'freiwillig')),
+        v.sonder ? L.feld('Name', name) : null,
+        el('div', {}, L.nebenknopf(v.sonder ? 'Sonderplan löschen …' : 'Version löschen …', () => versionLoeschen(v)))),
+      speichern: () => schritt('/api/stundenplan/version/' + v.id, { ab: ab.value, bis: v.sonder ? bis.value : null, name: name.value }),
     });
     if (r) zeichnen();
   }
 
   async function versionLoeschen(v) {
     const r = await L.dialog({
-      titel: 'Version löschen?', knopf: 'Löschen', gefaehrlich: true,
-      inhalt: el('p', { text: '„' + versionText(v) + '“ mit allen Einträgen löschen? Wochen in ihrem Zeitraum zeigen danach die vorige Version (oder keinen Unterricht).' }),
+      titel: v.sonder ? 'Sonderplan löschen?' : 'Version löschen?', knopf: 'Löschen', gefaehrlich: true,
+      inhalt: el('p', { text: '„' + versionText(v) + '“ mit allen Einträgen löschen? ' + (v.sonder
+        ? 'In diesem Zeitraum gilt danach wieder der normale Plan.' : 'Wochen in ihrem Zeitraum zeigen danach die vorige Version (oder keinen Unterricht).') }),
       speichern: () => schritt('/api/stundenplan/version/' + v.id + '/loeschen'),
     });
     if (r) zeichnen();

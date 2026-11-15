@@ -272,6 +272,22 @@ MIGRATIONEN = [
     ALTER TABLE klasse ADD COLUMN beginn TEXT;
     ALTER TABLE klasse ADD COLUMN ende TEXT
     """,
+    # 8: Sonderstundenplan (z. B. Einfuehrungswoche): eine Version mit Enddatum gilt nur von ab bis sonder_bis und dort
+    #    statt des normalen Plans. Ein Sonderplan darf am selben Tag beginnen wie eine normale Version, deshalb faellt
+    #    UNIQUE (lehrkraft_id, ab) weg (die Regeln prueft jetzt der Code).
+    (True, """
+    CREATE TABLE stundenplan_version_neu (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        ab TEXT NOT NULL,
+        sonder_bis TEXT,
+        name TEXT NOT NULL DEFAULT '',
+        erstellt TEXT NOT NULL);
+    INSERT INTO stundenplan_version_neu (id, lehrkraft_id, ab, name, erstellt) SELECT id, lehrkraft_id, ab, name, erstellt FROM stundenplan_version;
+    DROP TABLE stundenplan_version;
+    ALTER TABLE stundenplan_version_neu RENAME TO stundenplan_version;
+    CREATE INDEX stundenplan_version_lk ON stundenplan_version (lehrkraft_id, ab)
+    """),
 ]
 
 
