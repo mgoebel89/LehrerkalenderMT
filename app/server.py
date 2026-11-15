@@ -19,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, grunddaten, konten, notenschluessel, planung, pruefungen, qr, stundenplan, totp, updates
+from . import VERSION, abos, db, exporte, grunddaten, konten, notenschluessel, planung, pruefungen, qr, stundenplan, totp, updates
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -742,6 +742,33 @@ def api_teams_bilden(h, con, daten, pid):
     h.antwort(200, pruefungen.ergebnis(con, k["id"], int(pid)))
 
 
+def api_export(h, con, daten, pid):
+    """Fuer die Export-Ansicht: Notenspalte (Excel) und wer fuer Moodle keine E-Mail-Adresse hat."""
+    k = h.konto(con)
+    _, ohne = exporte.moodle_csv(con, k["id"], _ganzzahl(pid))
+    h.antwort(200, {"notenspalte": exporte.notenspalte(con, k["id"], int(pid)), "ohne_email": ohne})
+
+
+def api_ergebnis_pdf(h, con, daten, pid):
+    k = h.konto(con)
+    inhalt, name = exporte.ergebnis_pdf(con, k["id"], _ganzzahl(pid), k["name"])
+    h.herunterladen(inhalt, "application/pdf", name)
+
+
+def api_rueckmeldung_pdf(h, con, daten, pid):
+    k = h.konto(con)
+    sid = h.abfrage("schueler")
+    inhalt, name = exporte.rueckmeldung_pdf(con, k["id"], _ganzzahl(pid), _ganzzahl(sid) if sid else None, k["name"])
+    h.herunterladen(inhalt, "application/pdf", name)
+
+
+def api_moodle_csv(h, con, daten, pid):
+    k = h.konto(con)
+    text, _ = exporte.moodle_csv(con, k["id"], _ganzzahl(pid))
+    p = pruefungen.ergebnis(con, k["id"], int(pid))["pruefung"]
+    h.herunterladen(text.encode("utf-8"), "text/csv; charset=utf-8", "Moodle %s.csv" % p["titel"])
+
+
 def api_wieder_oeffnen(h, con, daten, pid):
     k = h.konto(con)
     with db.transaktion(con):
@@ -898,6 +925,10 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/pruefungen/unterricht", api_unterricht),
     ("POST", r"/api/pruefung", _pr_schritt(lambda con, k, d, _: pruefungen.pruefung_speichern(con, k["id"], d))),
     ("GET", r"/api/pruefung/" + ID, api_pruefung),
+    ("GET", r"/api/pruefung/" + ID + "/export", api_export),
+    ("GET", r"/api/pruefung/" + ID + r"/ergebnis\.pdf", api_ergebnis_pdf),
+    ("GET", r"/api/pruefung/" + ID + r"/rueckmeldung\.pdf", api_rueckmeldung_pdf),
+    ("GET", r"/api/pruefung/" + ID + r"/moodle\.csv", api_moodle_csv),
     ("POST", r"/api/pruefung/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.pruefung_speichern(con, k["id"], d, i))),
     ("POST", r"/api/pruefung/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.pruefung_loeschen(con, k["id"], i))),
     ("POST", r"/api/pruefung/" + ID + "/bewertung/" + ID, api_bewertung),

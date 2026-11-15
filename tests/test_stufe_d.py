@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import unittest
 
-from app import db, grunddaten, konten, notenschluessel, planung, pruefungen, stundenplan
+from app import db, exporte, grunddaten, pdf, konten, notenschluessel, planung, pruefungen, stundenplan
 
 MOODLE = """Vorname;Nachname;E-Mail-Adresse
 Clara;Weiß;clara@schule.de
@@ -382,6 +382,45 @@ class Pruefungsmodus(MitPruefung):
         self.assertTrue(z["beginn"].startswith("2020-01-01T07:50") and z["dauer"] > 0)
         self.assertIsNone(z["prozent"])                                # Dauer allein ist keine Bewertung
 
+
+class Exporte(MitPruefung):
+    def setUp(self):
+        super().setUp()
+        self.pid = pruefungen.pruefung_speichern(self.con, self.lid, self.strang(
+            titel="Klassenarbeit LF 7", form="termin", datum="2026-11-20", beginn="07:45", erfassung="aufgaben",
+            aufgaben=[{"name": "A1", "max": 20}, {"name": "A2", "max": 30}]))
+        s = self.ids()
+        pruefungen.bewertung_setzen(self.con, self.lid, self.pid, s["Weiß"], {"werte": {"k1": 20, "k2": 22}, "notiz": "Gute Herleitung."})
+        pruefungen.bewertung_setzen(self.con, self.lid, self.pid, s["Schmitt"], {"fehlt": True})
+        pruefungen.schueler_speichern(self.con, self.lid, {"nachname": "Yılmaz", "vorname": "Deniz", "aktiv": False}, s["Yılmaz"])
+        pruefungen.schueler_speichern(self.con, self.lid, {"klasse_id": self.kl, "nachname": "Adler", "vorname": "Ben"})
+
+    def test_notenspalte_alle_alphabetisch_mit_komma(self):
+        z = exporte.notenspalte(self.con, self.lid, self.pid)
+        self.assertEqual([x["name"] for x in z], ["Adler, Ben", "Schmitt, Lea", "Weiß, Clara", "Yılmaz, Deniz"])   # auch ausgetretene
+        self.assertEqual([x["note"] for x in z], ["", "", "1,7", ""])                                                # 84 % = 2+ = 1,7
+        self.assertEqual([x["fehlt"] for x in z], [False, True, False, False])
+
+    def test_moodle_csv(self):
+        text, ohne = exporte.moodle_csv(self.con, self.lid, self.pid)
+        self.assertEqual(text.strip().splitlines(), ["E-Mail-Adresse,Bewertung,Feedback", "clara@schule.de,84.00,Note 2+ · 84 %"])
+        self.assertEqual(ohne, [])
+        adler = next(x for x in pruefungen.schueler(self.con, self.lid, self.kl) if x["nachname"] == "Adler")
+        pruefungen.bewertung_setzen(self.con, self.lid, self.pid, adler["id"], {"werte": {"k1": 10, "k2": 10}})
+        self.assertEqual(exporte.moodle_csv(self.con, self.lid, self.pid)[1], ["Adler, Ben"])   # ohne E-Mail: nicht zuordenbar
+
+    def test_pdfs(self):
+        inhalt, name = exporte.ergebnis_pdf(self.con, self.lid, self.pid, "Matthias Göbel")
+        self.assertTrue(inhalt.startswith(b"%PDF-1.4") and inhalt.rstrip().endswith(b"%%EOF"))
+        self.assertEqual(name, "Ergebnis BSMT 24a Klassenarbeit LF 7.pdf")
+        self.assertIn("Weiß, Clara".encode("cp1252"), inhalt)
+        self.assertEqual(pdf._ersetzen("Yılmaz, Şahin, Łukasz, Dvořák, Müller"), "Yilmaz, Sahin, Lukasz, Dvorák, Müller")   # á kennt cp1252
+        inhalt, name = exporte.rueckmeldung_pdf(self.con, self.lid, self.pid)
+        self.assertEqual(inhalt.count(b"/Type /Page "), 1)                 # nur Weiß ist bewertet (Schmitt fehlt)
+        self.assertIn("Gute Herleitung.".encode("cp1252"), inhalt)
+        self.assertNotIn("Schmitt".encode("cp1252"), inhalt)               # keine Daten anderer
+        with self.assertRaises(pruefungen.PruefungFehler):
+            exporte.rueckmeldung_pdf(self.con, self.lid, self.pid, self.ids()["Schmitt"])
 
 if __name__ == "__main__":
     unittest.main()

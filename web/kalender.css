@@ -395,3 +395,8 @@ label.haken.gross input { width: 24px; height: 24px; }
   .pm-uhr { font-size: 1.6rem; min-width: 100px; } .pm-skala { grid-template-columns: 1fr 1fr; } }
 .pm-skala button { display: grid; gap: 2px; align-content: start; justify-items: start; text-align: left; padding: 5px 5px; font-size: .74rem; line-height: 1.2; min-width: 0; }
 .pm-skala button span { white-space: normal; overflow-wrap: break-word; hyphens: auto; -webkit-hyphens: auto; }
+
+/* D2c: Export */
+.export .notenspalte { max-height: 340px; overflow: auto; border: 1px solid var(--linie); border-radius: 6px; }
+.export .notenspalte td { padding-top: 3px; padding-bottom: 3px; }
+.export tr.aus td { color: var(--leise); }

@@ -31,6 +31,7 @@ from . import db, grunddaten, notenschluessel, stundenplan
 
 ARTEN = {"schriftlich": "schriftlich", "muendlich": "mündlich", "praktisch": "praktisch", "portfolio": "Portfolio"}
 ERFASSUNGEN = ("aufgaben", "gesamt", "bogen", "checkliste")
+ERFASSUNG_NAMEN = {"aufgaben": "Punkte je Aufgabe", "gesamt": "Gesamtpunkte", "bogen": "Feedbackbogen", "checkliste": "Checkliste"}
 TYPEN = ("stufen", "punkte", "haken", "text", "check")   # check = Haken mit Punkten (Checkliste)
 STAENDE = ("geplant", "angekuendigt", "durchgefuehrt", "ausgewertet")
 # Einschaetzung einer gezogenen oder spontanen Frage im Pruefungsmodus (Stufe 0-4)

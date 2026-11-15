@@ -345,7 +345,7 @@ const Pruefungen = (() => {
         el('span', { text: E.herkunft })),
       el('div', { class: 'zeile' },
         segment([['bewerten', 'Bewerten']].concat(hatTeams(p) ? [['teams', 'Teams' + (p.teams.length ? ' (' + p.teams.length + ')' : '')]] : [],
-          [['fragen', 'Fragen' + (p.fragen.length ? ' (' + p.fragen.length + ')' : '')], ['auswertung', 'Auswertung']]),
+          [['fragen', 'Fragen' + (p.fragen.length ? ' (' + p.fragen.length + ')' : '')], ['auswertung', 'Auswertung'], ['export', 'Export']]),
           reiter, w => { reiter = w; detailZeichnen(); }),
         kopfStatistik(st)),
       fertig ? el('div', { class: 'banner', text: 'Abgeschlossen: Der Notenschlüssel ist festgehalten, Bewertungen sind gesperrt. „Wieder öffnen“ hebt das auf.' }) : null,
@@ -372,6 +372,7 @@ const Pruefungen = (() => {
     }
     if (reiter === 'teams' && !hatTeams(E.pruefung)) reiter = 'bewerten';
     if (reiter === 'fragen') return L.setzen(rumpf, fragenAnsicht());
+    if (reiter === 'export') { X = null; return L.setzen(rumpf, exportAnsicht()); }
     L.setzen(rumpf, reiter === 'auswertung' ? auswertung() : reiter === 'teams' ? teamsAnsicht()
       : E.pruefung.erfassung === 'checkliste' ? checklisteMatrix() : bewertenTabelle());
   }
@@ -396,7 +397,9 @@ const Pruefungen = (() => {
       inhalt: el('div', { class: 'stapel', style: 'gap:6px' },
         z.rechenweg.map(r => el('div', { class: 'mono klein rechenweg-zeile', text: r })),
         z.fehlend.length ? el('div', { class: 'banner warnung', text: 'Nicht bewertet und nicht mitgerechnet: ' + z.fehlend.join(', ') }) : null,
-        z.notiz ? el('p', { class: 'klein' }, el('b', { text: 'Notiz: ' }), z.notiz) : null),
+        z.notiz ? el('p', { class: 'klein' }, el('b', { text: 'Notiz: ' }), z.notiz) : null,
+        el('div', {}, el('button', { type: 'button', class: 'klein', onclick: () => L.herunterladen('/api/pruefung/' + E.pruefung.id + '/rueckmeldung.pdf?schueler=' + z.id).catch(e => L.meldung(e.message, true)) },
+          L.symbol('formular'), 'Rückmeldebogen (PDF)'))),
     });
   }
 
@@ -568,6 +571,54 @@ const Pruefungen = (() => {
         v.team && !z.team_id ? el('p', { class: 'leise klein', text: 'Ohne Team: der Haken gilt nur für diesen Schüler.' }) : null),
     });
     detailZeichnen();
+  }
+
+  // --- Reiter Export: Notenspalte (Excel), PDF, Moodle ---
+  let X = null;   // Exportdaten der Pruefung
+
+  async function kopieren(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch (e) {   // ohne Zwischenablage-Recht: Text zum Markieren anbieten
+      const t = el('textarea', { rows: 10, readonly: true });
+      t.value = text;
+      L.dialog({ titel: 'Zum Kopieren markieren', knopf: 'Schließen', abbrechen: null, speichern: () => true,
+        inhalt: el('div', { class: 'stapel' }, el('p', { class: 'leise klein', text: 'Strg+A, Strg+C – dann in Excel einfügen.' }), t) });
+      setTimeout(() => { t.focus(); t.select(); }, 50);
+      return false;
+    }
+  }
+
+  function exportAnsicht() {
+    const p = E.pruefung;
+    const ort = el('div', { class: 'stapel' }, el('p', { class: 'leise', text: 'Lade …' }));
+    const zeichne = () => {
+      const mitNote = X.notenspalte.filter(z => z.note).length;
+      const download = async (pfad, knopf) => {
+        knopf.disabled = true;
+        try { await L.herunterladen('/api/pruefung/' + p.id + pfad); } catch (e) { L.meldung(e.message, true); }
+        knopf.disabled = false;
+      };
+      const knopf = (text, sym, pfad) => { const b = el('button', { type: 'button' }, L.symbol(sym), text); b.addEventListener('click', () => download(pfad, b)); return b; };
+      L.setzen(ort, el('div', { class: 'raster export' },
+        el('div', { class: 'karte stapel' }, el('h3', { text: 'Excel-Notenliste' }),
+          el('p', { class: 'leise klein', text: 'Alle ' + X.notenspalte.length + ' Schüler der Liste alphabetisch, Note als Dezimalzahl (' + mitNote + ' mit Note). Gefehlt oder ohne Note = leere Zelle. In Excel die erste Zelle der Spalte anklicken und einfügen.' }),
+          el('div', { class: 'zeile' },
+            el('button', { type: 'button', class: 'haupt', onclick: async () => { if (await kopieren(X.notenspalte.map(z => z.note).join('\n'))) L.meldung('Notenspalte kopiert (' + X.notenspalte.length + ' Zeilen).'); } }, L.symbol('kopie'), 'Noten kopieren'),
+            el('button', { type: 'button', onclick: async () => { if (await kopieren(X.notenspalte.map(z => z.name + '\t' + z.note).join('\n'))) L.meldung('Namen und Noten kopiert.'); } }, 'Name + Note kopieren')),
+          el('div', { class: 'notenspalte' }, el('table', { class: 'liste' }, el('tbody', {}, X.notenspalte.map(z => el('tr', { class: z.aktiv ? null : 'aus' },
+            el('td', { text: z.name }), el('td', { class: 'mono zahl', text: z.note || (z.fehlt ? 'fehlt' : '') }))))))),
+        el('div', { class: 'karte stapel' }, el('h3', { text: 'PDF zum Abheften' }),
+          el('p', { class: 'leise klein', text: 'Ergebnisliste mit Notenspiegel für deine Akte; Rückmeldebögen je Schüler (eine Seite, ohne Daten anderer, mit Unterschriftszeilen) zum Aushändigen.' }),
+          el('div', { class: 'zeile' }, knopf('Ergebnisliste', 'liste', '/ergebnis.pdf'), knopf('Rückmeldebögen', 'formular', '/rueckmeldung.pdf')),
+          el('p', { class: 'leise klein', text: 'Einen einzelnen Bogen gibt es auch über den Rechenweg (Tipp auf die Note).' })),
+        el('div', { class: 'karte stapel' }, el('h3', { text: 'Moodle-Bewertungsbuch' }),
+          el('p', { class: 'leise klein', text: 'CSV mit E-Mail-Adresse, Bewertung (Prozent) und Feedback (Note). In Moodle: Bewertungen → Import → CSV-Datei; Zuordnung „E-Mail-Adresse“ ↔ „E-Mail-Adresse“, dann die Spalte „Bewertung“ dem Bewertungsaspekt zuordnen (Höchstwert 100).' }),
+          X.ohne_email.length ? el('div', { class: 'banner warnung klein', text: 'Ohne E-Mail-Adresse (fehlt in der CSV): ' + X.ohne_email.join(', ') + '. Ergänze sie in der Schülerliste.' }) : null,
+          el('div', {}, knopf('CSV herunterladen', 'hoch', '/moodle.csv')))));
+    };
+    if (X && X.pid === p.id && X.geaendert === E.pruefung.geaendert) zeichne();
+    else L.api('GET', '/api/pruefung/' + p.id + '/export').then(x => { X = Object.assign(x, { pid: p.id }); zeichne(); }).catch(e => L.setzen(ort, el('div', { class: 'banner warnung', text: e.message })));
+    return ort;
   }
 
   // --- Reiter Fragen: Einstellungen des Pruefungsmodus und Fragenpool ---

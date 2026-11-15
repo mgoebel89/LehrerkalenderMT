@@ -1,0 +1,151 @@
+"""Kleiner PDF-Schreiber ohne Zusatzpakete (aus dem Lernbuero MT uebernommen): Seiten mit Text (Helvetica aus den
+PDF-Grundschriften, WinAnsi), Rechtecken und Linien, A4 hoch oder quer. Die Pruefungs-PDFs baut app/exporte.py.
+"""
+
+import unicodedata
+
+MM = 72 / 25.4
+A4 = (595.28, 841.89)
+A4_QUER = (841.89, 595.28)
+ERSATZ = {"✓": "OK", "→": "->", "…": "...", "–": "-", "„": '"', "“": '"', "”": '"', " ": " ", " ": " ", "✗": "x", "−": "-", "◆": "*"}
+
+# Zeichenbreiten von Helvetica (1/1000 em) fuer die haeufigsten Zeichen; der Rest gilt als 556
+_BREITE = {" ": 278, "-": 333, ".": 278, ",": 278, ":": 278, "/": 278, "(": 333, ")": 333, "i": 222, "l": 222, "j": 222,
+           "f": 278, "t": 278, "r": 333, "I": 278, "J": 500, "m": 833, "w": 722, "M": 833, "W": 944, "s": 500, "c": 500,
+           "k": 500, "v": 500, "x": 500, "y": 500, "z": 500, "A": 667, "B": 667, "C": 722, "D": 722, "E": 667, "F": 611,
+           "G": 778, "H": 722, "K": 667, "L": 556, "N": 722, "O": 778, "P": 667, "Q": 778, "R": 722, "S": 667, "T": 611,
+           "U": 722, "V": 667, "X": 667, "Y": 667, "Z": 611, "ä": 556, "ö": 556, "ü": 556, "ß": 611, "Ä": 667, "Ö": 778,
+           "Ü": 722}
+
+
+# Buchstaben ausserhalb von WinAnsi (cp1252), die sich nicht zerlegen lassen
+_EIGEN = {"ı": "i", "İ": "I", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "ø": "ø", "ħ": "h", "ŋ": "n", "ə": "e", "Ə": "E"}
+
+
+def _zeichen(c):
+    """Ein Zeichen fuer die PDF-Grundschrift: unveraendert, wenn cp1252 es kennt, sonst ohne Akzent (ş -> s, ğ -> g)."""
+    try:
+        c.encode("cp1252")
+        return c
+    except UnicodeEncodeError:
+        pass
+    if c in _EIGEN:
+        return _EIGEN[c]
+    zerlegt = "".join(x for x in unicodedata.normalize("NFKD", c) if not unicodedata.combining(x))
+    try:
+        zerlegt.encode("cp1252")
+        return zerlegt or "?"
+    except UnicodeEncodeError:
+        return "?"
+
+
+def _ersetzen(s):
+    s = str(s or "")
+    for a, b in ERSATZ.items():
+        s = s.replace(a, b)
+    return "".join(_zeichen(c) for c in s)
+
+
+def _pdf_text(s):
+    roh = _ersetzen(s).encode("cp1252", errors="replace")
+    return roh.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
+
+
+def textbreite(s, groesse, fett=False):
+    faktor = 1.06 if fett else 1.0
+    return sum(_BREITE.get(c, 556) for c in _ersetzen(s)) * groesse / 1000 * faktor
+
+
+def kuerzen(s, groesse, breite, fett=False):
+    s = _ersetzen(s)
+    if textbreite(s, groesse, fett) <= breite:
+        return s
+    while s and textbreite(s + "...", groesse, fett) > breite:
+        s = s[:-1]
+    return s.rstrip() + "..."
+
+
+def umbrechen(s, groesse, breite, fett=False):
+    """Text in Zeilen, die in breite passen (Absaetze bleiben, zu lange Woerter werden geteilt)."""
+    zeilen = []
+    for absatz in _ersetzen(s).split("\n"):
+        zeile = ""
+        for wort in absatz.split():
+            while textbreite(wort, groesse, fett) > breite and len(wort) > 1:
+                teil = wort
+                while len(teil) > 1 and textbreite(teil, groesse, fett) > breite:
+                    teil = teil[:-1]
+                if zeile:
+                    zeilen.append(zeile)
+                    zeile = ""
+                zeilen.append(teil)
+                wort = wort[len(teil):]
+            probe = (zeile + " " + wort) if zeile else wort
+            if zeile and textbreite(probe, groesse, fett) > breite:
+                zeilen.append(zeile)
+                zeile = wort
+            else:
+                zeile = probe
+        zeilen.append(zeile)
+    return zeilen
+
+
+class Seite:
+    def __init__(self, groesse=A4):
+        self.teile = []
+        self.groesse = groesse
+
+    def text(self, x, y, s, groesse=10, fett=False, farbe=(0.11, 0.14, 0.2)):
+        self.teile.append(b"BT %.3f %.3f %.3f rg /%s %.1f Tf %.2f %.2f Td (" % (farbe + (b"F2" if fett else b"F1", groesse, x, y))
+                          + _pdf_text(s) + b") Tj ET")
+
+    def rechteck(self, x, y, b, h, farbe=(0, 0, 0)):
+        self.teile.append(b"%.3f %.3f %.3f rg %.3f %.3f %.3f %.3f re f" % (farbe + (x, y, b, h)))
+
+    def linie(self, x1, y1, x2, y2, farbe=(0.8, 0.82, 0.86), staerke=0.6):
+        self.teile.append(b"%.3f %.3f %.3f RG %.2f w [] 0 d %.3f %.3f m %.3f %.3f l S" % (farbe + (staerke, x1, y1, x2, y2)))
+
+    def rahmen(self, x, y, b, h, farbe=(0.8, 0.82, 0.86), gestrichelt=True, staerke=0.6):
+        strich = b"[3 2] 0 d " if gestrichelt else b"[] 0 d "
+        self.teile.append(b"%.3f %.3f %.3f RG %.2f w " % (farbe + (staerke,)) + strich + b"%.3f %.3f %.3f %.3f re S" % (x, y, b, h))
+
+    def inhalt(self):
+        return b"\n".join(self.teile)
+
+
+def dokument(seiten, titel="Lehrerkalender MT"):
+    objekte = []
+
+    def obj(inhalt):
+        objekte.append(inhalt)
+        return len(objekte)
+
+    katalog = obj(None)
+    seiten_obj = obj(None)
+    f1 = obj(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
+    f2 = obj(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
+    kinder = []
+    for s in seiten:
+        daten = s.inhalt()
+        strom = obj(b"<< /Length %d >>\nstream\n" % len(daten) + daten + b"\nendstream")
+        breite, hoehe = getattr(s, "groesse", A4)
+        kinder.append(obj(b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %.2f %.2f] /Contents %d 0 R "
+                          b"/Resources << /Font << /F1 %d 0 R /F2 %d 0 R >> >> >>" % (seiten_obj, breite, hoehe, strom, f1, f2)))
+    objekte[katalog - 1] = b"<< /Type /Catalog /Pages %d 0 R >>" % seiten_obj
+    objekte[seiten_obj - 1] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % k for k in kinder), len(kinder))
+    info = obj(b"<< /Title (" + _pdf_text(titel) + b") /Producer (Lehrerkalender MT) >>")
+    aus = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    lagen = []
+    for i, inhalt in enumerate(objekte, 1):
+        lagen.append(len(aus))
+        aus += b"%d 0 obj\n" % i + inhalt + b"\nendobj\n"
+    xref = len(aus)
+    aus += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objekte) + 1)
+    for lage in lagen:
+        aus += b"%010d 00000 n \n" % lage
+    aus += b"trailer\n<< /Size %d /Root %d 0 R /Info %d 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objekte) + 1, katalog, info, xref)
+    return bytes(aus)
+
+
+BLAU = (0, 0.388, 0.612)
+LEISE = (0.365, 0.404, 0.475)
