@@ -1,6 +1,7 @@
 'use strict';
-// Rahmen der App: Anmeldung pruefen, Seitenleiste, Bereiche ueber die Adresse (#start, #konto, #admin-...).
-// Stufe A: Start (Einrichtungsliste), Mein Konto (Passwort, zweiter Faktor), Admin (admin.js).
+// Rahmen der App: Anmeldung pruefen, Seitenleiste, Bereiche ueber die Adresse (#start, #einstellungen, #admin-...).
+// Start = Wochenplan (woche.js), Einstellungen = Stundenplan (stundenplan.js) und Konto (Passwort, zweiter Faktor),
+// Admin (admin.js).
 const el = L.el;
 const inhalt = document.getElementById('inhalt');
 const S = { konto: null, update: null };
@@ -10,12 +11,12 @@ const BEREICHE = [
   { a: 'planung', text: 'Planung', sym: 'plan', spaeter: 'Stufe C' },
   { a: 'pruefungen', text: 'Prüfungen', sym: 'pruefung', spaeter: 'Stufe D' },
   { a: 'formulare', text: 'Formulare', sym: 'formular', spaeter: 'Stufe F' },
-  { a: 'konto', text: 'Mein Konto', sym: 'konto' },
+  { a: 'einstellungen', text: 'Einstellungen', sym: 'einstellungen' },
   { a: 'admin-konten', text: 'Konten', sym: 'lehrkraefte', admin: true, gruppe: 'Admin' },
   { a: 'admin-grunddaten', text: 'Grunddaten', sym: 'pakete', admin: true },
   { a: 'admin-klassen', text: 'Klassen', sym: 'klassen', admin: true },
   { a: 'admin-noten', text: 'Notenschlüssel', sym: 'schluessel', admin: true },
-  { a: 'admin-system', text: 'System', sym: 'einstellungen', admin: true },
+  { a: 'admin-system', text: 'System', sym: 'admin', admin: true },
 ];
 
 function titelSetzen(text) {
@@ -42,12 +43,13 @@ function navigation(aktiv) {
 
 async function zeigen() {
   const ziel = (location.hash || '#start').slice(1);
-  const bereich = BEREICHE.find(b => b.a === ziel && !b.spaeter && (!b.admin || S.konto.rolle === 'admin')) || BEREICHE[0];
+  const haupt = ziel.startsWith('einstellungen') ? 'einstellungen' : ziel;
+  const bereich = BEREICHE.find(b => b.a === haupt && !b.spaeter && (!b.admin || S.konto.rolle === 'admin')) || BEREICHE[0];
   navigation(bereich.a);
   L.setzen(inhalt, el('p', { class: 'leise', text: 'Lädt …' }));
   try {
     if (bereich.a === 'start') await startZeigen();
-    else if (bereich.a === 'konto') await kontoZeigen();
+    else if (bereich.a === 'einstellungen') await einstellungenZeigen(ziel === 'einstellungen-konto' ? 'konto' : 'stundenplan');
     else await Admin.zeigen(bereich.a, inhalt, titelSetzen);
   } catch (e) {
     if (e.status === 401) { location.href = '/anmelden'; return; }
@@ -55,11 +57,13 @@ async function zeigen() {
   }
 }
 
-// --- Start: in Stufe A eine Einrichtungsliste; der Wochenplan kommt mit Stufe B ---
+// --- Start: Hinweisleiste und Wochenplan; fuer Admins solange die Einrichtungsliste, bis alles da ist ---
 
 async function startZeigen() {
   titelSetzen('Start');
-  const teile = [el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: 'Hallo ' + S.konto.name.split(' ')[0] }))];
+  const wochenOrt = el('div', { class: 'stapel', style: 'gap:12px' });
+  const teile = [el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: 'Hallo ' + S.konto.name.split(' ')[0] }),
+    el('span', { class: 'leise', text: L.tag(L.heute(), true) }))];
   if (S.konto.rolle === 'admin') {
     const g = await L.api('GET', '/api/grunddaten');
     const k = await L.api('GET', '/api/admin/konten');
@@ -72,30 +76,45 @@ async function startZeigen() {
       ['Konferenz-Notenschlüssel je Bildungsgang', g.bildungsgaenge.length > 0 && g.bildungsgaenge.every(b =>
         g.notenschluessel.some(s => s.art === 'konferenz' && s.bildungsgang_id === b.id)), 'admin-noten'],
       ['Kolleginnen und Kollegen eingeladen', k.konten.length > 1 || k.einladungen.some(e => e.stand === 'offen'), 'admin-konten'],
-      ['Zweiter Faktor für dein Konto', S.konto.zweiter_faktor, 'konto'],
+      ['Zweiter Faktor für dein Konto', S.konto.zweiter_faktor, 'einstellungen-konto'],
     ];
     const fertig = schritte.filter(s => s[1]).length;
-    teile.push(el('div', { class: 'karte stapel', style: 'max-width:640px' },
-      el('div', { class: 'zeile' }, el('h2', { text: 'Einrichtung' }),
-        el('span', { class: 'rechts' }, el('span', { class: 'chip ' + (fertig === schritte.length ? 'gruen' : 'gelb'), text: fertig + ' von ' + schritte.length }))),
-      el('p', { class: 'leise klein', text: 'Die Grunddaten gelten für alle Lehrkräfte. Ab Stufe B tragen alle ihren Stundenplan ein und brauchen dafür Klassen und Zeitraster.' }),
-      el('div', { class: 'einrichtung-liste' }, schritte.map(([text, ok, ziel]) =>
-        el('a', { href: '#' + ziel, class: ok ? 'ok' : null }, L.symbol(ok ? 'ok' : 'warnung'), el('span', { text }))))));
+    if (fertig < schritte.length) {
+      teile.push(el('details', { class: 'karte einrichtung' },
+        el('summary', { class: 'zeile' }, el('b', { text: 'Einrichtung' }),
+          el('span', { class: 'chip gelb', text: fertig + ' von ' + schritte.length }),
+          el('span', { class: 'leise klein', text: 'Grunddaten für alle Lehrkräfte' })),
+        el('div', { class: 'einrichtung-liste', style: 'margin-top:8px' }, schritte.map(([text, ok, ziel]) =>
+          el('a', { href: '#' + ziel, class: ok ? 'ok' : null }, L.symbol(ok ? 'ok' : 'warnung'), el('span', { text }))))));
+    }
   }
-  teile.push(el('div', { class: 'banner', style: 'max-width:640px' },
-    el('b', { text: 'Was hier noch kommt: ' }), 'Wochenplan aller Klassen mit Hinweisen (Stufe B), Unterrichtsplanung (Stufe C), Prüfungen (Stufe D).'));
+  teile.push(wochenOrt);
   L.setzen(inhalt, teile);
+  await Woche.zeigen(wochenOrt);
+}
+
+// --- Einstellungen: Stundenplan und Konto ---
+
+async function einstellungenZeigen(reiter) {
+  titelSetzen('Einstellungen');
+  const ort = el('div', { class: 'stapel' });
+  const tab = (id, ziel, text, sym) => el('a', { class: 'knopf' + (reiter === id ? ' an' : ''), href: '#' + ziel }, L.symbol(sym), text);
+  L.setzen(inhalt,
+    el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: reiter === 'konto' ? 'Mein Konto' : 'Stundenplan' }),
+      el('div', { class: 'segment', role: 'group', 'aria-label': 'Einstellungen' },
+        tab('stundenplan', 'einstellungen', 'Stundenplan', 'spalten'), tab('konto', 'einstellungen-konto', 'Konto und Sicherheit', 'schloss'))),
+    ort);
+  if (reiter === 'konto') kontoZeigen(ort);
+  else await Stundenplan.zeigen(ort);
 }
 
 // --- Mein Konto: Passwort und zweiter Faktor ---
 
-async function kontoZeigen() {
-  titelSetzen('Mein Konto');
+function kontoZeigen(ort) {
   const k = S.konto;
   const alt = el('input', { type: 'password', autocomplete: 'current-password' });
   const neu = el('input', { type: 'password', autocomplete: 'new-password', minlength: 8 });
-  L.setzen(inhalt,
-    el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: 'Mein Konto' })),
+  L.setzen(ort,
     el('div', { class: 'zwei-spalten' },
       el('form', { class: 'karte stapel', onsubmit: async ev => {
         ev.preventDefault();

@@ -7,6 +7,7 @@ LEHRERKALENDER_BIND, LEHRERKALENDER_OHNE_TLS.
 
 Alle Aenderungen laufen ueber POST mit JSON und dem Kopf X-Lehrerkalender: 1 (Schutz vor fremden Formularen).
 """
+import datetime
 import json
 import mimetypes
 import os
@@ -18,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, db, grunddaten, konten, notenschluessel, qr, totp, updates
+from . import VERSION, db, grunddaten, konten, notenschluessel, qr, stundenplan, totp, updates
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -202,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
         except Fehler as f:
             self.antwort(f.status, {"fehler": f.meldung})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
-                updates.UpdateFehler) as f:
+                stundenplan.StundenplanFehler, updates.UpdateFehler) as f:
             self.antwort(400, {"fehler": str(f)})
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -430,8 +431,15 @@ def _nur_id(funktion):
 
 
 def _zeitraster(con, daten):
+    """Raster speichern und die Stundenplaene aller Lehrkraefte auf geaenderte Zeiten nachziehen (gleiche Bezeichnung)."""
     bid = daten.get("bildungsgang_id")
+    vorher = stundenplan.raster_vorher(con)
     grunddaten.zeitraster_speichern(con, None if bid in (None, "", 0) else _ganzzahl(bid), daten.get("bloecke"))
+    stundenplan.raster_nachziehen(con, vorher)
+
+
+def _a_woche(con, daten):
+    stundenplan.a_woche_setzen(con, daten.get("a_woche"))
 
 
 def api_schluessel_vorgabe(h, con, daten):
@@ -485,6 +493,47 @@ def api_protokoll(h, con, daten):
     zeilen = con.execute("SELECT zeit, wer, art, daten FROM protokoll ORDER BY id DESC LIMIT 200")
     h.antwort(200, {"protokoll": [{"zeit": z["zeit"], "wer": z["wer"], "art": z["art"], "daten": json.loads(z["daten"])}
                                   for z in zeilen]})
+
+
+# --- Stundenplan, Wochenplan, Aenderungen, Termine (Stufe B) ---
+
+def api_stundenplan(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, stundenplan.editor(con, k["id"]))
+
+
+def _stundenplan_schritt(funktion):
+    """Aenderung am eigenen Stundenplan; Antwort ist der neue Stand des Editors."""
+    def schritt(h, con, daten, vid=None):
+        k = h.konto(con)
+        with db.transaktion(con):
+            neu = funktion(con, k["id"], daten, None if vid is None else _ganzzahl(vid))
+        antwort = stundenplan.editor(con, k["id"])
+        if isinstance(neu, int):
+            antwort["neu"] = neu
+        h.antwort(200, antwort)
+    return schritt
+
+
+def api_woche(h, con, daten):
+    k = h.konto(con)
+    try:
+        montag = db.heute() if not h.abfrage("montag") else datetime.date.fromisoformat(h.abfrage("montag"))
+    except ValueError:
+        raise Fehler(400, "Ungültiges Datum.")
+    if not h.abfrage("montag") and montag.isoweekday() > 5:   # am Wochenende schon die naechste Woche
+        montag = montag + datetime.timedelta(days=8 - montag.isoweekday())
+    h.antwort(200, stundenplan.woche(con, k["id"], montag))
+
+
+def _eigene_schritt(funktion):
+    """Aenderung oder Termin der eigenen Woche; Antwort {ok, id}. Die Oberflaeche laedt die Woche danach neu."""
+    def schritt(h, con, daten, oid=None):
+        k = h.konto(con)
+        with db.transaktion(con):
+            neu = funktion(con, k["id"], daten, None if oid is None else _ganzzahl(oid))
+        h.antwort(200, {"ok": True, "id": neu})
+    return schritt
 
 
 # --- System: Update und Sicherung ---
@@ -553,6 +602,7 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/admin/lernfeld/" + ID + "/loeschen", _grunddaten_schritt("lernfeld_geloescht",
                                                                              _nur_id(grunddaten.lernfeld_loeschen), True)),
     ("POST", r"/api/admin/zeitraster", _grunddaten_schritt("zeitraster_geaendert", _zeitraster)),
+    ("POST", r"/api/admin/a-woche", _grunddaten_schritt("a_woche_geaendert", _a_woche)),
     ("POST", r"/api/admin/ferien", _grunddaten_schritt("ferien_angelegt", grunddaten.ferien_anlegen)),
     ("POST", r"/api/admin/ferien/" + ID + "/loeschen", _grunddaten_schritt("ferien_geloescht", _nur_id(grunddaten.ferien_loeschen), True)),
     ("POST", r"/api/admin/klasse", _grunddaten_schritt("klasse_angelegt", grunddaten.klasse_speichern)),
@@ -566,6 +616,21 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/notenschluessel/" + ID + "/kopieren", api_schluessel_kopieren),
     ("POST", r"/api/notenschluessel/" + ID + "/loeschen", api_schluessel_loeschen),
     ("GET", r"/api/admin/protokoll", api_protokoll),
+    ("GET", r"/api/stundenplan", api_stundenplan),
+    ("POST", r"/api/stundenplan/version", _stundenplan_schritt(lambda con, lid, d, _: stundenplan.version_anlegen(con, lid, d))),
+    ("POST", r"/api/stundenplan/version/" + ID, _stundenplan_schritt(lambda con, lid, d, vid: stundenplan.version_aendern(con, lid, vid, d))),
+    ("POST", r"/api/stundenplan/version/" + ID + "/loeschen",
+     _stundenplan_schritt(lambda con, lid, d, vid: stundenplan.version_loeschen(con, lid, vid))),
+    ("POST", r"/api/stundenplan/version/" + ID + "/feld",
+     _stundenplan_schritt(lambda con, lid, d, vid: stundenplan.feld_setzen(con, lid, vid, d))),
+    ("POST", r"/api/stundenplan/version/" + ID + "/tag-kopieren",
+     _stundenplan_schritt(lambda con, lid, d, vid: stundenplan.tag_kopieren(con, lid, vid, d.get("von"), d.get("nach")))),
+    ("GET", r"/api/woche", api_woche),
+    ("POST", r"/api/aenderung", _eigene_schritt(lambda con, lid, d, _: stundenplan.aenderung_anlegen(con, lid, d))),
+    ("POST", r"/api/aenderung/" + ID + "/loeschen", _eigene_schritt(lambda con, lid, d, aid: stundenplan.aenderung_loeschen(con, lid, aid))),
+    ("POST", r"/api/termin", _eigene_schritt(lambda con, lid, d, _: stundenplan.termin_speichern(con, lid, d))),
+    ("POST", r"/api/termin/" + ID, _eigene_schritt(lambda con, lid, d, tid: stundenplan.termin_speichern(con, lid, d, tid))),
+    ("POST", r"/api/termin/" + ID + "/loeschen", _eigene_schritt(lambda con, lid, d, tid: stundenplan.termin_loeschen(con, lid, tid))),
     ("GET", r"/api/admin/sicherung\.zip", api_sicherung),
     ("GET", r"/api/admin/update", api_update),
     ("POST", r"/api/admin/update", api_update_anfordern),

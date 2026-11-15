@@ -144,6 +144,57 @@ MIGRATIONEN = [
         art TEXT NOT NULL,
         daten TEXT NOT NULL DEFAULT '{}')
     """,
+    # 2: Stufe B: Stundenplan je Lehrkraft mit Versionen (gelten ab einem Datum) und A/B-Wochen, einmalige Aenderungen
+    #    (Ausfall, vertreten werden, Verschieben, Vertretung, Zusatzstunde), eigene Termine und Merker.
+    #    Bloecke stehen mit ihren Uhrzeiten drin (nicht als Verweis), damit alte Versionen ihre Zeiten behalten.
+    """
+    CREATE TABLE stundenplan_version (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        ab TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        erstellt TEXT NOT NULL,
+        UNIQUE (lehrkraft_id, ab));
+    CREATE TABLE stundenplan_eintrag (
+        id INTEGER PRIMARY KEY,
+        version_id INTEGER NOT NULL REFERENCES stundenplan_version(id) ON DELETE CASCADE,
+        wochentag INTEGER NOT NULL CHECK (wochentag BETWEEN 1 AND 6),
+        beginn TEXT NOT NULL,
+        ende TEXT NOT NULL,
+        klasse_id INTEGER NOT NULL REFERENCES klasse(id),
+        woche TEXT NOT NULL DEFAULT 'alle' CHECK (woche IN ('alle', 'A', 'B')),
+        UNIQUE (version_id, wochentag, beginn, woche));
+    CREATE TABLE aenderung (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        art TEXT NOT NULL CHECK (art IN ('ausfall', 'vertreten', 'verschoben', 'vertretung', 'zusatz')),
+        datum TEXT NOT NULL,
+        beginn TEXT NOT NULL,
+        ende TEXT NOT NULL,
+        klasse_id INTEGER REFERENCES klasse(id),
+        klasse_text TEXT NOT NULL DEFAULT '',
+        ziel_datum TEXT,
+        ziel_beginn TEXT,
+        ziel_ende TEXT,
+        wer TEXT NOT NULL DEFAULT '',
+        grund TEXT NOT NULL DEFAULT '',
+        erstellt TEXT NOT NULL);
+    CREATE INDEX aenderung_datum ON aenderung (lehrkraft_id, datum);
+    CREATE INDEX aenderung_ziel ON aenderung (lehrkraft_id, ziel_datum);
+    CREATE TABLE termin (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        art TEXT NOT NULL CHECK (art IN ('dienst', 'privat', 'merker')),
+        datum TEXT NOT NULL,
+        bis TEXT,
+        beginn TEXT,
+        ende TEXT,
+        klasse_id INTEGER REFERENCES klasse(id) ON DELETE CASCADE,
+        titel TEXT NOT NULL,
+        notiz TEXT NOT NULL DEFAULT '',
+        erstellt TEXT NOT NULL);
+    CREATE INDEX termin_datum ON termin (lehrkraft_id, datum)
+    """,
 ]
 
 

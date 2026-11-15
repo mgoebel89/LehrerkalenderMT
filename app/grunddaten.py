@@ -85,7 +85,7 @@ def alles(con):
             "id": b["id"], "name": b["name"], "kuerzel": b["kuerzel"], "einheit": b["einheit"], "aktiv": bool(b["aktiv"]),
             "stufen": stufen, "lernfelder": lernfelder, "zeitraster": zeitraster(con, b["id"], eigenes=True)})
     return {"bildungsgaenge": bildungsgaenge, "zeitraster_schule": zeitraster(con, None),
-            "ferien": ferien(con), "klassen": klassen(con)}
+            "ferien": ferien(con), "klassen": klassen(con), "a_woche": db.einstellung(con, "a_woche", "ungerade")}
 
 
 # --- Bildungsgaenge und Stufen ---
@@ -284,5 +284,8 @@ def klasse_speichern(con, daten, kid=None):
 
 
 def klasse_loeschen(con, kid):
-    # ab Stufe B haengen Stundenplaene und Planung an der Klasse; dann wird hier vorher geprueft
+    # an der Klasse haengen Stundenplaene und Aenderungen aller Lehrkraefte: dann nur noch "nicht aktiv"
+    if con.execute("SELECT 1 FROM stundenplan_eintrag WHERE klasse_id = ? UNION SELECT 1 FROM aenderung WHERE klasse_id = ?",
+                   (kid, kid)).fetchone():
+        raise GrunddatenFehler("Die Klasse steht in Stundenplänen. Bitte stattdessen auf „nicht aktiv“ stellen.")
     con.execute("DELETE FROM klasse WHERE id = ?", (kid,))

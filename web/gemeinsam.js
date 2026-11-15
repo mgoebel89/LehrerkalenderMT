@@ -111,6 +111,18 @@ const L = {
     refresh: 'M21 12a9 9 0 0 1-15.5 6.2L3 16M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M3 21v-5h5',
     liste: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
     abmelden: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+    jetzt: 'M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20M10 8l6 4-6 4z',
+    kreis: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18',
+    merker: 'M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z',
+    ausfall: 'M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 2v4M8 2v4M3 10h18M10 13l4 4M14 13l-4 4',
+    zusatz: 'M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 2v4M8 2v4M3 10h18M12 13v6M9 16h6',
+    vertretung: 'M17 2l4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3',
+    verschieben: 'M8 3 4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4',
+    offen: 'M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20M12 7v6M12 17h.01',
+    spalten: 'M3 4h18v16H3zM9 4v16M15 4v16',
+    info: 'M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20M12 16v-4M12 8h.01',
+    mehr: 'M5 12h.01M12 12h.01M19 12h.01',
+    undo: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
   },
 
   // Einschaetzung in 4 Stufen: gespeichert wird immer 1 bis 4, die Klasse zeigt Smileys oder Zahlen

@@ -286,15 +286,27 @@ const Admin = (() => {
   }
 
   function ferienAnsicht() {
-    return el('div', { class: 'karte stapel', style: 'max-width:760px' },
+    return el('div', { class: 'stapel', style: 'max-width:760px' }, abWochenKarte(), el('div', { class: 'karte stapel' },
       el('div', { class: 'zeile' }, el('h2', { text: 'Ferien und freie Tage' }),
         el('span', { class: 'rechts' }, el('button', { type: 'button', class: 'haupt klein', onclick: ferienNeu }, L.symbol('plus'), 'Ferien'))),
-      el('p', { class: 'leise klein', text: 'Gelten für alle Klassen. Gesetzliche Feiertage in Rheinland-Pfalz rechnet das Programm selbst aus. Das Schulkalender-Abo kommt mit Stufe B.' }),
+      el('p', { class: 'leise klein', text: 'Gelten für alle Klassen. Gesetzliche Feiertage in Rheinland-Pfalz (auch Fronleichnam und Allerheiligen) rechnet das Programm selbst aus; an diesen Tagen fällt der Stundenplan weg.' }),
       G.ferien.length ? el('table', { class: 'liste' }, el('tbody', {}, G.ferien.map(f => el('tr', {},
         el('td', {}, el('b', { text: f.name })), el('td', { class: 'mono', text: L.tag(f.von, true) + (f.bis !== f.von ? ' – ' + L.tag(f.bis, true) : '') }),
         el('td', { class: 'knoepfe' }, el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Entfernen',
           onclick: () => loeschenFragen(f.name + ' entfernen?', 'Die Ferien verschwinden aus allen Kalendern.', '/api/admin/ferien/' + f.id + '/loeschen') }, L.symbol('muell')))))))
-        : el('p', { class: 'leise', text: 'Noch keine Ferien eingetragen.' }));
+        : el('p', { class: 'leise', text: 'Noch keine Ferien eingetragen.' })));
+  }
+
+  // A/B-Wochen nach Kalenderwoche: welche KW sind A-Wochen?
+  function abWochenKarte() {
+    const wahl = el('select', { 'aria-label': 'A-Wochen', style: 'width:auto', onchange: async () => {
+      try { await gd('/api/admin/a-woche', { a_woche: wahl.value }); L.meldung('Gespeichert.'); grunddatenZeichnen(); } catch (e) { L.meldung(e.message, true); }
+    } }, [['ungerade', 'ungeraden'], ['gerade', 'geraden']].map(([w, t]) =>
+      el('option', { value: w, text: t + ' Kalenderwochen', selected: G.a_woche === w ? true : null })));
+    return el('div', { class: 'karte stapel' },
+      el('h2', { text: 'A- und B-Wochen' }),
+      el('div', { class: 'zeile' }, el('span', { text: 'A-Wochen sind die' }), wahl),
+      el('p', { class: 'leise klein', text: 'Gilt für alle Stundenpläne mit Einträgen „nur A“ oder „nur B“. Ferien unterbrechen die Folge nicht.' }));
   }
 
   async function ferienNeu() {
