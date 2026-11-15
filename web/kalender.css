@@ -154,3 +154,23 @@ table.gp { border-collapse: separate; border-spacing: 0; width: 100%; min-width:
 .marke-symbol { width: 26px; height: 26px; flex: none; display: block; }
 .gk .gr { font-size: .66rem; font-weight: 700; padding: 0 5px; border-radius: 999px; background: var(--blau-hell); color: var(--blau); }
 .wp-b .kl .chip.gr { background: var(--blau-hell); border-color: var(--blau-mittel); color: var(--blau); }
+
+/* ---- Stufe C1: Planung und Bibliothek ---- */
+.strang-wahl { gap: 6px; }
+.chip-knopf.an { background: var(--blau-hell); border-color: var(--blau); color: var(--blau); }
+.lp td.auf { max-width: 340px; }
+.lp td.auf .thema-name { min-height: 28px; padding: 2px 4px; font-weight: 600; font-size: .85rem; color: var(--text); max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; text-align: left; }
+.lp td.auf[draggable] { cursor: grab; }
+.lp td.auf.ziel { box-shadow: inset 0 3px 0 var(--blau); }
+.lp td.t.kw { width: 34px; min-width: 34px; }
+.lp td.t .anzahl { position: absolute; left: 0; right: 0; top: 10px; text-align: center; font-family: var(--mono); font-size: .6rem; font-weight: 700; color: #fff; pointer-events: none; }
+.lp td.t .nadel { position: absolute; left: 1px; top: -1px; color: var(--rot); pointer-events: none; }
+.lp td.t .nadel .symbol { width: 13px; height: 13px; }
+.stufe-titel { margin-top: 6px; font-size: 1rem; color: var(--leise); text-transform: uppercase; letter-spacing: .06em; }
+details.lf-karte summary { cursor: pointer; list-style: none; }
+details.lf-karte summary::-webkit-details-marker { display: none; }
+.gk .lf { font-family: var(--mono); font-size: .62rem; font-weight: 700; color: var(--leise); }
+.wp-b .th { font-size: .78rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
+.wp-b .th .teil { color: var(--leise); font-family: var(--mono); font-size: .68rem; }
+.lp tr.paket td .kleben { position: sticky; left: 10px; }

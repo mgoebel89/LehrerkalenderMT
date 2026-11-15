@@ -13,6 +13,11 @@ UHRZEIT = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 EINHEITEN = ("lernfeld", "modul")
 
 
+def natuerlich(text):
+    """Sortierschluessel, der Zahlen als Zahlen behandelt: LF 7 vor LF 10."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", text or "")]
+
+
 class GrunddatenFehler(Exception):
     """Fehler mit einer Meldung, die direkt in der Oberflaeche erscheinen darf."""
 
@@ -76,7 +81,7 @@ def alles(con):
         stufen = [dict(s) for s in con.execute("SELECT id, name, reihenfolge FROM stufe WHERE bildungsgang_id = ? "
                                                "ORDER BY reihenfolge, name", (b["id"],))]
         lernfelder = []
-        for lf in con.execute("SELECT * FROM lernfeld WHERE bildungsgang_id = ? ORDER BY nummer", (b["id"],)):
+        for lf in sorted(con.execute("SELECT * FROM lernfeld WHERE bildungsgang_id = ?", (b["id"],)), key=lambda z: natuerlich(z["nummer"])):
             anteile = {str(a["stufe_id"]): a["stunden"] for a in
                        con.execute("SELECT stufe_id, stunden FROM lernfeld_anteil WHERE lernfeld_id = ?", (lf["id"],))}
             lernfelder.append({"id": lf["id"], "nummer": lf["nummer"], "name": lf["name"], "stufe_id": lf["stufe_id"],
@@ -85,7 +90,8 @@ def alles(con):
             "id": b["id"], "name": b["name"], "kuerzel": b["kuerzel"], "einheit": b["einheit"], "aktiv": bool(b["aktiv"]),
             "stufen": stufen, "lernfelder": lernfelder, "zeitraster": zeitraster(con, b["id"], eigenes=True)})
     return {"bildungsgaenge": bildungsgaenge, "zeitraster_schule": zeitraster(con, None),
-            "ferien": ferien(con), "klassen": klassen(con), "a_woche": db.einstellung(con, "a_woche", "ungerade")}
+            "ferien": ferien(con), "klassen": klassen(con), "a_woche": db.einstellung(con, "a_woche", "ungerade"),
+            "schuljahre": schuljahre(con)}
 
 
 # --- Bildungsgaenge und Stufen ---
@@ -183,6 +189,7 @@ def lernfeld_speichern(con, daten, lid=None):
 
 
 def lernfeld_loeschen(con, lid):
+    # Bibliothek haengt am Lernfeld (wird mitgeloescht); Planungen und Stundenplaene verlieren nur die Zuordnung
     con.execute("DELETE FROM lernfeld WHERE id = ?", (lid,))
 
 
@@ -249,6 +256,43 @@ def ferien_loeschen(con, fid):
     con.execute("DELETE FROM ferien WHERE id = ?", (fid,))
 
 
+# --- Schuljahre (erster und letzter Unterrichtstag; die Planung gilt je Schuljahr) ---
+
+def schuljahre(con):
+    return [dict(z) for z in con.execute("SELECT id, name, beginn, ende FROM schuljahr ORDER BY beginn")]
+
+
+def schuljahr_speichern(con, daten, sid=None):
+    name = _text(daten.get("name"), "einen Namen (z. B. 2026/27)", max_len=20)
+    beginn, ende = _datum(daten.get("beginn"), "den ersten Unterrichtstag"), _datum(daten.get("ende"), "den letzten Unterrichtstag")
+    if ende <= beginn:
+        raise GrunddatenFehler("Der letzte Unterrichtstag muss nach dem ersten liegen.")
+    if con.execute("SELECT 1 FROM schuljahr WHERE name = ? AND id != ?", (name, sid or -1)).fetchone():
+        raise GrunddatenFehler("Das Schuljahr %s gibt es schon." % name)
+    anderes = con.execute("SELECT name FROM schuljahr WHERE beginn <= ? AND ende >= ? AND id != ?", (ende, beginn, sid or -1)).fetchone()
+    if anderes:
+        raise GrunddatenFehler("Der Zeitraum überschneidet sich mit dem Schuljahr %s." % anderes["name"])
+    if sid is None:
+        return con.execute("INSERT INTO schuljahr (name, beginn, ende) VALUES (?, ?, ?)", (name, beginn, ende)).lastrowid
+    if con.execute("SELECT 1 FROM schuljahr WHERE id = ?", (sid,)).fetchone() is None:
+        raise GrunddatenFehler("Dieses Schuljahr gibt es nicht.")
+    con.execute("UPDATE schuljahr SET name = ?, beginn = ?, ende = ? WHERE id = ?", (name, beginn, ende, sid))
+    return sid
+
+
+def schuljahr_loeschen(con, sid):
+    if con.execute("SELECT 1 FROM plan_thema WHERE schuljahr_id = ?", (sid,)).fetchone():
+        raise GrunddatenFehler("In diesem Schuljahr gibt es schon Planungen. Es lässt sich nicht mehr löschen.")
+    con.execute("DELETE FROM schuljahr WHERE id = ?", (sid,))
+
+
+def schuljahr_zum(con, datum):
+    """Das Schuljahr, in dem datum (date oder ISO) liegt, oder None."""
+    iso = datum if isinstance(datum, str) else datum.isoformat()
+    zeile = con.execute("SELECT id, name, beginn, ende FROM schuljahr WHERE beginn <= ? AND ende >= ?", (iso, iso)).fetchone()
+    return dict(zeile) if zeile else None
+
+
 # --- Klassen ---
 
 def klassen(con):
@@ -285,7 +329,7 @@ def klasse_speichern(con, daten, kid=None):
 
 def klasse_loeschen(con, kid):
     # an der Klasse haengen Stundenplaene und Aenderungen aller Lehrkraefte: dann nur noch "nicht aktiv"
-    if con.execute("SELECT 1 FROM stundenplan_eintrag WHERE klasse_id = ? UNION SELECT 1 FROM aenderung WHERE klasse_id = ?",
-                   (kid, kid)).fetchone():
+    if con.execute("SELECT 1 FROM stundenplan_eintrag WHERE klasse_id = ? UNION SELECT 1 FROM aenderung WHERE klasse_id = ? "
+                   "UNION SELECT 1 FROM plan_thema WHERE klasse_id = ?", (kid, kid, kid)).fetchone():
         raise GrunddatenFehler("Die Klasse steht in Stundenplänen. Bitte stattdessen auf „nicht aktiv“ stellen.")
     con.execute("DELETE FROM klasse WHERE id = ?", (kid,))

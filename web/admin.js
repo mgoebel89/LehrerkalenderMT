@@ -143,7 +143,7 @@ const Admin = (() => {
       L.setzen(ort,
         kopf('Grunddaten'),
         el('div', { class: 'segment', role: 'group', 'aria-label': 'Grunddaten' },
-          tab('bildungsgaenge', 'Bildungsgänge und Lernfelder', 'pakete'), tab('zeitraster', 'Zeitraster', 'uhr'), tab('ferien', 'Ferien', 'kalender')),
+          tab('bildungsgaenge', 'Bildungsgänge und Lernfelder', 'pakete'), tab('zeitraster', 'Zeitraster', 'uhr'), tab('ferien', 'Schuljahr und Ferien', 'kalender')),
         reiter === 'bildungsgaenge' ? bildungsgaengeAnsicht() : reiter === 'zeitraster' ? zeitrasterAnsicht() : ferienAnsicht());
     };
     grunddatenZeichnen();
@@ -286,7 +286,7 @@ const Admin = (() => {
   }
 
   function ferienAnsicht() {
-    return el('div', { class: 'stapel', style: 'max-width:760px' }, abWochenKarte(), el('div', { class: 'karte stapel' },
+    return el('div', { class: 'stapel', style: 'max-width:760px' }, schuljahrKarte(), abWochenKarte(), el('div', { class: 'karte stapel' },
       el('div', { class: 'zeile' }, el('h2', { text: 'Ferien und freie Tage' }),
         el('span', { class: 'rechts' }, el('button', { type: 'button', class: 'haupt klein', onclick: ferienNeu }, L.symbol('plus'), 'Ferien'))),
       el('p', { class: 'leise klein', text: 'Gelten für alle Klassen. Gesetzliche Feiertage in Rheinland-Pfalz (auch Fronleichnam und Allerheiligen) rechnet das Programm selbst aus; an diesen Tagen fällt der Stundenplan weg.' }),
@@ -295,6 +295,34 @@ const Admin = (() => {
         el('td', { class: 'knoepfe' }, el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Entfernen',
           onclick: () => loeschenFragen(f.name + ' entfernen?', 'Die Ferien verschwinden aus allen Kalendern.', '/api/admin/ferien/' + f.id + '/loeschen') }, L.symbol('muell')))))))
         : el('p', { class: 'leise', text: 'Noch keine Ferien eingetragen.' })));
+  }
+
+  // Schuljahre: erster und letzter Unterrichtstag (die Planung jeder Klasse gilt je Schuljahr)
+  function schuljahrKarte() {
+    return el('div', { class: 'karte stapel' },
+      el('div', { class: 'zeile' }, el('h2', { text: 'Schuljahr' }),
+        el('span', { class: 'rechts' }, el('button', { type: 'button', class: 'haupt klein', onclick: () => schuljahrBearbeiten(null) }, L.symbol('plus'), 'Schuljahr'))),
+      el('p', { class: 'leise klein', text: 'Erster und letzter Unterrichtstag. Die Planung jeder Klasse läuft über ein Schuljahr; was danach nicht mehr passt, zeigt sie rot.' }),
+      G.schuljahre.length ? el('table', { class: 'liste' }, el('tbody', {}, G.schuljahre.map(j => el('tr', { class: 'klickbar', tabindex: '0',
+        onclick: () => schuljahrBearbeiten(j), onkeydown: ev => { if (ev.key === 'Enter') schuljahrBearbeiten(j); } },
+      el('td', {}, el('b', { text: j.name })), el('td', { class: 'mono', text: L.tag(j.beginn, true) + ' – ' + L.tag(j.ende, true) }),
+      el('td', { class: 'knoepfe' }, L.symbol('stift'))))))
+        : el('p', { class: 'leise', text: 'Noch kein Schuljahr eingetragen.' }));
+  }
+
+  async function schuljahrBearbeiten(j) {
+    const name = el('input', { maxlength: 20, value: j ? j.name : '', placeholder: 'z. B. 2026/27' });
+    const beginn = el('input', { type: 'date', value: j ? j.beginn : '' });
+    const ende = el('input', { type: 'date', value: j ? j.ende : '' });
+    const r = await L.dialog({
+      titel: j ? 'Schuljahr ' + j.name : 'Neues Schuljahr',
+      inhalt: el('div', { class: 'felder' }, L.feld('Name', name),
+        el('div', { class: 'felder zwei' }, L.feld('Erster Unterrichtstag', beginn), L.feld('Letzter Unterrichtstag', ende)),
+        j ? el('div', {}, L.nebenknopf('Schuljahr löschen …', () => loeschenFragen('Schuljahr ' + j.name + ' löschen?',
+          'Geht nur, solange es darin noch keine Planung gibt.', '/api/admin/schuljahr/' + j.id + '/loeschen'))) : null),
+      speichern: () => gd(j ? '/api/admin/schuljahr/' + j.id : '/api/admin/schuljahr', { name: name.value, beginn: beginn.value, ende: ende.value }),
+    });
+    if (r) grunddatenZeichnen();
   }
 
   // A/B-Wochen nach Kalenderwoche: welche KW sind A-Wochen?

@@ -208,6 +208,46 @@ MIGRATIONEN = [
     ALTER TABLE stundenplan_eintrag ADD COLUMN gruppe_id INTEGER REFERENCES gruppe(id);
     ALTER TABLE aenderung ADD COLUMN gruppe_id INTEGER REFERENCES gruppe(id)
     """,
+    # 4: Stufe C1: Schuljahre (Admin), Bibliothek (Lernsituationen und Themen je Lernfeld, im Bildungsgang sichtbar),
+    #    Themenfolge je Strang (Klasse + Gruppe/ganze Klasse) und Schuljahr, optionales Lernfeld am Stundenplan-Block
+    """
+    CREATE TABLE schuljahr (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        beginn TEXT NOT NULL,
+        ende TEXT NOT NULL);
+    CREATE TABLE baustein (
+        id INTEGER PRIMARY KEY,
+        lernfeld_id INTEGER NOT NULL REFERENCES lernfeld(id) ON DELETE CASCADE,
+        art TEXT NOT NULL CHECK (art IN ('ls', 'thema')),
+        ls_id INTEGER REFERENCES baustein(id) ON DELETE CASCADE,
+        titel TEXT NOT NULL,
+        bloecke INTEGER NOT NULL DEFAULT 0,
+        hinweis TEXT NOT NULL DEFAULT '',
+        reihenfolge INTEGER NOT NULL DEFAULT 0,
+        besitzer_id INTEGER REFERENCES lehrkraft(id) ON DELETE SET NULL,
+        erstellt TEXT NOT NULL,
+        geaendert TEXT NOT NULL);
+    CREATE INDEX baustein_lf ON baustein (lernfeld_id, ls_id);
+    CREATE TABLE plan_thema (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        klasse_id INTEGER NOT NULL REFERENCES klasse(id),
+        gruppe_id INTEGER REFERENCES gruppe(id),
+        schuljahr_id INTEGER NOT NULL REFERENCES schuljahr(id),
+        reihenfolge INTEGER NOT NULL DEFAULT 0,
+        titel TEXT NOT NULL,
+        bloecke INTEGER NOT NULL DEFAULT 1,
+        lernfeld_id INTEGER REFERENCES lernfeld(id) ON DELETE SET NULL,
+        ls_titel TEXT NOT NULL DEFAULT '',
+        baustein_id INTEGER REFERENCES baustein(id) ON DELETE SET NULL,
+        hinweis TEXT NOT NULL DEFAULT '',
+        fest_datum TEXT,
+        fest_beginn TEXT,
+        erstellt TEXT NOT NULL);
+    CREATE INDEX plan_thema_strang ON plan_thema (lehrkraft_id, klasse_id, schuljahr_id);
+    ALTER TABLE stundenplan_eintrag ADD COLUMN lernfeld_id INTEGER REFERENCES lernfeld(id) ON DELETE SET NULL
+    """,
 ]
 
 

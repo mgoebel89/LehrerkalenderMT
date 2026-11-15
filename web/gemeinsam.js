@@ -123,6 +123,8 @@ const L = {
     info: 'M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20M12 16v-4M12 8h.01',
     mehr: 'M5 12h.01M12 12h.01M19 12h.01',
     undo: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
+    pin: 'M12 17v5M8 3h8M9 3v6l-3 4v2h12v-2l-3-4V3',
+    frist: 'M4 22V4M4 4h13l-2.5 4 2.5 4H4',
   },
 
   // Einschaetzung in 4 Stufen: gespeichert wird immer 1 bis 4, die Klasse zeigt Smileys oder Zahlen

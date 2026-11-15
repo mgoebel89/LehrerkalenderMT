@@ -68,6 +68,7 @@ const Stundenplan = (() => {
           onclick: () => feldBearbeiten(v, i + 1, z, hier) },
         hier.length ? hier.map(e => el('span', { class: 'gk', style: '--kl:' + farbe(e.klasse_id) },
           (klasse(e.klasse_id) || { name: '?' }).name, e.gruppe_id ? el('span', { class: 'gr', text: gruppenName(e.gruppe_id) }) : null,
+          e.lernfeld_id ? el('span', { class: 'lf', text: (E.lernfelder.find(l => l.id === e.lernfeld_id) || { nummer: '?' }).nummer }) : null,
           e.woche !== 'alle' ? el('span', { class: 'ab', text: e.woche }) : null)) : '+'));
         return td;
       })));
@@ -86,16 +87,23 @@ const Stundenplan = (() => {
     const kSel = klassenAuswahl(z, eintrag ? eintrag.klasse_id : null, '– frei –');
     const gSel = el('select', { 'aria-label': 'Gruppe' });
     const gFeld = L.feld('Gruppe', gSel);
-    const fuellen = gewaehlt => {
+    const lfSel = el('select', { 'aria-label': 'Lernfeld' });
+    const lfFeld = L.feld('Lernfeld dieses Blocks', lfSel, 'nur bei parallelen Lernfeldern: dann fließen nur dessen Themen hierher');
+    const fuellen = (gewaehlt, lfGewaehlt) => {
       const liste = kSel.value ? gruppenVon(kSel.value) : [];
       L.setzen(gSel, el('option', { value: '', text: 'ganze Klasse' }),
         liste.map(g => el('option', { value: g.id, text: g.name, selected: g.id === gewaehlt ? true : null })));
       gFeld.hidden = !liste.length;
+      const k = kSel.value ? klasse(Number(kSel.value)) : null;
+      const lfs = k ? E.lernfelder.filter(l => l.bildungsgang_id === k.bildungsgang_id) : [];
+      L.setzen(lfSel, el('option', { value: '', text: '– alle Themen der Folge –' }),
+        lfs.map(l => el('option', { value: l.id, text: l.nummer + ' ' + l.name, selected: l.id === lfGewaehlt ? true : null })));
+      lfFeld.hidden = !lfs.length;
     };
-    kSel.addEventListener('change', () => fuellen(null));
-    fuellen(eintrag ? eintrag.gruppe_id : null);
-    return { teil: el('div', { class: 'felder zwei' }, L.feld(beschriftung, kSel), gFeld),
-      wert: woche => ({ klasse_id: kSel.value || null, gruppe_id: gSel.value || null, woche }) };
+    kSel.addEventListener('change', () => fuellen(null, null));
+    fuellen(eintrag ? eintrag.gruppe_id : null, eintrag ? eintrag.lernfeld_id : null);
+    return { teil: el('div', { class: 'felder' }, el('div', { class: 'felder zwei' }, L.feld(beschriftung, kSel), gFeld), lfFeld),
+      wert: woche => ({ klasse_id: kSel.value || null, gruppe_id: gSel.value || null, lernfeld_id: lfSel.value || null, woche }) };
   }
 
   async function feldBearbeiten(v, tag, z, hier) {

@@ -8,7 +8,7 @@ const S = { konto: null, update: null };
 
 const BEREICHE = [
   { a: 'start', text: 'Start', sym: 'start' },
-  { a: 'planung', text: 'Planung', sym: 'plan', spaeter: 'Stufe C' },
+  { a: 'planung', text: 'Planung', sym: 'plan' },
   { a: 'pruefungen', text: 'Prüfungen', sym: 'pruefung', spaeter: 'Stufe D' },
   { a: 'formulare', text: 'Formulare', sym: 'formular', spaeter: 'Stufe F' },
   { a: 'einstellungen', text: 'Einstellungen', sym: 'einstellungen' },
@@ -43,13 +43,14 @@ function navigation(aktiv) {
 
 async function zeigen() {
   const ziel = (location.hash || '#start').slice(1);
-  const haupt = ziel.startsWith('einstellungen') ? 'einstellungen' : ziel;
+  const haupt = ziel.startsWith('einstellungen') ? 'einstellungen' : ziel.startsWith('planung') ? 'planung' : ziel;
   const bereich = BEREICHE.find(b => b.a === haupt && !b.spaeter && (!b.admin || S.konto.rolle === 'admin')) || BEREICHE[0];
   navigation(bereich.a);
   L.setzen(inhalt, el('p', { class: 'leise', text: 'Lädt …' }));
   try {
     if (bereich.a === 'start') await startZeigen();
     else if (bereich.a === 'einstellungen') await einstellungenZeigen(ziel === 'einstellungen-konto' ? 'konto' : 'stundenplan');
+    else if (bereich.a === 'planung') await planungZeigen(ziel === 'planung-bibliothek' ? 'bibliothek' : 'planung');
     else await Admin.zeigen(bereich.a, inhalt, titelSetzen);
   } catch (e) {
     if (e.status === 401) { location.href = '/anmelden'; return; }
@@ -71,6 +72,7 @@ async function startZeigen() {
       ['Bildungsgänge mit Stufen angelegt', g.bildungsgaenge.length > 0 && g.bildungsgaenge.every(b => b.stufen.length), 'admin-grunddaten'],
       ['Lernfelder bzw. Module mit Stundenansatz', g.bildungsgaenge.some(b => b.lernfelder.length), 'admin-grunddaten'],
       ['Zeitraster der Schule', g.zeitraster_schule.length > 0, 'admin-grunddaten'],
+      ['Schuljahr (erster und letzter Unterrichtstag)', g.schuljahre.length > 0, 'admin-grunddaten'],
       ['Ferien des Schuljahres', g.ferien.length > 0, 'admin-grunddaten'],
       ['Klassen', g.klassen.length > 0, 'admin-klassen'],
       ['Konferenz-Notenschlüssel je Bildungsgang', g.bildungsgaenge.length > 0 && g.bildungsgaenge.every(b =>
@@ -91,6 +93,20 @@ async function startZeigen() {
   teile.push(wochenOrt);
   L.setzen(inhalt, teile);
   await Woche.zeigen(wochenOrt);
+}
+
+// --- Planung: Themenfolge und Raster je Klasse, Bibliothek ---
+
+async function planungZeigen(reiter) {
+  titelSetzen(reiter === 'bibliothek' ? 'Bibliothek' : 'Planung');
+  const ort = el('div', { class: 'stapel' });
+  const tab = (id, ziel, text, sym) => el('a', { class: 'knopf' + (reiter === id ? ' an' : ''), href: '#' + ziel }, L.symbol(sym), text);
+  L.setzen(inhalt,
+    el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: reiter === 'bibliothek' ? 'Bibliothek' : 'Planung' }),
+      el('div', { class: 'segment', role: 'group', 'aria-label': 'Planung' },
+        tab('planung', 'planung', 'Planung', 'plan'), tab('bibliothek', 'planung-bibliothek', 'Bibliothek', 'pakete'))),
+    ort);
+  await Planung.zeigen(ort, reiter);
 }
 
 // --- Einstellungen: Stundenplan und Konto ---

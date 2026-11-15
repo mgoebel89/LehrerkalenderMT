@@ -19,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, db, grunddaten, konten, notenschluessel, qr, stundenplan, totp, updates
+from . import VERSION, db, grunddaten, konten, notenschluessel, planung, qr, stundenplan, totp, updates
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -203,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
         except Fehler as f:
             self.antwort(f.status, {"fehler": f.meldung})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
-                stundenplan.StundenplanFehler, updates.UpdateFehler) as f:
+                stundenplan.StundenplanFehler, planung.PlanungFehler, updates.UpdateFehler) as f:
             self.antwort(400, {"fehler": str(f)})
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -523,7 +523,7 @@ def api_woche(h, con, daten):
         raise Fehler(400, "Ungültiges Datum.")
     if not h.abfrage("montag") and montag.isoweekday() > 5:   # am Wochenende schon die naechste Woche
         montag = montag + datetime.timedelta(days=8 - montag.isoweekday())
-    h.antwort(200, stundenplan.woche(con, k["id"], montag))
+    h.antwort(200, planung.themen_der_woche(con, k["id"], stundenplan.woche(con, k["id"], montag)))
 
 
 def _eigene_schritt(funktion):
@@ -534,6 +534,49 @@ def _eigene_schritt(funktion):
             neu = funktion(con, k["id"], daten, None if oid is None else _ganzzahl(oid))
         h.antwort(200, {"ok": True, "id": neu})
     return schritt
+
+
+# --- Planung (Stufe C1): Bibliothek, Themenfolge, Fliessen ---
+
+def api_bibliothek(h, con, daten):
+    h.konto(con)
+    alles = grunddaten.alles(con)
+    gaenge = [{"id": b["id"], "name": b["name"], "kuerzel": b["kuerzel"], "einheit": b["einheit"], "stufen": b["stufen"]}
+              for b in alles["bildungsgaenge"] if b["aktiv"]]
+    bid = h.abfrage("bildungsgang")
+    bid = _ganzzahl(bid) if bid else (gaenge[0]["id"] if gaenge else None)
+    h.antwort(200, {"bildungsgaenge": gaenge, "bildungsgang_id": bid,
+                    "lernfelder": planung.bibliothek(con, bid) if bid else []})
+
+
+def _planung_schritt(funktion):
+    """Aenderung an Bibliothek oder Planung; Antwort {ok, id}. Die Oberflaeche laedt danach neu."""
+    def schritt(h, con, daten, oid=None):
+        k = h.konto(con)
+        with db.transaktion(con):
+            neu = funktion(con, k, daten, None if oid is None else _ganzzahl(oid))
+        h.antwort(200, {"ok": True, "id": neu})
+    return schritt
+
+
+def api_planung(h, con, daten):
+    k = h.konto(con)
+    jahre = grunddaten.schuljahre(con)
+    sid = h.abfrage("schuljahr")
+    if sid:
+        sid = _ganzzahl(sid)
+    else:
+        jetzt = grunddaten.schuljahr_zum(con, db.heute())
+        kuenftig = [j for j in jahre if j["beginn"] > db.heute().isoformat()]
+        sid = jetzt["id"] if jetzt else (kuenftig[0]["id"] if kuenftig else (jahre[-1]["id"] if jahre else None))
+    antwort = {"schuljahre": jahre, "schuljahr_id": sid, "straenge": [], "plan": None}
+    if sid:
+        antwort["straenge"] = planung.straenge(con, k["id"], sid)
+        kid = h.abfrage("klasse")
+        if kid:
+            gid = h.abfrage("gruppe")
+            antwort["plan"] = planung.plan(con, k["id"], _ganzzahl(kid), _ganzzahl(gid) if gid else None, sid)
+    h.antwort(200, antwort)
 
 
 # --- System: Update und Sicherung ---
@@ -603,6 +646,11 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
                                                                              _nur_id(grunddaten.lernfeld_loeschen), True)),
     ("POST", r"/api/admin/zeitraster", _grunddaten_schritt("zeitraster_geaendert", _zeitraster)),
     ("POST", r"/api/admin/a-woche", _grunddaten_schritt("a_woche_geaendert", _a_woche)),
+    ("POST", r"/api/admin/schuljahr", _grunddaten_schritt("schuljahr_angelegt", grunddaten.schuljahr_speichern)),
+    ("POST", r"/api/admin/schuljahr/" + ID, _grunddaten_schritt("schuljahr_geaendert",
+                                                                lambda con, d, i: grunddaten.schuljahr_speichern(con, d, i), True)),
+    ("POST", r"/api/admin/schuljahr/" + ID + "/loeschen", _grunddaten_schritt("schuljahr_geloescht",
+                                                                              _nur_id(grunddaten.schuljahr_loeschen), True)),
     ("POST", r"/api/admin/ferien", _grunddaten_schritt("ferien_angelegt", grunddaten.ferien_anlegen)),
     ("POST", r"/api/admin/ferien/" + ID + "/loeschen", _grunddaten_schritt("ferien_geloescht", _nur_id(grunddaten.ferien_loeschen), True)),
     ("POST", r"/api/admin/klasse", _grunddaten_schritt("klasse_angelegt", grunddaten.klasse_speichern)),
@@ -630,6 +678,23 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/gruppe/" + ID + "/loeschen",
      _stundenplan_schritt(lambda con, lid, d, gid: stundenplan.gruppe_loeschen(con, lid, gid))),
     ("GET", r"/api/woche", api_woche),
+    ("GET", r"/api/bibliothek", api_bibliothek),
+    ("POST", r"/api/baustein", _planung_schritt(lambda con, k, d, _: planung.baustein_speichern(con, k, d))),
+    ("POST", r"/api/baustein/" + ID, _planung_schritt(lambda con, k, d, i: planung.baustein_speichern(con, k, d, i))),
+    ("POST", r"/api/baustein/" + ID + "/loeschen", _planung_schritt(lambda con, k, d, i: planung.baustein_loeschen(con, k, i))),
+    ("POST", r"/api/baustein/" + ID + "/schieben",
+     _planung_schritt(lambda con, k, d, i: planung.baustein_schieben(con, k, i, d.get("richtung") or 1))),
+    ("GET", r"/api/planung", api_planung),
+    ("POST", r"/api/planung/uebernehmen", _planung_schritt(lambda con, k, d, _: planung.aus_bibliothek(con, k["id"], d))),
+    ("POST", r"/api/thema", _planung_schritt(lambda con, k, d, _: planung.thema_speichern(con, k["id"], d))),
+    ("POST", r"/api/thema/" + ID, _planung_schritt(lambda con, k, d, i: planung.thema_speichern(con, k["id"], d, i))),
+    ("POST", r"/api/thema/" + ID + "/loeschen", _planung_schritt(lambda con, k, d, i: planung.thema_loeschen(con, k["id"], i))),
+    ("POST", r"/api/thema/" + ID + "/schieben",
+     _planung_schritt(lambda con, k, d, i: planung.thema_schieben(con, k["id"], i, d.get("richtung") or 1))),
+    ("POST", r"/api/thema/" + ID + "/stelle",
+     _planung_schritt(lambda con, k, d, i: planung.thema_an_stelle(con, k["id"], i, d.get("stelle")))),
+    ("POST", r"/api/thema/" + ID + "/festsetzen",
+     _planung_schritt(lambda con, k, d, i: planung.festsetzen(con, k["id"], i, d.get("datum"), d.get("beginn")))),
     ("POST", r"/api/aenderung", _eigene_schritt(lambda con, lid, d, _: stundenplan.aenderung_anlegen(con, lid, d))),
     ("POST", r"/api/aenderung/" + ID + "/loeschen", _eigene_schritt(lambda con, lid, d, aid: stundenplan.aenderung_loeschen(con, lid, aid))),
     ("POST", r"/api/termin", _eigene_schritt(lambda con, lid, d, _: stundenplan.termin_speichern(con, lid, d))),
