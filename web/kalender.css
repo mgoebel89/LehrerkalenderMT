@@ -149,3 +149,6 @@ table.gp { border-collapse: separate; border-spacing: 0; width: 100%; min-width:
 .gk { border: 1px solid var(--linie); border-left: 3px solid var(--kl); border-radius: 6px 2px 2px 2px; padding: 4px 6px; background: var(--karte);
   display: flex; gap: 4px; align-items: center; font-weight: 700; color: var(--text); font-size: .8rem; text-align: left; }
 .gk .ab { margin-left: auto; font-family: var(--mono); font-size: .62rem; font-weight: 700; padding: 0 4px; border-radius: 4px; background: var(--knopf); color: var(--leise); }
+
+/* Icon (Entwurf A, Kalenderblatt) in der Kopfzeile */
+.marke-symbol { width: 26px; height: 26px; flex: none; display: block; }
