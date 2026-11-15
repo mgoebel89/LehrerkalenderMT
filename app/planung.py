@@ -586,13 +586,15 @@ def fliessen(themen, bloecke, ist=None):
                           bloecke[i].get("keys", {(bloecke[i]["datum"], bloecke[i]["beginn"])})), None)
             if start is None:
                 info[t["id"]]["nadel"] = "fehlt"
+                if t.get("pruefung_id"):              # eine Pruefung fliesst nie: ohne Unterricht zum Termin bleibt sie leer
+                    info[t["id"]]["ende"] = True
                 continue
             info[t["id"]]["nadel"] = "ok"
             fuellen(t, start)
         # 2. die uebrigen in Reihenfolge in die freien Bloecke
         zeiger = 0
         for t in liste:
-            if info[t["id"]]["nadel"] != "ok":
+            if info[t["id"]]["nadel"] != "ok" and not t.get("pruefung_id"):
                 zeiger = fuellen(t, zeiger)
     for t in themen:
         x = info[t["id"]]

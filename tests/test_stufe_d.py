@@ -247,6 +247,16 @@ class GetrenntSchreiben(MitPruefung):
         andere = [(b["beginn"], b["zweit"]) for b in p["bloecke"] if b["datum"] == "2026-11-19" and b["thema_id"] != ka["id"]]
         self.assertEqual(andere, [("07:45", False), ("13:15", True)])   # 1. von B und 2. von A: derselbe Stoff
 
+    def test_pruefung_ohne_unterricht_fliesst_nicht(self):
+        planung.thema_speichern(self.con, self.lid, self.strang(titel="SPS", bloecke=2))
+        pid = pruefungen.pruefung_speichern(self.con, self.lid, self.strang(titel="KA", form="termin", datum="2026-11-17", beginn="07:45",
+                                                                            erfassung="gesamt", max_punkte=10))   # Dienstag: kein Unterricht
+        p = planung.plan(self.con, self.lid, self.kl, None, self.sj, jetzt="2026-11-15T12:00:00")
+        ka = next(t for t in p["themen"] if t["pruefung_id"] == pid)
+        self.assertEqual((ka["nadel"], ka["zugeteilt"], ka["ueberlauf"]), ("fehlt", 0, 0))
+        self.assertFalse(any(b["thema_id"] == ka["id"] for b in p["bloecke"]))
+        self.assertIn("keinen Unterricht", pruefungen.ergebnis(self.con, self.lid, pid)["pruefung"]["hinweise"][0])
+
     def test_offene_ist_sieht_spaetere_pruefung(self):
         planung.thema_speichern(self.con, self.lid, self.strang(titel="SPS", bloecke=10))
         pruefungen.pruefung_speichern(self.con, self.lid, self.strang(titel="KA", form="termin", datum="2026-12-04", beginn="07:45",

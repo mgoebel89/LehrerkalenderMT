@@ -85,7 +85,8 @@ const Planung = (() => {
         text: ls.length ? t.verteilt + '/' + t.bloecke + ' Bl' : umfang(t.bloecke) }),
       t.verteilt > t.bloecke ? el('span', { class: 'chip gelb klein', title: 'Die Lernsituationen brauchen mehr als der geplante Umfang – das Thema wächst entsprechend.', text: '+' + (t.verteilt - t.bloecke) }) : null,
       t.ueberlauf ? el('span', { class: 'chip rot klein', title: 'Passt nicht mehr ins Schuljahr', text: '−' + t.ueberlauf }) : null,
-      t.nadel === 'fehlt' ? el('span', { class: 'chip gelb klein', title: 'Der festgesetzte Block findet nicht statt', text: 'Nadel?' }) : null);
+      t.nadel === 'fehlt' ? el('span', { class: 'chip gelb klein', title: t.pruefung_id ? 'Zum Termin der Prüfung hast du keinen Unterricht in dieser Klasse – Termin unter Prüfungen ändern.'
+        : 'Der festgesetzte Block findet nicht statt', text: t.pruefung_id ? 'kein Unterricht zum Termin' : 'Nadel?' }) : null);
     const tr = zelle;
     tr.draggable = true;
     tr.addEventListener('dragstart', ev => { ziehen = t.id; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(t.id)); });
@@ -129,6 +130,13 @@ const Planung = (() => {
         el('td', { class: 'auf ls-auf' }, el('button', { type: 'button', class: 'leicht klein', onclick: () => lsBearbeiten(t, null) }, L.symbol('plus'), 'Lernsituation')),
         el('td', { colspan: 999 })));
     });
+    // letzte Zeile: Block antippen -> Pruefung zu diesem Termin anlegen
+    const planen = { id: 0, titel: 'Prüfung planen', planen: true };
+    rows.push(el('tr', { class: 'pruef-zeile', style: '--b:var(--rot)' },
+      el('td', { class: 'auf', title: 'Block antippen, um dort eine Prüfung anzulegen' },
+        el('span', { class: 'auf-knopf leer' }), L.symbol('pruefung'), el('span', { class: 'pruef-text', text: 'Prüfung planen' }),
+        el('span', { class: 'art', text: 'Block antippen' })),
+      zellen(reihe(p, planen, () => false, planen.titel))));
     return rows;
   }
 
@@ -182,7 +190,6 @@ const Planung = (() => {
     if (!p.themen.length) {
       teile.push(el('div', { class: 'leer' }, 'Noch keine Themen. Übernimm Lernsituationen aus der ',
         el('a', { href: '#planung-bibliothek', text: 'Bibliothek' }), ' oder lege mit „+ Thema“ eines an. Lernsituationen entwickelst du danach in den Themen.'));
-      return setzen();
     }
     const tabelle = wahl.ansicht === 'schuljahr' ? rasterSchuljahr(p) : wahl.ansicht === 'tage' ? rasterTage(p) : rasterBloecke(p);
     const scroll = el('div', { class: 'r-scroll' }, tabelle);
@@ -406,12 +413,21 @@ const Planung = (() => {
     if (alt) alt.remove();
     const bloecke = (Array.isArray(c) ? c : [c]).filter(x => x.nutzbar);
     const punkte = [];
-    if (t.pruefung_id) punkte.push(['pruefung', 'Prüfung öffnen (Termin dort ändern)', () => { location.hash = '#pruefung-' + t.pruefung_id; }]);
+    const anlegen = b => () => Pruefungen.ausWochenplan({ klasse: { id: wahl.klasse }, gruppe: b.gruppe_id ? { id: b.gruppe_id } : null, datum: b.datum, beginn: b.beginn },
+      () => { gezeichnet = null; wahl.springe = b.datum; neuLaden(); });
+    if (t.planen) {
+      bloecke.forEach(b => punkte.push(['pruefung', 'Prüfung hier anlegen: ' + tagKurz(b.datum) + ' ' + b.beginn + (b.gruppe ? ' · ' + b.gruppe : '') + ' …', anlegen(b)]));
+      bloecke.forEach(b => punkte.push(['auge', 'Stunde öffnen: ' + tagKurz(b.datum) + ' ' + b.beginn, () => Stunde.oeffnen(b.datum, b.beginn, neuLaden)]));
+      if (!bloecke.length) return;
+    } else if (t.pruefung_id) punkte.push(['pruefung', 'Prüfung öffnen (Termin dort ändern)', () => { location.hash = '#pruefung-' + t.pruefung_id; }]);
     else bloecke.forEach(b => punkte.push(['pin', (bloecke.length > 1 ? b.beginn + ': ' : '') + 'Hier festsetzen – beginnt ' + tagKurz(b.datum) + ' ' + b.beginn,
       () => festsetzen(t, b.datum, b.beginn)]));
     bloecke.forEach(b => punkte.push(['auge', 'Stunde öffnen: ' + tagKurz(b.datum) + ' ' + b.beginn, () => Stunde.oeffnen(b.datum, b.beginn, neuLaden)]));
     if (t.nadel && !t.pruefung_id) punkte.push(['undo', 'Stecknadel lösen (fließt wieder)', () => festsetzen(t, null, null)]);
-    if (!t.pruefung_id) punkte.push(['stift', 'Thema bearbeiten …', () => themaBearbeiten(t)]);
+    if (!t.pruefung_id && !t.planen) {
+      punkte.push(['stift', 'Thema bearbeiten …', () => themaBearbeiten(t)]);
+      bloecke.forEach(b => punkte.push(['pruefung', 'Prüfung hier anlegen: ' + tagKurz(b.datum) + ' ' + b.beginn + ' …', anlegen(b)]));
+    }
     const m = el('div', { class: 'wp-menue', id: 'wp-menue', role: 'menu' }, el('div', { class: 'mk', text: t.titel }),
       punkte.map(([sym, text, aktion]) => el('button', { type: 'button', role: 'menuitem', onclick: () => { m.remove(); aktion(); } }, L.symbol(sym), text)));
     document.body.appendChild(m);
