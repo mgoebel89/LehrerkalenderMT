@@ -74,7 +74,9 @@ const Pruefungen = (() => {
     const s = P.straenge.find(x => x.klasse_id === wahl.klasse && (x.gruppe_id || null) === (wahl.gruppe || null));
     L.setzen(ort, kopf.reiter, el('div', { class: 'karteiblatt stapel' },
       el('div', { class: 'zeile' }, el('h2', { text: s ? s.klasse : '' }), kopf.unter,
-        el('span', { class: 'rechts' }, el('button', { type: 'button', class: 'haupt', onclick: () => pruefungDialog(null, R, { klasse_id: wahl.klasse, gruppe_id: wahl.gruppe, schuljahr_id: wahl.schuljahr }) }, L.symbol('plus'), 'Prüfung'))),
+        el('span', { class: 'rechts zeile' },
+          el('button', { type: 'button', title: 'Ergebnisse eines Moodle-Tests als neue Prüfung übernehmen', onclick: () => moodleImport({ klasse_id: wahl.klasse }) }, L.symbol('hoch'), 'Aus Moodle'),
+          el('button', { type: 'button', class: 'haupt', onclick: () => pruefungDialog(null, R, { klasse_id: wahl.klasse, gruppe_id: wahl.gruppe, schuljahr_id: wahl.schuljahr }) }, L.symbol('plus'), 'Prüfung'))),
       R.pruefungen.length ? el('div', { class: 'raster' }, R.pruefungen.map(p => pruefungKarte(p)))
         : el('div', { class: 'leer', text: 'Noch keine Prüfung. Lege eine mit „+ Prüfung“ an oder im Wochenplan über das Menü einer Stunde.' })));
   }
@@ -458,6 +460,8 @@ const Pruefungen = (() => {
     });
     const kopfZahlen = () => { const alt = ort.querySelector('.pr-statistik'); if (alt) alt.replaceWith(kopfStatistik(E.statistik)); };
     return el('div', { class: 'stapel', style: 'gap:8px' },
+      p.erfassung === 'gesamt' && !fertig ? el('div', { class: 'zeile' }, el('button', { type: 'button', class: 'klein', onclick: () => moodleImport({ pruefung_id: p.id }) },
+        L.symbol('hoch'), 'Moodle-Ergebnisse übernehmen'), el('span', { class: 'leise klein', text: 'aus dem Bericht „Antworten“ eines Moodle-Tests' })) : null,
       el('div', { class: 'r-scroll' }, el('table', { class: 'liste bewerten' }, el('thead', {}, kopf), el('tbody', {}, zeilen))),
       el('p', { class: 'leise klein', text: p.erfassung === 'bogen'
         ? '„Bogen“ öffnet den Feedbackbogen des Schülers; jede Eingabe wird sofort gespeichert. Tipp auf die Note zeigt den Rechenweg.'
@@ -571,6 +575,77 @@ const Pruefungen = (() => {
         v.team && !z.team_id ? el('p', { class: 'leise klein', text: 'Ohne Team: der Haken gilt nur für diesen Schüler.' }) : null),
     });
     detailZeichnen();
+  }
+
+  // --- Moodle-Ergebnisse uebernehmen (Bericht "Antworten" als JSON oder CSV) ---
+  // ziel: { pruefung_id } (vorhandene Pruefung mit Gesamtpunkten) oder { klasse_id } (neue Pruefung aus der Datei)
+  async function moodleImport(ziel) {
+    let V = null, text = '', dateiname = '';
+    const datei = el('input', { type: 'file', accept: '.json,.csv,.txt,application/json,text/csv' });
+    const titel = el('input', { maxlength: 120, placeholder: 'Titel der Prüfung' });
+    const ort = el('div', { class: 'stapel', style: 'gap:8px' });
+    const auswahl = {};
+    const zeichne = () => {
+      const s = V.schueler;
+      const vergeben = () => Object.values(auswahl).map(x => x.value).filter(Boolean);
+      const zeilen = V.zeilen.map(z => {
+        const sel = el('select', { class: z.schueler_id && !z.sicher ? 'unsicher' : null, 'aria-label': 'Zuordnung für ' + z.name },
+          el('option', { value: '', text: '– nicht übernehmen –' }),
+          s.map(x => el('option', { value: x.id, text: x.name + (x.aktiv ? '' : ' (ausgetreten)'), selected: x.id === z.schueler_id ? true : null })));
+        sel.addEventListener('change', () => { sel.classList.remove('unsicher'); pruefeDoppelt(); });
+        auswahl[z.schluessel] = sel;
+        return el('tr', {},
+          el('td', {}, el('b', { text: z.name }), z.anzahl > 1 ? el('span', { class: 'leise klein', text: ' · ' + z.anzahl + ' Versuche, bester zählt' }) : null),
+          el('td', { class: 'mono zahl', text: z.bewertung === null ? '–' : fmt(z.bewertung, 2) + ' / ' + fmt(V.max) }),
+          el('td', { class: 'klein' }, z.datum ? tagKurz(z.datum) : '', z.nachgeschrieben ? el('span', { class: 'chip gelb klein', text: 'nachgeschrieben' }) : null),
+          el('td', {}, sel));
+      });
+      const doppelt = el('div', { class: 'banner warnung klein', hidden: true });
+      const pruefeDoppelt = () => {
+        const v = vergeben();
+        const mehrfach = s.filter(x => v.filter(y => Number(y) === x.id).length > 1).map(x => x.name);
+        doppelt.textContent = mehrfach.length ? 'Mehrfach zugeordnet: ' + mehrfach.join(', ') : '';
+        doppelt.hidden = !mehrfach.length;
+      };
+      const unsicher = V.zeilen.filter(z => z.schueler_id && !z.sicher).length;
+      const ohne = V.zeilen.filter(z => !z.schueler_id).length;
+      L.setzen(ort,
+        el('p', { class: 'klein' }, el('b', { text: V.zeilen.length + ' Personen' }),
+          ' · Höchstwert ' + fmt(V.max) + (V.pruefung ? ' → umgerechnet auf ' + fmt(V.pruefung.max_punkte) + ' Punkte von „' + V.pruefung.titel + '“' : '') +
+          (V.termin ? ' · Prüfungstag ' + tagKurz(V.termin) : '') + (V.uebersprungen ? ' · ' + V.uebersprungen + ' nicht beendete Versuche übersprungen' : '')),
+        !V.pruefung ? L.feld('Neue Prüfung', titel, 'Gesamtpunkte (max. ' + fmt(V.max) + '), fester Termin am Prüfungstag im passenden Block') : null,
+        unsicher || ohne ? el('div', { class: 'banner klein', text: (unsicher ? unsicher + ' Zuordnung(en) nur vorgeschlagen (gelb) – bitte prüfen. ' : '') +
+          (ohne ? ohne + ' ohne passenden Namen in der Schülerliste – wähle den Schüler oder „nicht übernehmen“.' : '') }) : null,
+        el('div', { class: 'r-scroll', style: 'max-height:50vh' }, el('table', { class: 'liste moodle-import' },
+          el('thead', {}, el('tr', {}, ['Name in Moodle', 'Bewertung', 'Tag', 'Schüler'].map(t => el('th', { text: t })))), el('tbody', {}, zeilen))),
+        doppelt,
+        el('p', { class: 'leise klein', text: 'Übernommen werden die Bewertung (bester Versuch) sowie Beginn und Dauer; Nachschreiber bekommen einen Vermerk in der Notiz. Die Antworttexte bleiben in Moodle.' }));
+      titel.value = titel.value || V.titel;
+    };
+    datei.addEventListener('change', async () => {
+      const f = datei.files[0];
+      if (!f) return;
+      dateiname = f.name;
+      text = await f.text();
+      L.setzen(ort, el('p', { class: 'leise', text: 'Lese …' }));
+      try { V = await L.api('POST', '/api/moodle/vorschau', Object.assign({ text, dateiname }, ziel)); zeichne(); }
+      catch (e) { V = null; L.setzen(ort, el('div', { class: 'banner warnung', text: e.message })); }
+    });
+    const r = await L.dialog({
+      titel: ziel.pruefung_id ? 'Moodle-Ergebnisse übernehmen' : 'Neue Prüfung aus Moodle', knopf: 'Übernehmen', breit: true,
+      inhalt: el('div', { class: 'stapel', style: 'gap:10px' },
+        el('p', { class: 'leise klein', text: 'In Moodle im Test unter Ergebnisse → „Antworten“ (oder „Bewertungen“) den Bericht als JSON oder CSV herunterladen und hier wählen.' }),
+        datei, ort),
+      speichern: () => {
+        if (!V) throw new Error('Bitte zuerst die Moodle-Datei wählen.');
+        const zuordnung = Object.fromEntries(Object.entries(auswahl).map(([k, sel]) => [k, sel.value ? Number(sel.value) : null]));
+        return L.api('POST', '/api/moodle/uebernehmen', Object.assign({ text, dateiname, zuordnung, titel: titel.value }, ziel));
+      },
+    });
+    if (!r) return;
+    L.meldung(r.uebernommen + ' Bewertung(en) übernommen' + (r.ohne_zuordnung ? ', ' + r.ohne_zuordnung + ' nicht übernommen' : '') + '.');
+    if (location.hash === '#pruefung-' + r.pruefung_id) detailZeigen(r.pruefung_id);
+    else location.hash = '#pruefung-' + r.pruefung_id;
   }
 
   // --- Reiter Export: Notenspalte (Excel), PDF, Moodle ---

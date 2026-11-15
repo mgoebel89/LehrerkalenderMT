@@ -400,3 +400,13 @@ label.haken.gross input { width: 24px; height: 24px; }
 .export .notenspalte { max-height: 340px; overflow: auto; border: 1px solid var(--linie); border-radius: 6px; }
 .export .notenspalte td { padding-top: 3px; padding-bottom: 3px; }
 .export tr.aus td { color: var(--leise); }
+
+/* D2d: Moodle-Import */
+.moodle-import select { min-width: 180px; }
+.moodle-import select.unsicher { background: #fdf1d6; border-color: #e3b44b; }
+
+/* Schullogo */
+.kopf .schul-logo { height: 30px; width: auto; max-width: 180px; object-fit: contain; display: block; margin-left: 4px; padding-left: 12px; border-left: 1px solid var(--linie); }
+.logo-vorschau { border: 1px dashed var(--linie-stark); border-radius: 8px; padding: 12px; background: #fff; display: flex; justify-content: center; }
+.logo-vorschau img { max-width: 100%; max-height: 110px; object-fit: contain; }
+@media (max-width: 760px) { .kopf .schul-logo { display: none; } }

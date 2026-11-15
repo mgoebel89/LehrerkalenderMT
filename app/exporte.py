@@ -10,8 +10,8 @@ import csv
 import datetime
 import io
 
-from . import grunddaten, pdf, pruefungen
-from .pdf import MM, A4, BLAU, LEISE, Seite, kuerzen, umbrechen
+from . import grunddaten, pdf, pruefungen, schule
+from .pdf import MM, A4, BLAU, LEISE, Seite, kuerzen, textbreite, umbrechen
 
 TEXT = (0.11, 0.14, 0.2)
 LINIE = (0.8, 0.82, 0.86)
@@ -84,23 +84,55 @@ def moodle_csv(con, lid, pid):
 
 # --- PDF: Ergebnisliste ---
 
-def _kopf(seite, p, klasse, unterzeile):
+def _kopfdaten(con):
+    """Schule fuer Kopf und Fuss: Logo (JPEG + Masse), Name, Webadresse."""
+    a = schule.angaben(con)
+    return {"logo": schule.logo(con) if a["logo"] else None, "masse": a["logo_masse"], "name": a["name"], "web": a["web"]}
+
+
+def _rechts(seite, x_rechts, y, text, groesse, fett=False, farbe=TEXT):
+    seite.text(x_rechts - textbreite(text, groesse, fett), y, text, groesse, fett, farbe)
+
+
+def _kopf(seite, p, klasse, unterzeile, kd):
+    """Kopf im DRS-Design: Logo links oben, rechts Klasse/Art, Erfassung, Termin; feine Linie; darunter Titel."""
     b, h = A4
-    seite.rechteck(0, h - 8 * MM, b, 8 * MM, BLAU)
-    seite.text(15 * MM, h - 5.5 * MM, "Lehrerkalender MT", 8, True, (1, 1, 1))
-    seite.text(15 * MM, h - 20 * MM, kuerzen(p["titel"], 18, b - 30 * MM, True), 18, True)
-    seite.text(15 * MM, h - 27 * MM, kuerzen(unterzeile, 9, b - 30 * MM), 9, farbe=LEISE)
-    seite.text(15 * MM, h - 32 * MM, kuerzen("%s · %s · %s · %s" % (klasse, p["artname"], pruefungen.ERFASSUNG_NAMEN.get(p["erfassung"], p["erfassung"]),
-                                                               _wann(p)), 9, b - 30 * MM), 9, farbe=LEISE)
-    seite.linie(15 * MM, h - 35 * MM, b - 15 * MM, h - 35 * MM)
-    return h - 43 * MM
+    oben = h - 12 * MM
+    hoehe = 0
+    if kd["logo"] and kd["masse"]:
+        bp, hp = kd["masse"]
+        hoehe = 15 * MM
+        breite = hoehe * bp / hp
+        if breite > 75 * MM:
+            breite = 75 * MM
+            hoehe = breite * hp / bp
+        seite.bild(kd["logo"], 15 * MM, oben - hoehe, breite, hoehe)
+    else:
+        seite.text(15 * MM, oben - 5 * MM, kuerzen(kd["name"], 12, 100 * MM, True), 12, True, BLAU)
+        hoehe = 7 * MM
+    rechts = b - 15 * MM
+    _rechts(seite, rechts, oben - 3.5 * MM, kuerzen("%s · %s" % (klasse, p["artname"]), 9.5, 90 * MM, True), 9.5, True)
+    _rechts(seite, rechts, oben - 8.5 * MM, pruefungen.ERFASSUNG_NAMEN.get(p["erfassung"], p["erfassung"]), 9, farbe=LEISE)
+    _rechts(seite, rechts, oben - 13.5 * MM, kuerzen(_wann(p), 9, 90 * MM), 9, farbe=LEISE)
+    linie = oben - max(hoehe, 15 * MM) - 4 * MM
+    seite.linie(15 * MM, linie, b - 15 * MM, linie, (0.88, 0.88, 0.88), 0.5)
+    seite.text(15 * MM, linie - 10 * MM, kuerzen(p["titel"], 17, b - 30 * MM, True), 17, True)
+    seite.text(15 * MM, linie - 16 * MM, kuerzen(unterzeile, 9, b - 30 * MM), 9, farbe=LEISE)
+    return linie - 25 * MM
 
 
-def _fuss(seite, nr, gesamt, lehrkraft):
+def _fuss(seite, nr, gesamt, lehrkraft, kd):
+    """Fuss im DRS-Design: Farbband Blau/Gruen/Pink/Gelb (4:1:1:1) ueber der Webadresse, rechts Ersteller und Seite."""
     b, _ = A4
-    seite.linie(15 * MM, 14 * MM, b - 15 * MM, 14 * MM)
-    seite.text(15 * MM, 9 * MM, "%s · erstellt %s" % (lehrkraft, datetime.date.today().strftime("%d.%m.%Y")), 7.5, farbe=LEISE)
-    seite.text(b - 35 * MM, 9 * MM, "Seite %d von %d" % (nr, gesamt), 7.5, farbe=LEISE)
+    breite, luecke = 45 * MM, 0.8 * MM
+    teil = (breite - 3 * luecke) / 7
+    x = 15 * MM
+    for anteil, farbe in ((4, BLAU), (1, pdf.DRS_GRUEN), (1, pdf.DRS_PINK), (1, pdf.DRS_GELB)):
+        seite.rechteck(x, 15 * MM, anteil * teil, 1.1 * MM, farbe)
+        x += anteil * teil + luecke
+    seite.text(15 * MM, 10.5 * MM, kd["web"] or kd["name"], 7.5, farbe=LEISE)
+    _rechts(seite, b - 15 * MM, 10.5 * MM, "%s · erstellt %s · Seite %d von %d" % (lehrkraft, datetime.date.today().strftime("%d.%m.%Y"), nr, gesamt),
+            7.5, farbe=LEISE)
 
 
 def ergebnis_pdf(con, lid, pid, lehrkraft=""):
@@ -112,7 +144,8 @@ def ergebnis_pdf(con, lid, pid, lehrkraft=""):
         "%s (%s)" % (e["schluessel"]["name"], e["schluessel"]["systemname"]) if e["schluessel"] else "kein Notenschlüssel")
     b, _ = A4
     seiten = [Seite()]
-    y = _kopf(seiten[0], p, klasse, "Ergebnisliste · Notenschlüssel: " + schluessel)
+    kd = _kopfdaten(con)
+    y = _kopf(seiten[0], p, klasse, "Ergebnisliste · Notenschlüssel: " + schluessel, kd)
     s = seiten[0]
     kennzahlen = [("bewertet", "%d von %d" % (st["bewertet"], st["schueler"])), ("gefehlt", str(st["fehlt"])),
                   ("Schnitt", _komma(st["schnitt"], 2) or "–"), ("Ø Prozent", (_komma(st["prozent"], 1) + " %") if st["prozent"] is not None else "–")]
@@ -145,7 +178,7 @@ def ergebnis_pdf(con, lid, pid, lehrkraft=""):
 
     y = tabellenkopf(s, y)
     for nr, z in enumerate(e["schueler"], 1):
-        if y < 22 * MM:
+        if y < 26 * MM:
             s = Seite()
             seiten.append(s)
             y = tabellenkopf(s, A4[1] - 20 * MM)
@@ -165,7 +198,7 @@ def ergebnis_pdf(con, lid, pid, lehrkraft=""):
     s.linie(15 * MM, y, 85 * MM, y, TEXT)
     s.text(15 * MM, y - 4 * MM, "Datum, Unterschrift Lehrkraft", 7.5, farbe=LEISE)
     for i, seite in enumerate(seiten, 1):
-        _fuss(seite, i, len(seiten), lehrkraft)
+        _fuss(seite, i, len(seiten), lehrkraft, kd)
     return pdf.dokument(seiten, "Ergebnis " + p["titel"]), "Ergebnis %s %s.pdf" % (klasse, p["titel"])
 
 
@@ -199,7 +232,7 @@ class _Schreiber:
         self.y = self.kopf(self.s)
 
     def platz(self, hoehe):
-        if self.y - hoehe < 30 * MM:
+        if self.y - hoehe < 32 * MM:
             self.neu()
 
     def zeile(self, text, groesse=9.5, fett=False, farbe=TEXT, einzug=0, abstand=1.45):
@@ -235,10 +268,11 @@ def rueckmeldung_pdf(con, lid, pid, sid=None, lehrkraft=""):
                and (z["prozent"] is not None or z["protokoll"] or any(v["erledigt"] for v in z["versuche"]))]
     if not auswahl:
         raise pruefungen.PruefungFehler("Es gibt noch keine Bewertung für einen Rückmeldebogen.")
+    kd = _kopfdaten(con)
     alle_seiten = []
     for z in auswahl:
         seiten = []
-        w = _Schreiber(seiten, lambda s: _kopf(s, p, klasse, "Rückmeldung für " + z["name"]))
+        w = _Schreiber(seiten, lambda s: _kopf(s, p, klasse, "Rückmeldung für " + z["name"], kd))
         w.zeile(z["name"], 14, True)
         w.y -= 2
         if p["erfassung"] == "gesamt":
@@ -285,7 +319,7 @@ def rueckmeldung_pdf(con, lid, pid, sid=None, lehrkraft=""):
             w.s.linie(x, w.y, x + 80 * MM, w.y, TEXT)
             w.s.text(x, w.y - 4 * MM, text, 7.5, farbe=LEISE)
         for i, seite in enumerate(seiten, 1):
-            _fuss(seite, i, len(seiten), lehrkraft)
+            _fuss(seite, i, len(seiten), lehrkraft, kd)
         alle_seiten.extend(seiten)
     name = "Rückmeldung %s %s%s.pdf" % (klasse, p["titel"], (" " + auswahl[0]["name"]) if sid else "")
     return pdf.dokument(alle_seiten, "Rückmeldung " + p["titel"]), name

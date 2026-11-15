@@ -143,12 +143,66 @@ const Admin = (() => {
       L.setzen(ort,
         kopf('Grunddaten'),
         el('div', { class: 'segment', role: 'group', 'aria-label': 'Grunddaten' },
-          tab('bildungsgaenge', 'Bildungsgänge und Lernfelder', 'pakete'), tab('zeitraster', 'Zeitraster', 'uhr'), tab('ferien', 'Schuljahr und Ferien', 'kalender')),
-        reiter === 'bildungsgaenge' ? bildungsgaengeAnsicht() : reiter === 'zeitraster' ? zeitrasterAnsicht() : ferienAnsicht());
+          tab('bildungsgaenge', 'Bildungsgänge und Lernfelder', 'pakete'), tab('zeitraster', 'Zeitraster', 'uhr'), tab('ferien', 'Schuljahr und Ferien', 'kalender'),
+          tab('schule', 'Schule und Logo', 'formular')),
+        reiter === 'bildungsgaenge' ? bildungsgaengeAnsicht() : reiter === 'zeitraster' ? zeitrasterAnsicht() : reiter === 'schule' ? schuleAnsicht() : ferienAnsicht());
     };
     grunddatenZeichnen();
   }
   let grunddatenZeichnen = () => {};
+
+  // --- Schule: Logo (fuer App und Dokumente), Name und Webadresse fuer Kopf und Fuss der Dokumente ---
+  // Jedes Bild wird im Browser in ein JPEG umgewandelt (weisser Hintergrund, hoechstens 1600 px breit): so bettet der
+  // Server es ohne Bildbibliothek in die PDFs ein.
+  function alsJpeg(datei) {
+    return new Promise((ok, fehler) => {
+      const url = URL.createObjectURL(datei);
+      const bild = new Image();
+      bild.onload = () => {
+        const faktor = Math.min(1, 1600 / bild.naturalWidth);
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(bild.naturalWidth * faktor));
+        c.height = Math.max(1, Math.round(bild.naturalHeight * faktor));
+        const g = c.getContext('2d');
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(bild, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        ok(c.toDataURL('image/jpeg', 0.92));
+      };
+      bild.onerror = () => { URL.revokeObjectURL(url); fehler(new Error('Dieses Bild lässt sich nicht öffnen. Bitte ein PNG oder JPEG wählen.')); };
+      bild.src = url;
+    });
+  }
+
+  function schuleAnsicht() {
+    const sch = G.schule;
+    const name = el('input', { maxlength: 120, value: sch.name });
+    const web = el('input', { maxlength: 120, value: sch.web, placeholder: 'www.drsneuwied.de' });
+    const datei = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif' });
+    const speichernLogo = async wert => {
+      try { G.schule = await L.api('POST', '/api/schule', { logo: wert }); L.meldung(wert ? 'Logo gespeichert.' : 'Logo entfernt.'); grunddatenZeichnen(); }
+      catch (e) { L.meldung(e.message, true); }
+    };
+    datei.addEventListener('change', async () => {
+      if (!datei.files[0]) return;
+      try { await speichernLogo(await alsJpeg(datei.files[0])); } catch (e) { L.meldung(e.message, true); }
+    });
+    return el('div', { class: 'zwei-spalten' },
+      el('div', { class: 'karte stapel' }, el('h3', { text: 'Schullogo' }),
+        sch.logo ? el('div', { class: 'logo-vorschau' }, el('img', { src: '/api/schule/logo?v=' + encodeURIComponent(sch.logo_stand), alt: 'Schullogo' }))
+          : el('p', { class: 'leise', text: 'Noch kein Logo. Ohne Logo steht der Schulname im Kopf der Dokumente.' }),
+        el('p', { class: 'leise klein', text: 'Erscheint auf der Anmeldeseite, in der Kopfzeile und oben links auf allen Dokumenten (PDF). Am besten das Logo im Querformat; PNG mit Transparenz bekommt einen weißen Hintergrund.' }),
+        el('div', { class: 'zeile' }, L.feld(sch.logo ? 'Anderes Logo hochladen' : 'Logo hochladen', datei),
+          sch.logo ? L.nebenknopf('Logo entfernen', () => speichernLogo('')) : null)),
+      el('div', { class: 'karte stapel' }, el('h3', { text: 'Angaben für die Dokumente' }),
+        L.feld('Schulname', name, 'steht im Kopf, wenn kein Logo da ist'),
+        L.feld('Webadresse', web, 'steht im Fuß unter dem DRS-Farbband'),
+        el('div', {}, el('button', { type: 'button', class: 'haupt', onclick: async () => {
+          try { G.schule = await L.api('POST', '/api/schule', { name: name.value, web: web.value }); L.meldung('Gespeichert.'); }
+          catch (e) { L.meldung(e.message, true); }
+        } }, L.symbol('ok'), 'Speichern'))));
+  }
 
   function bildungsgaengeAnsicht() {
     return el('div', { class: 'stapel' },

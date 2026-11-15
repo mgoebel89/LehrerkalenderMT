@@ -19,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, grunddaten, konten, notenschluessel, planung, pruefungen, qr, stundenplan, totp, updates
+from . import VERSION, abos, db, exporte, grunddaten, konten, moodle, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -204,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
             self.antwort(f.status, {"fehler": f.meldung})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
-                updates.UpdateFehler) as f:
+                updates.UpdateFehler, schule.SchuleFehler) as f:
             self.antwort(400, {"fehler": str(f)})
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -290,7 +290,9 @@ def api_abmelden(h, con, daten):
 
 def api_ich(h, con, daten):
     k = h.konto(con, vorlaeufig_ok=True)
-    h.antwort(200, {"konto": k, "version": VERSION, "update": updates.kurz() if k["rolle"] == "admin" else None})
+    a = schule.angaben(con)
+    h.antwort(200, {"konto": k, "version": VERSION, "update": updates.kurz() if k["rolle"] == "admin" else None,
+                    "schule": {"name": a["name"], "logo": a["logo"], "stand": a["logo_stand"]}})
 
 
 def api_passwort(h, con, daten):
@@ -407,7 +409,28 @@ def api_grunddaten(h, con, daten):
     k = h.konto(con)
     alles = grunddaten.alles(con)
     alles["notenschluessel"] = notenschluessel.liste(con, k)
+    alles["schule"] = schule.angaben(con)
     h.antwort(200, alles)
+
+
+def api_logo(h, con, daten):
+    """Schullogo (oeffentlich, auch fuer die Anmeldeseite)."""
+    daten_ = schule.logo(con)
+    if not daten_:
+        raise Fehler(404, "Kein Schullogo.")
+    h.antwort(200, daten_, "image/jpeg", extra=[("Cache-Control", "max-age=300")], cache=True)
+
+
+def api_logo_da(h, con, daten):
+    a = schule.angaben(con)
+    h.antwort(200, {"logo": a["logo"], "stand": a["logo_stand"], "name": a["name"]})
+
+
+def api_schule(h, con, daten):
+    _admin(h, con)
+    with db.transaktion(con):
+        schule.speichern(con, daten)
+    h.antwort(200, schule.angaben(con))
 
 
 def _grunddaten_schritt(art, funktion, mit_id=False):
@@ -762,11 +785,23 @@ def api_rueckmeldung_pdf(h, con, daten, pid):
     h.herunterladen(inhalt, "application/pdf", name)
 
 
-def api_moodle_csv(h, con, daten, pid):
+def api_moodle_export(h, con, daten, pid):
     k = h.konto(con)
     text, _ = exporte.moodle_csv(con, k["id"], _ganzzahl(pid))
     p = pruefungen.ergebnis(con, k["id"], int(pid))["pruefung"]
     h.herunterladen(text.encode("utf-8"), "text/csv; charset=utf-8", "Moodle %s.csv" % p["titel"])
+
+
+def api_moodle_vorschau(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, moodle.vorschau(con, k["id"], daten))
+
+
+def api_moodle_uebernehmen(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        r = moodle.uebernehmen(con, k["id"], daten)
+    h.antwort(200, r)
 
 
 def api_wieder_oeffnen(h, con, daten, pid):
@@ -863,6 +898,9 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/admin/einladungen", api_einladung_anlegen),
     ("POST", r"/api/admin/einladungen/" + ID + "/zurueckziehen", api_einladung_zurueckziehen),
     ("GET", r"/api/grunddaten", api_grunddaten),
+    ("GET", r"/api/schule/logo", api_logo),
+    ("GET", r"/api/schule/logo/da", api_logo_da),
+    ("POST", r"/api/schule", api_schule),
     ("POST", r"/api/admin/bildungsgang", _grunddaten_schritt("bildungsgang_angelegt", grunddaten.bildungsgang_speichern)),
     ("POST", r"/api/admin/bildungsgang/" + ID, _grunddaten_schritt("bildungsgang_geaendert",
                                                                    lambda con, d, i: grunddaten.bildungsgang_speichern(con, d, i), True)),
@@ -926,9 +964,11 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/pruefung", _pr_schritt(lambda con, k, d, _: pruefungen.pruefung_speichern(con, k["id"], d))),
     ("GET", r"/api/pruefung/" + ID, api_pruefung),
     ("GET", r"/api/pruefung/" + ID + "/export", api_export),
+    ("POST", r"/api/moodle/vorschau", api_moodle_vorschau),
+    ("POST", r"/api/moodle/uebernehmen", api_moodle_uebernehmen),
     ("GET", r"/api/pruefung/" + ID + r"/ergebnis\.pdf", api_ergebnis_pdf),
     ("GET", r"/api/pruefung/" + ID + r"/rueckmeldung\.pdf", api_rueckmeldung_pdf),
-    ("GET", r"/api/pruefung/" + ID + r"/moodle\.csv", api_moodle_csv),
+    ("GET", r"/api/pruefung/" + ID + r"/moodle\.csv", api_moodle_export),
     ("POST", r"/api/pruefung/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.pruefung_speichern(con, k["id"], d, i))),
     ("POST", r"/api/pruefung/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.pruefung_loeschen(con, k["id"], i))),
     ("POST", r"/api/pruefung/" + ID + "/bewertung/" + ID, api_bewertung),

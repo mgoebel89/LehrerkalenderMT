@@ -25,6 +25,15 @@ class Python311(unittest.TestCase):
             with self.subTest(datei=str(datei.relative_to(REPO))):
                 ast.parse(datei.read_text(encoding="utf-8"), feature_version=(3, 11))
 
+    def test_keine_doppelten_funktionen(self):
+        """Eine zweite Funktion gleichen Namens ueberdeckt still die erste (so in 0.10.0 passiert: der Moodle-Export
+        ersetzte den Schuelerlisten-Import)."""
+        for datei in (REPO / "app").glob("*.py"):
+            namen = [k.name for k in ast.parse(datei.read_text(encoding="utf-8")).body if isinstance(k, (ast.FunctionDef, ast.ClassDef))]
+            doppelt = sorted({n for n in namen if namen.count(n) > 1})
+            with self.subTest(datei=datei.name):
+                self.assertEqual(doppelt, [])
+
 
 class MitDatenbank(unittest.TestCase):
     def setUp(self):

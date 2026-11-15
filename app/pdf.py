@@ -90,10 +90,37 @@ def umbrechen(s, groesse, breite, fett=False):
     return zeilen
 
 
+def jpeg_masse(daten):
+    """(Breite, Hoehe, Farbkanaele) eines JPEG aus seinem SOF-Abschnitt; None, wenn es kein lesbares JPEG ist."""
+    if not daten or daten[:2] != b"\xff\xd8":
+        return None
+    i = 2
+    while i + 9 < len(daten):
+        if daten[i] != 0xFF:
+            return None
+        marke = daten[i + 1]
+        if marke in (0xD8, 0x01) or 0xD0 <= marke <= 0xD7:
+            i += 2
+            continue
+        laenge = int.from_bytes(daten[i + 2:i + 4], "big")
+        if marke in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+            hoehe = int.from_bytes(daten[i + 5:i + 7], "big")
+            breite = int.from_bytes(daten[i + 7:i + 9], "big")
+            return breite, hoehe, daten[i + 9]
+        i += 2 + laenge
+    return None
+
+
 class Seite:
     def __init__(self, groesse=A4):
         self.teile = []
         self.groesse = groesse
+        self.bilder = []        # JPEG-Daten der Bilder dieser Seite (Name /Im<n> je Dokument)
+
+    def bild(self, jpeg, x, y, b, h):
+        """JPEG-Bild mit linker unterer Ecke (x, y) in Breite b und Hoehe h."""
+        self.bilder.append(jpeg)
+        self.teile.append(b"q %.3f 0 0 %.3f %.3f %.3f cm /@BILD%d@ Do Q" % (b, h, x, y, len(self.bilder) - 1))
 
     def text(self, x, y, s, groesse=10, fett=False, farbe=(0.11, 0.14, 0.2)):
         self.teile.append(b"BT %.3f %.3f %.3f rg /%s %.1f Tf %.2f %.2f Td (" % (farbe + (b"F2" if fett else b"F1", groesse, x, y))
@@ -125,12 +152,24 @@ def dokument(seiten, titel="Lehrerkalender MT"):
     f1 = obj(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
     f2 = obj(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
     kinder = []
+    bild_obj = {}                                   # gleiche Bilder (Logo auf jeder Seite) nur einmal in der Datei
     for s in seiten:
         daten = s.inhalt()
+        namen = []
+        for n, jpeg in enumerate(getattr(s, "bilder", [])):
+            if jpeg not in bild_obj:
+                breite_px, hoehe_px, kanaele = jpeg_masse(jpeg) or (1, 1, 3)
+                farbraum = b"/DeviceGray" if kanaele == 1 else (b"/DeviceCMYK /Decode [1 0 1 0 1 0 1 0]" if kanaele == 4 else b"/DeviceRGB")
+                bild_obj[jpeg] = obj(b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 "
+                                     b"/Filter /DCTDecode /Length %d >>\nstream\n" % (breite_px, hoehe_px, farbraum, len(jpeg)) + jpeg + b"\nendstream")
+            name = b"Im%d" % bild_obj[jpeg]
+            daten = daten.replace(b"/@BILD%d@" % n, b"/" + name)
+            namen.append(b"/%s %d 0 R" % (name, bild_obj[jpeg]))
         strom = obj(b"<< /Length %d >>\nstream\n" % len(daten) + daten + b"\nendstream")
         breite, hoehe = getattr(s, "groesse", A4)
+        xobj = (b" /XObject << " + b" ".join(sorted(set(namen))) + b" >>") if namen else b""
         kinder.append(obj(b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %.2f %.2f] /Contents %d 0 R "
-                          b"/Resources << /Font << /F1 %d 0 R /F2 %d 0 R >> >> >>" % (seiten_obj, breite, hoehe, strom, f1, f2)))
+                          b"/Resources << /Font << /F1 %d 0 R /F2 %d 0 R >>%s >> >>" % (seiten_obj, breite, hoehe, strom, f1, f2, xobj)))
     objekte[katalog - 1] = b"<< /Type /Catalog /Pages %d 0 R >>" % seiten_obj
     objekte[seiten_obj - 1] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % k for k in kinder), len(kinder))
     info = obj(b"<< /Title (" + _pdf_text(titel) + b") /Producer (Lehrerkalender MT) >>")
@@ -149,3 +188,7 @@ def dokument(seiten, titel="Lehrerkalender MT"):
 
 BLAU = (0, 0.388, 0.612)
 LEISE = (0.365, 0.404, 0.475)
+# DRS-Farben (Farbband im Fuss: Blau, Gruen, Pink, Gelb im Verhaeltnis 4:1:1:1)
+DRS_GRUEN = (0.694, 0.784, 0.0)
+DRS_PINK = (0.831, 0.0, 0.369)
+DRS_GELB = (0.973, 0.706, 0.259)

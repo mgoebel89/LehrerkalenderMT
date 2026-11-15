@@ -258,11 +258,18 @@ document.getElementById('abmelden').addEventListener('click', async () => {
     const ich = await L.api('GET', '/api/ich');
     S.konto = ich.konto;
     S.update = ich.update;
+    S.schule = ich.schule;
   } catch (e) {
     location.href = '/anmelden';
     return;
   }
   document.getElementById('wer').textContent = S.konto.name;
+  if (S.schule && S.schule.logo) {
+    const logo = document.getElementById('schul-logo');
+    logo.src = '/api/schule/logo?v=' + encodeURIComponent(S.schule.stand);
+    logo.alt = S.schule.name;
+    logo.hidden = false;
+  }
   while (S.konto.pw_vorlaeufig) await eigenesPasswort();
   window.addEventListener('hashchange', zeigen);
   zeigen();

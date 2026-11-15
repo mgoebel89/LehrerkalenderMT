@@ -85,7 +85,7 @@ def _fmt(zahl, stellen=1):
 
 def normalisiert(text):
     """Namen robust vergleichen: Umlaute ausschreiben, Akzente weg, nur Buchstaben, klein."""
-    t = (text or "").lower().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+    t = (text or "").lower().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss").replace("ı", "i").replace("ł", "l")
     t = unicodedata.normalize("NFKD", t)
     return re.sub(r"[^a-z]", "", "".join(c for c in t if not unicodedata.combining(c)))
 
