@@ -315,6 +315,7 @@ const Pruefungen = (() => {
   let reiter = 'bewerten';
 
   async function detailZeigen(pid) {
+    if (PM.ort && (!E || E.pruefung.id !== pid)) { clearInterval(PM.takt); PM.takt = null; PM.ort.remove(); PM.ort = null; document.body.classList.remove('pm-offen'); }
     E = await L.api('GET', '/api/pruefung/' + pid);
     detailZeichnen();
   }
@@ -336,13 +337,15 @@ const Pruefungen = (() => {
       el('div', { class: 'zeile' }, el('a', { class: 'knopf', href: '#pruefungen' }, L.symbol('links'), 'Alle Prüfungen'),
         el('h2', { text: p.titel }), el('span', { class: 'chip ' + standFarbe, text: standText }),
         el('span', { class: 'rechts' },
+          !fertig && E.schueler.length ? el('button', { type: 'button', onclick: pruefungsmodus }, L.symbol('uhr'), 'Prüfungsmodus') : null,
           !fertig ? el('button', { type: 'button', onclick: async () => pruefungDialog(p, null, null, () => detailZeigen(p.id)) }, L.symbol('stift'), 'Bearbeiten') : null,
           fertig ? el('button', { type: 'button', onclick: oeffnen }, L.symbol('undo'), 'Wieder öffnen')
             : el('button', { type: 'button', class: 'haupt', onclick: abschliessen }, L.symbol('ok'), 'Abschließen'))),
       el('div', { class: 'zeile leise klein' }, el('span', { text: p.artname + ' · ' + ERFASSUNG[p.erfassung] + ' · ' + wannText(p) }), schluesselText(),
         el('span', { text: E.herkunft })),
       el('div', { class: 'zeile' },
-        segment([['bewerten', 'Bewerten']].concat(hatTeams(p) ? [['teams', 'Teams' + (p.teams.length ? ' (' + p.teams.length + ')' : '')]] : [], [['auswertung', 'Auswertung']]),
+        segment([['bewerten', 'Bewerten']].concat(hatTeams(p) ? [['teams', 'Teams' + (p.teams.length ? ' (' + p.teams.length + ')' : '')]] : [],
+          [['fragen', 'Fragen' + (p.fragen.length ? ' (' + p.fragen.length + ')' : '')], ['auswertung', 'Auswertung']]),
           reiter, w => { reiter = w; detailZeichnen(); }),
         kopfStatistik(st)),
       fertig ? el('div', { class: 'banner', text: 'Abgeschlossen: Der Notenschlüssel ist festgehalten, Bewertungen sind gesperrt. „Wieder öffnen“ hebt das auf.' }) : null,
@@ -368,6 +371,7 @@ const Pruefungen = (() => {
       return L.setzen(rumpf, el('div', { class: 'leer' }, 'Für diese Klasse gibt es noch keine Schülerliste. ', el('a', { href: '#pruefungen-schueler', text: 'Schülerliste anlegen' })));
     }
     if (reiter === 'teams' && !hatTeams(E.pruefung)) reiter = 'bewerten';
+    if (reiter === 'fragen') return L.setzen(rumpf, fragenAnsicht());
     L.setzen(rumpf, reiter === 'auswertung' ? auswertung() : reiter === 'teams' ? teamsAnsicht()
       : E.pruefung.erfassung === 'checkliste' ? checklisteMatrix() : bewertenTabelle());
   }
@@ -432,6 +436,8 @@ const Pruefungen = (() => {
       const meine = [];
       tr.appendChild(el('td', {}, el('b', { text: z.name }), z.gruppe ? el('span', { class: 'chip klein gr', text: z.gruppe }) : null,
         z.team ? el('span', { class: 'chip klein team', text: z.team }) : null,
+        z.dauer !== null && z.dauer !== undefined ? el('span', { class: 'leise klein mono', title: 'Dauer im Prüfungsmodus', text: ' ⏱ ' + mmss(z.dauer) }) : null,
+        z.protokoll && z.protokoll.length ? el('span', { class: 'leise klein', title: z.protokoll.map(x => x.text + (x.stufe !== null ? ' (' + x.stufe + '/4)' : '')).join('\n'), text: ' · ' + z.protokoll.length + ' Fragen' }) : null,
         z.notiz ? el('span', { class: 'leise klein', title: z.notiz, text: ' ✎' }) : null));
       if (p.erfassung === 'aufgaben') kriterien.forEach(k => { const i = feld(k.key, z.werte[k.key], k.max); meine.push(i); tr.appendChild(el('td', { class: 'zahl' }, i)); });
       if (p.erfassung === 'gesamt') { const i = feld('gesamt', z.werte.gesamt, p.max_punkte); meine.push(i); tr.appendChild(el('td', { class: 'zahl' }, i)); }
@@ -562,6 +568,250 @@ const Pruefungen = (() => {
         v.team && !z.team_id ? el('p', { class: 'leise klein', text: 'Ohne Team: der Haken gilt nur für diesen Schüler.' }) : null),
     });
     detailZeichnen();
+  }
+
+  // --- Reiter Fragen: Einstellungen des Pruefungsmodus und Fragenpool ---
+  async function pmAktion(pfad, daten) {
+    try { E = await L.api('POST', '/api/pruefung/' + E.pruefung.id + pfad, daten || {}); return E; }
+    catch (e) { L.meldung(e.message, true); return null; }
+  }
+
+  function einstellungFelder(st) {
+    const zahl = (wert, breite) => el('input', { type: 'number', min: 0, value: wert, style: 'width:' + (breite || 90) + 'px' });
+    const f = { minuten: zahl(st.minuten), vorwarnung: zahl(st.vorwarnung), gesamt_minuten: zahl(st.gesamt_minuten),
+      fragen_anzahl: zahl(st.fragen_anzahl), fragen_gewicht: zahl(st.fragen_gewicht) };
+    const inhalt = el('div', { class: 'felder zwei' },
+      L.feld('Minuten je Schüler (einzeln)', f.minuten), L.feld('Vorwarnung (Minuten vor Ende)', f.vorwarnung, 'Uhr wird gelb'),
+      L.feld('Gesamtzeit (alle parallel)', f.gesamt_minuten, 'Minuten'), L.feld('Fragen je Schüler', f.fragen_anzahl, 'Ziel beim Ziehen'),
+      E.pruefung.erfassung === 'bogen' ? L.feld('Gewicht der Fragen in der Note', f.fragen_gewicht, '0 = nur Protokoll; sonst wie ein Bereich des Bogens') : null);
+    const werte = () => Object.fromEntries(Object.entries(f).map(([k, i]) => [k, i.value]));
+    return { inhalt, werte };
+  }
+
+  async function einstellungenDialog(danach) {
+    const ef = einstellungFelder(E.pruefung.einstellungen);
+    const r = await L.dialog({ titel: 'Einstellungen Prüfungsmodus', inhalt: ef.inhalt,
+      speichern: () => L.api('POST', '/api/pruefung/' + E.pruefung.id + '/einstellungen', ef.werte()) });
+    if (r) { E = r; if (danach) danach(); }
+  }
+
+  function fragenAnsicht() {
+    const p = E.pruefung;
+    const st = p.einstellungen;
+    const viele = el('textarea', { rows: 4, placeholder: 'Eine Frage je Zeile, z. B.\nPneumatik: Was ist ein 5/2-Wegeventil?\nWas macht ein Drosselrückschlagventil?' });
+    const einfuegen = async () => { if (await pmAktion('/fragen/einfuegen', { text: viele.value })) { viele.value = ''; detailZeichnen(); } };
+    const bearbeiten = async f => {
+      const text = el('textarea', { rows: 3, maxlength: 1000 });
+      text.value = f.text;
+      const kat = el('input', { maxlength: 60, value: f.kategorie, placeholder: 'freiwillig' });
+      const r = await L.dialog({ titel: 'Frage', inhalt: el('div', { class: 'felder' }, L.feld('Frage', text), L.feld('Kategorie', kat)),
+        weitere: [{ text: 'Löschen', klasse: 'warnen', speichern: () => L.api('POST', '/api/pruefung/' + p.id + '/frage/' + f.id + '/loeschen', {}) }],
+        speichern: () => L.api('POST', '/api/pruefung/' + p.id + '/frage/' + f.id, { text: text.value, kategorie: kat.value }) });
+      if (r) { E = r; detailZeichnen(); }
+    };
+    return el('div', { class: 'zwei-spalten' },
+      el('div', { class: 'karte stapel' }, el('div', { class: 'zeile' }, el('h3', { text: 'Fragenpool' }), el('span', { class: 'leise klein', text: p.fragen.length + ' Fragen' })),
+        p.fragen.length ? el('table', { class: 'liste' }, el('tbody', {}, p.fragen.map(f => el('tr', { class: 'klickbar', onclick: () => bearbeiten(f) },
+          el('td', {}, f.kategorie ? el('span', { class: 'chip klein', text: f.kategorie }) : null, ' ', f.text),
+          el('td', { class: 'leise klein mono', style: 'white-space:nowrap', text: f.gezogen ? f.gezogen + '× gezogen' : '' })))))
+          : el('p', { class: 'leise', text: 'Noch keine Fragen. Im Prüfungsmodus ziehst du je Schüler zufällig Fragen; keine kommt doppelt, solange der Pool reicht.' }),
+        viele, el('div', {}, el('button', { type: 'button', onclick: einfuegen }, L.symbol('plus'), 'Fragen hinzufügen'))),
+      el('div', { class: 'karte stapel' }, el('h3', { text: 'Prüfungsmodus' }),
+        el('div', { class: 'leise klein', text: 'Einzeln: ' + st.minuten + ' min je Schüler, Vorwarnung ' + st.vorwarnung + ' min · Alle parallel: ' + st.gesamt_minuten +
+          ' min · ' + st.fragen_anzahl + ' Fragen je Schüler' + (p.erfassung === 'bogen' ? ' · Fragen in der Note: ' + (st.fragen_gewicht ? 'Gewicht ' + fmt(st.fragen_gewicht) : 'nein (nur Protokoll)') : '') }),
+        el('div', { class: 'zeile' }, el('button', { type: 'button', onclick: () => einstellungenDialog(detailZeichnen) }, L.symbol('einstellungen'), 'Einstellungen'),
+          p.stand !== 'ausgewertet' ? el('button', { type: 'button', class: 'haupt', onclick: pruefungsmodus }, L.symbol('uhr'), 'Prüfungsmodus starten') : null),
+        el('p', { class: 'leise klein', text: 'Einschätzung je Frage: ' + p.fragen_stufen.map((s, i) => i + ' = ' + s).join(' · ') })));
+  }
+
+  // --- Pruefungsmodus (Vollbild fuers Tablet) ---
+  const PM = { modus: 'einzeln', aktiv: null, mitglied: null, start: {}, gesamt: { start: null, verbraucht: 0 }, takt: null, ort: null };
+
+  const mmss = sek => { const a = Math.abs(Math.round(sek)); return (sek < 0 ? '+' : '') + String(Math.floor(a / 60)).padStart(2, '0') + ':' + String(a % 60).padStart(2, '0'); };
+
+  // Eintraege der Liste: Teams (wenn Team-Bereiche) und einzelne Schueler
+  function pmEintraege() {
+    const p = E.pruefung;
+    const aktiv = E.schueler.filter(z => z.aktiv || z.protokoll.length || z.beginn);
+    const mitTeams = hatTeams(p) && p.teams.length;
+    const liste = [];
+    if (mitTeams) p.teams.forEach(t => {
+      const m = aktiv.filter(z => z.team_id === t.id);
+      if (m.length) liste.push({ id: 't' + t.id, name: t.name, mitglieder: m, team: true });
+    });
+    aktiv.filter(z => !mitTeams || !z.team_id).forEach(z => liste.push({ id: 's' + z.id, name: z.name, mitglieder: [z], team: false }));
+    liste.forEach(e => {
+      const z0 = e.mitglieder[0];
+      e.zustand = e.mitglieder.every(z => z.fehlt) ? 'fehlt' : z0.ende ? 'fertig' : z0.beginn || PM.start[e.id] ? 'laeuft' : 'offen';
+    });
+    const rang = { laeuft: 0, offen: 1, fertig: 2, fehlt: 3 };
+    return liste.sort((a, b) => rang[a.zustand] - rang[b.zustand] || a.name.localeCompare(b.name, 'de'));
+  }
+
+  function pruefungsmodus() {
+    if (PM.ort) PM.ort.remove();
+    PM.ort = el('div', { class: 'pm', role: 'dialog', 'aria-label': 'Prüfungsmodus' });
+    document.body.appendChild(PM.ort);
+    document.body.classList.add('pm-offen');
+    if (!PM.takt) PM.takt = setInterval(pmUhr, 500);
+    pmZeichnen();
+  }
+
+  function pmSchliessen() {
+    clearInterval(PM.takt); PM.takt = null;
+    if (PM.ort) PM.ort.remove();
+    PM.ort = null;
+    document.body.classList.remove('pm-offen');
+    detailZeichnen();
+  }
+
+  // Restzeit in Sekunden fuer die Uhr oben
+  function pmRest() {
+    const st = E.pruefung.einstellungen;
+    if (PM.modus === 'parallel') {
+      const lauf = PM.gesamt.verbraucht + (PM.gesamt.start ? (Date.now() - PM.gesamt.start) / 1000 : 0);
+      return { rest: st.gesamt_minuten * 60 - lauf, laeuft: !!PM.gesamt.start, gesamt: st.gesamt_minuten * 60 };
+    }
+    const e = PM.aktiv && pmEintraege().find(x => x.id === PM.aktiv);
+    if (!e) return { rest: st.minuten * 60, laeuft: false, gesamt: st.minuten * 60 };
+    const z0 = e.mitglieder[0];
+    let beginn = PM.start[e.id];
+    if (!beginn && z0.beginn) beginn = new Date(z0.beginn).getTime();
+    const ende = z0.ende ? new Date(z0.ende).getTime() : null;
+    if (!beginn) return { rest: st.minuten * 60, laeuft: false, gesamt: st.minuten * 60 };
+    return { rest: st.minuten * 60 - ((ende || Date.now()) - beginn) / 1000, laeuft: !ende, gesamt: st.minuten * 60 };
+  }
+
+  function pmUhr() {
+    if (!PM.ort) return;
+    const u = PM.ort.querySelector('.pm-uhr');
+    if (!u) return;
+    const r = pmRest();
+    const vor = E.pruefung.einstellungen.vorwarnung * 60;
+    u.textContent = mmss(r.rest);
+    u.classList.toggle('gelb', r.rest > 0 && r.rest <= vor);
+    u.classList.toggle('rot', r.rest <= 0);
+    u.classList.toggle('steht', !r.laeuft);
+  }
+
+  function pmZeichnen() {
+    if (!PM.ort) return;
+    const p = E.pruefung;
+    const liste = pmEintraege();
+    if (PM.aktiv && !liste.some(e => e.id === PM.aktiv)) PM.aktiv = null;
+    const parallelKnoepfe = PM.modus === 'parallel' ? [
+      el('button', { type: 'button', class: 'haupt', onclick: () => {
+        if (PM.gesamt.start) { PM.gesamt.verbraucht += (Date.now() - PM.gesamt.start) / 1000; PM.gesamt.start = null; } else PM.gesamt.start = Date.now();
+        pmZeichnen(); } }, PM.gesamt.start ? '⏸ Pause' : '▶ Start'),
+      el('button', { type: 'button', onclick: () => { PM.gesamt = { start: null, verbraucht: 0 }; pmZeichnen(); } }, L.symbol('undo'), 'Zurück')] : [];
+    const kopf = el('div', { class: 'pm-kopf' },
+      el('div', { class: 'pm-titel' }, el('b', { text: p.titel }), el('span', { class: 'leise klein', text: ERFASSUNG[p.erfassung] })),
+      segment([['einzeln', 'Einzeln nacheinander'], ['parallel', 'Alle parallel']], PM.modus, w => { PM.modus = w; pmZeichnen(); }),
+      el('div', { class: 'pm-uhr mono', 'aria-live': 'off' }), parallelKnoepfe,
+      el('span', { class: 'rechts zeile' },
+        el('button', { type: 'button', 'aria-label': 'Einstellungen', onclick: () => einstellungenDialog(pmZeichnen) }, L.symbol('einstellungen')),
+        el('button', { type: 'button', onclick: pmSchliessen }, L.symbol('zu'), 'Schließen')));
+    const listeEl = el('div', { class: 'pm-liste' }, liste.map(e => el('button', { type: 'button',
+      class: 'pm-eintrag ' + e.zustand + (e.id === PM.aktiv ? ' an' : ''), onclick: () => { PM.aktiv = e.id; PM.mitglied = e.mitglieder[0].id; pmZeichnen(); } },
+      el('span', { class: 'pm-name' }, e.team ? el('span', { class: 'chip klein team', text: e.name }) : el('b', { text: e.name }),
+        e.team ? el('span', { class: 'leise klein', text: ' ' + e.mitglieder.map(z => z.name.split(',')[0]).join(', ') }) : null),
+      el('span', { class: 'pm-stand klein' }, e.zustand === 'fertig' && e.mitglieder[0].dauer !== null ? '✓ ' + mmss(e.mitglieder[0].dauer)
+        : e.zustand === 'laeuft' ? '● läuft' : e.zustand === 'fehlt' ? 'fehlt' : '',
+        e.mitglieder.some(z => z.note) ? el('b', { text: ' ' + e.mitglieder.map(z => z.note ? z.note.text : '–').join(' / ') }) : null))));
+    const aktiv = liste.find(e => e.id === PM.aktiv);
+    L.setzen(PM.ort, kopf, el('div', { class: 'pm-rumpf' }, listeEl,
+      el('div', { class: 'pm-feld' }, aktiv ? pmPanel(aktiv) : el('div', { class: 'leer', text: 'Links einen Schüler bzw. ein Team antippen.' }))));
+    pmUhr();
+  }
+
+  async function pmLauf(e, aktion) {
+    let ok = true;
+    for (const z of e.mitglieder) ok = ok && !!(await pmAktion('/lauf/' + z.id, { aktion }));
+    if (aktion === 'start') PM.start[e.id] = Date.now();
+    else delete PM.start[e.id];
+    if (ok && aktion === 'ende') {   // naechster offener wird vorgeschlagen, aber nicht gestartet
+      const naechster = pmEintraege().find(x => x.zustand === 'offen');
+      PM.aktiv = naechster ? naechster.id : e.id;
+      PM.mitglied = naechster ? naechster.mitglieder[0].id : PM.mitglied;
+    }
+    pmZeichnen();
+  }
+
+  function pmPanel(e) {
+    const p = E.pruefung;
+    const fertig = p.stand === 'ausgewertet';
+    if (!e.mitglieder.some(z => z.id === PM.mitglied)) PM.mitglied = e.mitglieder[0].id;
+    const z = E.schueler.find(x => x.id === PM.mitglied);
+    const z0 = e.mitglieder[0];
+    const laeuft = (z0.beginn || PM.start[e.id]) && !z0.ende;
+    const steuerung = PM.modus === 'einzeln' ? el('div', { class: 'zeile pm-steuer' },
+      !laeuft && !z0.ende ? el('button', { type: 'button', class: 'haupt gross', onclick: () => pmLauf(e, 'start') }, '▶ Start') : null,
+      laeuft ? el('button', { type: 'button', class: 'haupt gross', onclick: () => pmLauf(e, 'ende') }, L.symbol('ok'), 'Fertig') : null,
+      z0.ende ? el('span', { class: 'chip gruen', text: 'fertig nach ' + mmss(z0.dauer || 0) }) : null,
+      z0.beginn || z0.ende ? el('button', { type: 'button', class: 'leicht klein', onclick: () => pmLauf(e, 'zuruecksetzen') }, L.symbol('undo'), 'Zeit zurücksetzen') : null) : null;
+    const mitglieder = e.mitglieder.length > 1 ? el('div', { class: 'segment', role: 'group', 'aria-label': 'Wer wird bewertet' }, e.mitglieder.map(m =>
+      el('button', { type: 'button', class: m.id === z.id ? 'an' : null, onclick: () => { PM.mitglied = m.id; pmZeichnen(); } }, m.name.split(',')[0]))) : null;
+    // Fragen: ziehen, spontan notieren, Einschaetzung je Frage
+    const st = p.einstellungen;
+    const spontan = el('input', { maxlength: 1000, placeholder: 'Spontane Frage notieren …', 'aria-label': 'Spontane Frage' });
+    const notieren = async () => { if (spontan.value.trim() && await pmAktion('/protokoll', { schueler_id: z.id, text: spontan.value })) pmZeichnen(); };
+    spontan.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); notieren(); } });
+    const fragenEl = el('section', { class: 'ov-ab' },
+      el('div', { class: 'ab-kopf' }, el('span', { text: 'Fragen' }), el('span', { class: 'leise klein', text: z.protokoll.filter(x => !x.spontan).length + ' von ' + st.fragen_anzahl + ' gezogen' }),
+        el('span', { class: 'rechts' }, !fertig ? el('button', { type: 'button', class: 'klein', disabled: !p.fragen.length ? true : null,
+          title: p.fragen.length ? null : 'Fragenpool ist leer (Reiter „Fragen“)', onclick: async () => { if (await pmAktion('/ziehen/' + z.id)) pmZeichnen(); } }, '🎲 Frage ziehen') : null)),
+      el('div', { class: 'ab-inhalt' },
+        z.protokoll.map(x => el('div', { class: 'pm-frage' },
+          el('div', { class: 'zeile' }, x.spontan ? el('span', { class: 'chip klein', text: 'spontan' }) : null, el('b', { class: 'pm-frage-text', text: x.text }),
+            !fertig ? el('span', { class: 'rechts zeile' },
+              x.spontan ? el('button', { type: 'button', class: 'leicht klein', title: 'In den Fragenpool übernehmen', onclick: async () => { if (await pmAktion('/protokoll/' + x.id, { in_pool: true })) { L.meldung('In den Pool übernommen.'); pmZeichnen(); } } }, L.symbol('plus'), 'Pool') : null,
+              el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Eintrag entfernen', onclick: async () => { if (await pmAktion('/protokoll/' + x.id + '/loeschen')) pmZeichnen(); } }, L.symbol('zu'))) : null),
+          el('div', { class: 'stufen-wahl pm-skala', role: 'group', 'aria-label': 'Einschätzung' }, p.fragen_stufen.map((name, i) =>
+            el('button', { type: 'button', class: x.stufe === i ? 'an' : null, disabled: fertig ? true : null,
+              onclick: async () => { if (await pmAktion('/protokoll/' + x.id, { stufe: x.stufe === i ? null : i })) pmZeichnen(); } },
+            el('b', { text: String(i) }), el('span', { class: 'leise', text: name })))))),
+        !fertig ? el('div', { class: 'zeile', style: 'flex-wrap:nowrap' }, spontan, el('button', { type: 'button', onclick: notieren }, 'notieren')) : null));
+    return el('div', { class: 'stapel', style: 'gap:10px' },
+      el('div', { class: 'zeile' }, el('h2', { text: e.team ? e.name : z.name }), mitglieder, z.note ? el('span', { class: 'chip blau', text: z.note.text + ' · ' + fmt(z.prozent) + ' %' }) : null),
+      steuerung, fragenEl, pmBewertung(z));
+  }
+
+  // Bewertung des gewaehlten Schuelers: Bogen bzw. Checkliste bzw. Punkte, grosse Felder
+  function pmBewertung(z) {
+    const p = E.pruefung;
+    const fertig = p.stand === 'ausgewertet';
+    const setze = async (key, wert) => { if (await speichern(z.id, { werte: { [key]: wert } })) pmZeichnen(); };
+    if (p.erfassung === 'gesamt') {
+      return el('section', { class: 'ov-ab' }, el('div', { class: 'ab-kopf', text: 'Bewertung' }), el('div', { class: 'ab-inhalt' },
+        el('div', { class: 'zeile' }, el('input', { inputmode: 'decimal', class: 'punkte gross', value: z.werte.gesamt === undefined ? '' : fmt(z.werte.gesamt, 2), disabled: fertig ? true : null,
+          onchange: ev => setze('gesamt', ev.target.value.replace(',', '.')) }), el('span', { class: 'leise', text: 'von ' + fmt(p.max_punkte) + ' P' }))));
+    }
+    return el('div', { class: 'stapel', style: 'gap:10px' }, p.struktur.bereiche.map(b => el('section', { class: 'ov-ab' },
+      el('div', { class: 'ab-kopf' }, el('span', { text: b.name }), b.team && z.team ? el('span', { class: 'chip klein team', text: 'gilt für ' + z.team }) : null),
+      el('div', { class: 'ab-inhalt' }, b.kriterien.map(k => {
+        const wert = z.werte[k.key];
+        let eingabe;
+        if (k.typ === 'stufen') {
+          eingabe = el('div', { class: 'stufen-wahl', role: 'group', 'aria-label': k.name }, k.stufen.map((s, i) => el('button', { type: 'button', class: wert === i ? 'an' : null,
+            disabled: fertig ? true : null, title: s.text || null, onclick: () => setze(k.key, wert === i ? null : i) }, el('b', { text: s.name }), el('span', { class: 'leise', text: fmt(s.punkte) + ' P' }))));
+        } else if (k.typ === 'punkte') {
+          eingabe = el('div', { class: 'zeile' }, el('input', { inputmode: 'decimal', class: 'punkte gross', value: wert === undefined ? '' : fmt(wert, 2), disabled: fertig ? true : null,
+            onchange: ev => setze(k.key, ev.target.value.replace(',', '.')) }), el('span', { class: 'leise', text: 'von ' + fmt(k.max) + ' P' }));
+        } else if (k.typ === 'check' || k.typ === 'haken') {
+          eingabe = el('label', { class: 'haken gross' }, el('input', { type: 'checkbox', checked: wert ? true : null, disabled: fertig ? true : null,
+            onchange: ev => setze(k.key, ev.target.checked ? true : null) }), el('span', { text: k.typ === 'check' ? fmt(k.max) + ' P' : 'erledigt' }));
+        } else {
+          const t = el('textarea', { rows: 2, disabled: fertig ? true : null, onchange: ev => setze(k.key, ev.target.value) });
+          t.value = wert || '';
+          eingabe = t;
+        }
+        return el('div', { class: 'kriterium' }, el('b', { text: k.name }), eingabe);
+      })))),
+      el('section', { class: 'ov-ab' }, el('div', { class: 'ab-kopf', text: 'Notiz' }), el('div', { class: 'ab-inhalt' }, (() => {
+        const t = el('textarea', { rows: 2, disabled: fertig ? true : null, placeholder: 'Gesamteindruck, Begründung …', onchange: ev => speichern(z.id, { notiz: ev.target.value }) });
+        t.value = z.notiz || '';
+        return t;
+      })())));
   }
 
   // Feedbackbogen eines Schuelers im Overlay

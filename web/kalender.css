@@ -364,3 +364,34 @@ a.z-knopf:hover span:last-child { text-decoration: underline; }
 .team-wahl { max-height: 50vh; overflow: auto; }
 .ka .segment { flex: none; white-space: nowrap; }
 .ka .segment button { white-space: nowrap; }
+
+/* D2b: Pruefungsmodus (Vollbild, Tablet) */
+body.pm-offen { overflow: hidden; }
+.pm { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.pm-kopf { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 14px; background: var(--karte); border-bottom: 2px solid var(--blau); }
+.pm-titel { display: grid; gap: 1px; min-width: 0; }
+.pm-uhr { font-size: 2.2rem; font-weight: 800; padding: 2px 14px; border-radius: 10px; background: var(--blau-hell); color: var(--blau); letter-spacing: .02em; min-width: 140px; text-align: center; }
+.pm-uhr.steht { opacity: .55; }
+.pm-uhr.gelb { background: #fde9b8; color: #7a4f00; }
+.pm-uhr.rot { background: #f9d3da; color: #a01c34; }
+.pm-rumpf { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); min-height: 0; }
+.pm-liste { overflow: auto; padding: 10px; display: grid; gap: 6px; align-content: start; border-right: 1px solid var(--linie); background: var(--karte); }
+.pm-eintrag { display: grid; gap: 2px; text-align: left; justify-content: stretch; min-height: 54px; padding: 8px 10px; border-radius: 8px; }
+.pm-eintrag.an { border: 2px solid var(--blau); background: var(--blau-hell); }
+.pm-eintrag.fertig { opacity: .7; }
+.pm-eintrag.laeuft .pm-stand { color: var(--blau); font-weight: 700; }
+.pm-eintrag.fehlt { opacity: .45; }
+.pm-stand { color: var(--leise); }
+.pm-feld { overflow: auto; padding: 14px 18px 40px; }
+.pm-steuer button.gross { min-height: 52px; font-size: 1.1rem; padding: 0 22px; }
+.pm-frage { display: grid; gap: 6px; padding-bottom: 8px; border-bottom: 1px dashed var(--linie); }
+.pm-frage-text { font-size: 1rem; }
+.pm-skala { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.pm-skala button { min-height: 52px; }
+input.punkte.gross { font-size: 1.3rem; width: 110px; min-height: 48px; }
+label.haken.gross { display: inline-flex; gap: 10px; align-items: center; min-height: 48px; padding: 4px 12px; border: 1px solid var(--linie); border-radius: 8px; }
+label.haken.gross input { width: 24px; height: 24px; }
+@media (max-width: 760px) { .pm-rumpf { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); } .pm-liste { max-height: 30vh; border-right: none; border-bottom: 1px solid var(--linie); }
+  .pm-uhr { font-size: 1.6rem; min-width: 100px; } .pm-skala { grid-template-columns: 1fr 1fr; } }
+.pm-skala button { display: grid; gap: 2px; align-content: start; justify-items: start; text-align: left; padding: 5px 5px; font-size: .74rem; line-height: 1.2; min-width: 0; }
+.pm-skala button span { white-space: normal; overflow-wrap: break-word; hyphens: auto; -webkit-hyphens: auto; }

@@ -19,6 +19,7 @@ Das Konzept (Fassung 2, freigegeben am 14.11.2026) liegt in `docs/KONZEPT.html`.
 | C3 | Thema als Ordner mit Umfang (Budget), darin Lernsituationen; Bibliothek Lernfeld → Thema → Lernsituationen; Raster mit aufklappbaren LS-Zeilen und „noch offen“; Schuljahr als Startansicht, aktuelle Woche in allen Rastern hinterlegt (Migration 11) | gebaut (0.6.0) |
 | C4 | Gruppen ohne eigene Planung: eine Themenfolge je Klasse, Gruppenstunden am selben Tag bilden einen Schritt (gleicher Stoff), Ausfall nur einer Gruppe → „holt nach“; Prüfungen zusammen oder getrennt je Gruppe, Hinweis ohne passenden Unterricht (Migration 12) | gebaut (0.7.0) |
 | D2a | Checkliste für Laborreihen (Versuche mit Haken und Punkten, je Versuch Team oder einzeln, nur Testat möglich), Teams je Prüfung (zufällig bilden, Team-Bereiche auch im Feedbackbogen), Matrix Schüler × Versuch; Prüfung aus dem Raster anlegen; Wochenplan zeigt Ausfall/Vertretung als farbiges Band (Migration 13) | gebaut (0.8.0) |
+| D2b | Prüfungsmodus am Tablet (Vollbild): einzeln nacheinander mit Countdown je Schüler/Team (Vorwarnung gelb, Ende rot, Überziehung) oder alle parallel mit gemeinsamer Uhr; Dauer je Schüler protokolliert; Fragenpool je Prüfung, Fragen ziehen ohne Wiederholung, Spontanfragen notieren, Einschätzung 0–4 je Frage, optional als Bereich in der Note (Migration 14) | gebaut (0.9.0) |
 | D2 | Prüfungsmodus am Tablet mit Stoppuhr, Gruppenprüfungen, Moodle-Ergebnisimport, PDF, Exporte | offen |
 | E | Teilen im Kollegium | offen |
 | F | Formularcenter, Unterrichtsbesuche, Paperless | offen |

@@ -459,6 +459,29 @@ MIGRATIONEN = [
         schueler_id INTEGER NOT NULL REFERENCES schueler(id) ON DELETE CASCADE,
         PRIMARY KEY (pruefung_id, schueler_id))
     """),
+    # 14: Stufe D2b Pruefungsmodus: Einstellungen je Pruefung (Minuten je Schueler, Vorwarnung, Gesamtzeit, Fragen je
+    #     Schueler, Gewicht der Fragen), Beginn/Ende je Schueler (Dauer), Fragenpool und Protokoll der gezogenen bzw.
+    #     spontanen Fragen mit Einschaetzung (Stufe 0-4).
+    """
+    ALTER TABLE pruefung ADD COLUMN einstellungen TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE bewertung ADD COLUMN beginn TEXT;
+    ALTER TABLE bewertung ADD COLUMN ende TEXT;
+    CREATE TABLE pruefung_frage (
+        id INTEGER PRIMARY KEY,
+        pruefung_id INTEGER NOT NULL REFERENCES pruefung(id) ON DELETE CASCADE,
+        text TEXT NOT NULL,
+        kategorie TEXT NOT NULL DEFAULT '',
+        reihenfolge INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE pruefung_protokoll (
+        id INTEGER PRIMARY KEY,
+        pruefung_id INTEGER NOT NULL REFERENCES pruefung(id) ON DELETE CASCADE,
+        schueler_id INTEGER NOT NULL REFERENCES schueler(id) ON DELETE CASCADE,
+        frage_id INTEGER REFERENCES pruefung_frage(id) ON DELETE SET NULL,
+        text TEXT NOT NULL,
+        stufe INTEGER,
+        zeit TEXT NOT NULL);
+    CREATE INDEX pruefung_protokoll_schueler ON pruefung_protokoll (pruefung_id, schueler_id)
+    """,
 ]
 
 

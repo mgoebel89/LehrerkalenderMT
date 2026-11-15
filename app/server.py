@@ -723,6 +723,18 @@ def api_team(h, con, daten, pid, tid=None, loeschen=False):
     h.antwort(200, pruefungen.ergebnis(con, k["id"], int(pid)))
 
 
+def _pm_schritt(funktion):
+    """Pruefungsmodus-Aenderung; Antwort: das ganze Ergebnis der Pruefung (plus "neu": Rueckgabe der Funktion)."""
+    def schritt(h, con, daten, pid, oid=None):
+        k = h.konto(con)
+        with db.transaktion(con):
+            neu = funktion(con, k["id"], _ganzzahl(pid), daten, None if oid is None else _ganzzahl(oid))
+        e = pruefungen.ergebnis(con, k["id"], int(pid))
+        e["neu"] = neu
+        h.antwort(200, e)
+    return schritt
+
+
 def api_teams_bilden(h, con, daten, pid):
     k = h.konto(con)
     with db.transaktion(con):
@@ -895,6 +907,16 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/pruefung/" + ID + "/team/" + ID, lambda h, con, d, pid, tid: api_team(h, con, d, pid, tid)),
     ("POST", r"/api/pruefung/" + ID + "/team/" + ID + "/loeschen", lambda h, con, d, pid, tid: api_team(h, con, d, pid, tid, True)),
     ("POST", r"/api/pruefung/" + ID + "/teams/bilden", api_teams_bilden),
+    ("POST", r"/api/pruefung/" + ID + "/einstellungen", _pm_schritt(lambda con, l, pid, d, _: pruefungen.einstellungen_setzen(con, l, pid, d))),
+    ("POST", r"/api/pruefung/" + ID + "/frage", _pm_schritt(lambda con, l, pid, d, _: pruefungen.frage_speichern(con, l, pid, d))),
+    ("POST", r"/api/pruefung/" + ID + "/frage/" + ID, _pm_schritt(lambda con, l, pid, d, fid: pruefungen.frage_speichern(con, l, pid, d, fid))),
+    ("POST", r"/api/pruefung/" + ID + "/frage/" + ID + "/loeschen", _pm_schritt(lambda con, l, pid, d, fid: pruefungen.frage_loeschen(con, l, pid, fid))),
+    ("POST", r"/api/pruefung/" + ID + "/fragen/einfuegen", _pm_schritt(lambda con, l, pid, d, _: pruefungen.fragen_einfuegen(con, l, pid, d.get("text")))),
+    ("POST", r"/api/pruefung/" + ID + "/ziehen/" + ID, _pm_schritt(lambda con, l, pid, d, sid: pruefungen.frage_ziehen(con, l, pid, sid))),
+    ("POST", r"/api/pruefung/" + ID + "/protokoll", _pm_schritt(lambda con, l, pid, d, _: pruefungen.protokoll_speichern(con, l, pid, d))),
+    ("POST", r"/api/pruefung/" + ID + "/protokoll/" + ID, _pm_schritt(lambda con, l, pid, d, eid: pruefungen.protokoll_speichern(con, l, pid, d, eid))),
+    ("POST", r"/api/pruefung/" + ID + "/protokoll/" + ID + "/loeschen", _pm_schritt(lambda con, l, pid, d, eid: pruefungen.protokoll_loeschen(con, l, pid, eid))),
+    ("POST", r"/api/pruefung/" + ID + "/lauf/" + ID, _pm_schritt(lambda con, l, pid, d, sid: pruefungen.lauf_setzen(con, l, pid, sid, d.get("aktion")))),
     ("POST", r"/api/notenschluessel/standard", api_standard_schluessel),
     ("POST", r"/api/abo", _abo_schritt(lambda con, k, d, _: abos.speichern(con, k, d), "abo_angelegt")),
     ("POST", r"/api/abo/" + ID, _abo_schritt(lambda con, k, d, i: abos.speichern(con, k, d, i), "abo_geaendert")),

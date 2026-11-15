@@ -33,6 +33,10 @@ ARTEN = {"schriftlich": "schriftlich", "muendlich": "mündlich", "praktisch": "p
 ERFASSUNGEN = ("aufgaben", "gesamt", "bogen", "checkliste")
 TYPEN = ("stufen", "punkte", "haken", "text", "check")   # check = Haken mit Punkten (Checkliste)
 STAENDE = ("geplant", "angekuendigt", "durchgefuehrt", "ausgewertet")
+# Einschaetzung einer gezogenen oder spontanen Frage im Pruefungsmodus (Stufe 0-4)
+FRAGE_STUFEN = ["nicht beantwortet", "ansatzweise mit Hilfe", "mit Hilfe beantwortet", "selbstständig beantwortet", "exzellent beantwortet"]
+EINSTELLUNGEN = {"minuten": (15, 1, 240), "vorwarnung": (2, 0, 60), "gesamt_minuten": (90, 1, 600), "fragen_anzahl": (2, 1, 10),
+                 "fragen_gewicht": (0, 0, 1000)}
 STANDARD_STUFEN = [{"name": "nicht erkennbar", "punkte": 0}, {"name": "ansatzweise", "punkte": 1},
                    {"name": "überwiegend", "punkte": 2}, {"name": "vollständig", "punkte": 3}]
 
@@ -270,7 +274,7 @@ def _kriterium_prozent(k, wert):
     return None, None
 
 
-def berechnen(erfassung, struktur, max_punkte, werte):
+def berechnen(erfassung, struktur, max_punkte, werte, fragen=None, fragen_gewicht=0):
     """Prozent (0..100) mit Rechenweg. Rueckgabe {prozent, rechenweg: [zeilen], fehlend: [namen], bereiche: [...]}"""
     werte = werte or {}
     if erfassung == "gesamt":
@@ -318,6 +322,13 @@ def berechnen(erfassung, struktur, max_punkte, werte):
             rechenweg.append("%s: %s von %s Punkten" % (b["name"], _fmt(punkte_erreicht), _fmt(punkte_max)))
         else:
             rechenweg.append("%s (Gewicht %s): %s → %s %%" % (b["name"], _fmt(b["gewicht"]), "; ".join(teile), _fmt(bp)))
+    stufen = [f for f in (fragen or []) if f is not None]
+    if erfassung == "bogen" and fragen_gewicht and stufen:
+        fp = 100.0 * sum(stufen) / (4.0 * len(stufen))
+        bereiche.append({"name": "Fragen", "gewicht": fragen_gewicht, "prozent": fp})
+        summe_gewicht += fragen_gewicht
+        summe += fragen_gewicht * fp
+        rechenweg.append("Fragen (Gewicht %s): %s → %s %%" % (_fmt(fragen_gewicht), ", ".join("%d/4" % x for x in stufen), _fmt(fp)))
     if summe_gewicht == 0:
         return {"prozent": None, "rechenweg": rechenweg, "fehlend": fehlend, "bereiche": bereiche}
     if erfassung == "checkliste" and not any(werte.get(k["key"]) for k in _kriterien(struktur)):
@@ -546,6 +557,165 @@ def _termine_pruefen(con, lid, kid, termine):
                          "beginn": stundenplan._uhrzeit(t.get("beginn"), "den Block")})
     ergebnis.sort(key=lambda t: (t["datum"], t["beginn"]))
     return ergebnis
+
+
+# --- Pruefungsmodus: Einstellungen, Fragenpool, Protokoll, Dauer ---
+
+def einstellungen(p):
+    """Einstellungen des Pruefungsmodus mit Vorgaben."""
+    roh = json.loads(p["einstellungen"] or "{}") if isinstance(p["einstellungen"], str) else (p["einstellungen"] or {})
+    return {k: roh.get(k, v[0]) for k, v in EINSTELLUNGEN.items()}
+
+
+def einstellungen_setzen(con, lid, pid, daten):
+    p = _pruefung(con, lid, pid)
+    neu = einstellungen(p)
+    for k, (_, lo, hi) in EINSTELLUNGEN.items():
+        if k in daten and daten[k] not in (None, ""):
+            wert = _zahl(daten[k], k, lo, hi)
+            neu[k] = int(wert) if k != "fragen_gewicht" else wert
+    con.execute("UPDATE pruefung SET einstellungen = ? WHERE id = ?", (json.dumps(neu), pid))
+
+
+def fragen(con, pid):
+    """Fragenpool mit Zahl der Ziehungen."""
+    gezogen = {z[0]: z[1] for z in con.execute("SELECT frage_id, COUNT(*) FROM pruefung_protokoll WHERE pruefung_id = ? "
+                                                 "AND frage_id IS NOT NULL GROUP BY frage_id", (pid,))}
+    return [{"id": z["id"], "text": z["text"], "kategorie": z["kategorie"], "gezogen": gezogen.get(z["id"], 0)}
+            for z in con.execute("SELECT * FROM pruefung_frage WHERE pruefung_id = ? ORDER BY reihenfolge, id", (pid,))]
+
+
+def frage_speichern(con, lid, pid, daten, fid=None):
+    _pruefung(con, lid, pid)
+    text = _text(daten.get("text"), "die Frage", 1000)
+    kategorie = _text(daten.get("kategorie"), "die Kategorie", 60, pflicht=False)
+    if fid is None:
+        n = con.execute("SELECT COALESCE(MAX(reihenfolge), 0) + 1 FROM pruefung_frage WHERE pruefung_id = ?", (pid,)).fetchone()[0]
+        return con.execute("INSERT INTO pruefung_frage (pruefung_id, text, kategorie, reihenfolge) VALUES (?, ?, ?, ?)",
+                           (pid, text, kategorie, n)).lastrowid
+    if con.execute("SELECT 1 FROM pruefung_frage WHERE id = ? AND pruefung_id = ?", (fid, pid)).fetchone() is None:
+        raise PruefungFehler("Diese Frage gibt es nicht.")
+    con.execute("UPDATE pruefung_frage SET text = ?, kategorie = ? WHERE id = ?", (text, kategorie, fid))
+    return fid
+
+
+def fragen_einfuegen(con, lid, pid, text):
+    """Mehrere Fragen auf einmal: eine je Zeile; "Kategorie: Frage" setzt die Kategorie. Rueckgabe: Anzahl."""
+    n = 0
+    for zeile in (text or "").splitlines():
+        zeile = zeile.strip().lstrip("-•*").strip()
+        if not zeile:
+            continue
+        kategorie = ""
+        m = re.match(r"^([^:?]{1,40}):\s+(.+)$", zeile)
+        if m:
+            kategorie, zeile = m.group(1).strip(), m.group(2).strip()
+        frage_speichern(con, lid, pid, {"text": zeile, "kategorie": kategorie})
+        n += 1
+    if not n:
+        raise PruefungFehler("Bitte mindestens eine Frage eintragen (eine je Zeile).")
+    return n
+
+
+def frage_loeschen(con, lid, pid, fid):
+    _pruefung(con, lid, pid)
+    con.execute("DELETE FROM pruefung_frage WHERE id = ? AND pruefung_id = ?", (fid, pid))
+
+
+def _schueler_der_pruefung(con, lid, p, sid):
+    s = _schueler_zeile(con, lid, sid)
+    if s["klasse_id"] != p["klasse_id"]:
+        raise PruefungFehler("Der Schüler gehört nicht zur Klasse der Prüfung.")
+    return s
+
+
+def frage_ziehen(con, lid, pid, sid, zufall=None):
+    """Zieht eine Frage fuer den Schueler: zuerst aus den in dieser Pruefung noch nie gezogenen; ist der Pool
+    aufgebraucht, aus denen, die der Schueler selbst noch nicht hatte. Rueckgabe: id des Protokolleintrags."""
+    p = _pruefung(con, lid, pid)
+    _schueler_der_pruefung(con, lid, p, sid)
+    pool = fragen(con, pid)
+    if not pool:
+        raise PruefungFehler("Der Fragenpool ist leer. Lege zuerst Fragen an (Reiter „Fragen“).")
+    eigene = {z[0] for z in con.execute("SELECT frage_id FROM pruefung_protokoll WHERE pruefung_id = ? AND schueler_id = ? "
+                                         "AND frage_id IS NOT NULL", (pid, sid))}
+    kandidaten = [f for f in pool if not f["gezogen"]] or [f for f in pool if f["id"] not in eigene]
+    if not kandidaten:
+        raise PruefungFehler("Dieser Schüler hatte schon alle Fragen des Pools.")
+    f = (zufall or random).choice(kandidaten)
+    return con.execute("INSERT INTO pruefung_protokoll (pruefung_id, schueler_id, frage_id, text, zeit) VALUES (?, ?, ?, ?, ?)",
+                       (pid, sid, f["id"], f["text"], db.jetzt())).lastrowid
+
+
+def _stufe(wert):
+    if wert in (None, ""):
+        return None
+    return int(_zahl(wert, "die Einschätzung", 0, len(FRAGE_STUFEN) - 1))
+
+
+def protokoll_speichern(con, lid, pid, daten, eid=None):
+    """Spontane Frage notieren (schueler_id, text, stufe) bzw. Eintrag aendern (stufe, text). Mit in_pool=True
+    kommt eine spontane Frage zusaetzlich in den Fragenpool."""
+    p = _pruefung(con, lid, pid)
+    if p["stand"] == "ausgewertet":
+        raise PruefungFehler("Die Prüfung ist abgeschlossen. Bitte zuerst wieder öffnen.")
+    if eid is None:
+        sid = _id(daten.get("schueler_id"))
+        _schueler_der_pruefung(con, lid, p, sid)
+        text = _text(daten.get("text"), "die Frage", 1000)
+        eid = con.execute("INSERT INTO pruefung_protokoll (pruefung_id, schueler_id, text, stufe, zeit) VALUES (?, ?, ?, ?, ?)",
+                          (pid, sid, text, _stufe(daten.get("stufe")), db.jetzt())).lastrowid
+    else:
+        alt = con.execute("SELECT * FROM pruefung_protokoll WHERE id = ? AND pruefung_id = ?", (eid, pid)).fetchone()
+        if alt is None:
+            raise PruefungFehler("Diesen Eintrag gibt es nicht.")
+        text = _text(daten.get("text"), "die Frage", 1000) if "text" in daten else alt["text"]
+        stufe = _stufe(daten.get("stufe")) if "stufe" in daten else alt["stufe"]
+        con.execute("UPDATE pruefung_protokoll SET text = ?, stufe = ? WHERE id = ?", (text, stufe, eid))
+    if daten.get("in_pool"):
+        z = con.execute("SELECT * FROM pruefung_protokoll WHERE id = ?", (eid,)).fetchone()
+        if z["frage_id"] is None:
+            fid = frage_speichern(con, lid, pid, {"text": z["text"]})
+            con.execute("UPDATE pruefung_protokoll SET frage_id = ? WHERE id = ?", (fid, eid))
+    if p["stand"] in ("geplant", "angekuendigt"):
+        con.execute("UPDATE pruefung SET stand = 'durchgefuehrt' WHERE id = ?", (pid,))
+    return eid
+
+
+def protokoll_loeschen(con, lid, pid, eid):
+    _pruefung(con, lid, pid)
+    con.execute("DELETE FROM pruefung_protokoll WHERE id = ? AND pruefung_id = ?", (eid, pid))
+
+
+def lauf_setzen(con, lid, pid, sid, aktion):
+    """Dauer protokollieren: 'start' setzt den Beginn (jetzt), 'ende' das Ende, 'zuruecksetzen' beides leer."""
+    p = _pruefung(con, lid, pid)
+    _schueler_der_pruefung(con, lid, p, sid)
+    if aktion not in ("start", "ende", "zuruecksetzen"):
+        raise PruefungFehler("Unbekannte Aktion.")
+    jetzt = db.jetzt()
+    con.execute("INSERT INTO bewertung (pruefung_id, schueler_id, werte, fehlt, notiz, geaendert) VALUES (?, ?, '{}', 0, '', ?) "
+                "ON CONFLICT (pruefung_id, schueler_id) DO NOTHING", (pid, sid, jetzt))
+    if aktion == "start":
+        con.execute("UPDATE bewertung SET beginn = ?, ende = NULL WHERE pruefung_id = ? AND schueler_id = ?", (jetzt, pid, sid))
+    elif aktion == "ende":
+        con.execute("UPDATE bewertung SET ende = ?, beginn = COALESCE(beginn, ?) WHERE pruefung_id = ? AND schueler_id = ?",
+                    (jetzt, jetzt, pid, sid))
+    else:
+        con.execute("UPDATE bewertung SET beginn = NULL, ende = NULL WHERE pruefung_id = ? AND schueler_id = ?", (pid, sid))
+    if p["stand"] in ("geplant", "angekuendigt") and aktion != "zuruecksetzen":
+        con.execute("UPDATE pruefung SET stand = 'durchgefuehrt' WHERE id = ?", (pid,))
+
+
+def _dauer(beginn, ende):
+    if not beginn or not ende:
+        return None
+    try:
+        a = datetime.datetime.fromisoformat(beginn)
+        b = datetime.datetime.fromisoformat(ende)
+    except ValueError:
+        return None
+    return max(0, int((b - a).total_seconds()))
 
 
 # --- Teams einer Pruefung ---
@@ -790,6 +960,13 @@ def ergebnis(con, lid, pid):
     schluessel, herkunft = schluessel_fuer(con, lid, p)
     bew = {z["schueler_id"]: z for z in con.execute("SELECT * FROM bewertung WHERE pruefung_id = ?", (pid,))}
     p["teams"] = teams(con, pid)
+    p["einstellungen"] = einstellungen(p)
+    p["fragen"] = fragen(con, pid)
+    p["fragen_stufen"] = FRAGE_STUFEN
+    protokoll = {}
+    for z in con.execute("SELECT * FROM pruefung_protokoll WHERE pruefung_id = ? ORDER BY zeit, id", (pid,)):
+        protokoll.setdefault(z["schueler_id"], []).append({"id": z["id"], "frage_id": z["frage_id"], "text": z["text"], "stufe": z["stufe"],
+                                                            "zeit": z["zeit"], "spontan": z["frage_id"] is None})
     team_von = {sid: t for t in p["teams"] for sid in t["mitglieder"]}
     team_keys = _team_keys(p["struktur"]) if p["erfassung"] in ("bogen", "checkliste") else set()
     testat = bool(p["struktur"].get("testat"))
@@ -806,7 +983,9 @@ def ergebnis(con, lid, pid):
             werte = {k: v for k, v in werte.items() if k not in team_keys}
             werte.update({k: v for k, v in team["werte"].items() if k in team_keys})
         fehlt = bool(b["fehlt"]) if b else False
-        r = berechnen(p["erfassung"], p["struktur"], p["max_punkte"], werte) if not fehlt else \
+        eintraege = protokoll.get(s["id"], [])
+        r = berechnen(p["erfassung"], p["struktur"], p["max_punkte"], werte, [e["stufe"] for e in eintraege],
+                      p["einstellungen"]["fragen_gewicht"]) if not fehlt else \
             {"prozent": None, "rechenweg": [], "fehlend": [], "bereiche": []}
         note = None
         if r["prozent"] is not None and schluessel:
@@ -820,6 +999,8 @@ def ergebnis(con, lid, pid):
                 versuche.append({"erledigt": sum(1 for k in ks if werte.get(k["key"])), "gesamt": len(ks)})
         zeilen.append({"id": s["id"], "name": s["name"], "gruppe": s["gruppe"], "aktiv": s["aktiv"], "werte": werte, "fehlt": fehlt,
                        "team_id": team["id"] if team else None, "team": team["name"] if team else "", "versuche": versuche,
+                       "protokoll": eintraege, "beginn": b["beginn"] if b else None, "ende": b["ende"] if b else None,
+                       "dauer": _dauer(b["beginn"], b["ende"]) if b else None,
                        "notiz": b["notiz"] if b else "", "prozent": r["prozent"], "note": note, "rechenweg": r["rechenweg"],
                        "fehlend": r["fehlend"], "bereiche": r["bereiche"]})
     # Statistik

@@ -332,5 +332,56 @@ class LaborUndTeams(MitPruefung):
         self.assertEqual(z["Weiß"]["team"], "Roboter")
 
 
+class Pruefungsmodus(MitPruefung):
+    def setUp(self):
+        super().setUp()
+        vid = pruefungen.vorlage_speichern(self.con, self.lid, {"name": "Fachgespräch", "art": "muendlich", "struktur": {"bereiche": [
+            {"name": "Fachwissen", "gewicht": 3, "kriterien": [{"name": "Grundlagen", "typ": "punkte", "max": 10}]}]}})
+        self.pid = pruefungen.pruefung_speichern(self.con, self.lid, self.strang(titel="Fachgespräch", art="muendlich", form="termin",
+                                                                                 datum="2026-11-20", beginn="07:45", erfassung="bogen", vorlage_id=vid))
+
+    def test_fragen_ziehen_ohne_wiederholung(self):
+        n = pruefungen.fragen_einfuegen(self.con, self.lid, self.pid, "Pneumatik: Was ist ein 5/2-Wegeventil?\n- Was macht ein Drosselrückschlagventil?\n\n")
+        self.assertEqual(n, 2)
+        pool = pruefungen.fragen(self.con, self.pid)
+        self.assertEqual([(f["kategorie"], f["text"][:8]) for f in pool], [("Pneumatik", "Was ist "), ("", "Was mach")])
+        s = self.ids()
+        e1 = pruefungen.frage_ziehen(self.con, self.lid, self.pid, s["Weiß"])
+        e2 = pruefungen.frage_ziehen(self.con, self.lid, self.pid, s["Schmitt"])
+        texte = [z[0] for z in self.con.execute("SELECT text FROM pruefung_protokoll WHERE id IN (?, ?)", (e1, e2))]
+        self.assertEqual(len(set(texte)), 2)                           # zweite Ziehung nimmt die andere Frage
+        e3 = pruefungen.frage_ziehen(self.con, self.lid, self.pid, s["Weiß"])   # Pool aufgebraucht: die, die Weiß noch nicht hatte
+        self.assertNotEqual(self.con.execute("SELECT frage_id FROM pruefung_protokoll WHERE id = ?", (e3,)).fetchone()[0],
+                            self.con.execute("SELECT frage_id FROM pruefung_protokoll WHERE id = ?", (e1,)).fetchone()[0])
+        with self.assertRaises(pruefungen.PruefungFehler):             # Weiß hatte jetzt alle
+            pruefungen.frage_ziehen(self.con, self.lid, self.pid, s["Weiß"])
+
+    def test_spontanfragen_stufen_in_der_note_und_dauer(self):
+        s = self.ids()
+        k = pruefungen.ergebnis(self.con, self.lid, self.pid)["pruefung"]["struktur"]["bereiche"][0]["kriterien"][0]["key"]
+        pruefungen.bewertung_setzen(self.con, self.lid, self.pid, s["Weiß"], {"werte": {k: 8}})
+        eid = pruefungen.protokoll_speichern(self.con, self.lid, self.pid, {"schueler_id": s["Weiß"], "text": "Wozu dient ein Rückschlagventil?", "stufe": 2})
+        pruefungen.protokoll_speichern(self.con, self.lid, self.pid, {"schueler_id": s["Weiß"], "text": "Symbol eines Zylinders?", "stufe": 4})
+        z = next(x for x in pruefungen.ergebnis(self.con, self.lid, self.pid)["schueler"] if x["name"].startswith("Weiß"))
+        self.assertAlmostEqual(z["prozent"], 80.0)                     # ohne Gewicht: Fragen nur im Protokoll
+        self.assertEqual([(e["stufe"], e["spontan"]) for e in z["protokoll"]], [(2, True), (4, True)])
+        pruefungen.einstellungen_setzen(self.con, self.lid, self.pid, {"fragen_gewicht": 1, "minuten": 20})
+        e = pruefungen.ergebnis(self.con, self.lid, self.pid)
+        z = next(x for x in e["schueler"] if x["name"].startswith("Weiß"))
+        self.assertEqual((e["pruefung"]["einstellungen"]["minuten"], e["pruefung"]["einstellungen"]["vorwarnung"]), (20, 2))
+        self.assertAlmostEqual(z["prozent"], (3 * 80 + 1 * 75) / 4)     # Fragen (2+4)/8 = 75 % mit Gewicht 1
+        self.assertIn("Fragen (Gewicht 1): 2/4, 4/4 → 75 %", z["rechenweg"])
+        pruefungen.protokoll_speichern(self.con, self.lid, self.pid, {"in_pool": True}, eid)
+        self.assertEqual([f["text"] for f in pruefungen.fragen(self.con, self.pid)], ["Wozu dient ein Rückschlagventil?"])
+        with self.assertRaises(pruefungen.PruefungFehler):
+            pruefungen.protokoll_speichern(self.con, self.lid, self.pid, {"stufe": 7}, eid)
+        pruefungen.lauf_setzen(self.con, self.lid, self.pid, s["Schmitt"], "start")
+        self.con.execute("UPDATE bewertung SET beginn = '2020-01-01T07:50:00' WHERE schueler_id = ?", (s["Schmitt"],))
+        pruefungen.lauf_setzen(self.con, self.lid, self.pid, s["Schmitt"], "ende")
+        z = next(x for x in pruefungen.ergebnis(self.con, self.lid, self.pid)["schueler"] if x["name"].startswith("Schmitt"))
+        self.assertTrue(z["beginn"].startswith("2020-01-01T07:50") and z["dauer"] > 0)
+        self.assertIsNone(z["prozent"])                                # Dauer allein ist keine Bewertung
+
+
 if __name__ == "__main__":
     unittest.main()
