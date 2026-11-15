@@ -225,6 +225,28 @@ class GetrenntSchreiben(MitPruefung):
         with self.assertRaises(stundenplan.StundenplanFehler):            # Gruppe mit Pruefungstermin
             stundenplan.gruppe_loeschen(self.con, self.lid, g1)
 
+    def test_getauschte_bloecke_bilden_das_paar(self):
+        """B hat Block 1+2, A Block 3+4; B schreibt im 2., A im 3. Block: diese beiden sind EIN Schritt, 1. und 4. der andere."""
+        grunddaten.zeitraster_speichern(self.con, None, [{"bezeichnung": "%d. Block" % (n + 1), "beginn": b, "ende": e} for n, (b, e) in
+                                                         enumerate([("07:45", "09:15"), ("09:30", "11:00"), ("11:30", "13:00"), ("13:15", "14:45")])])
+        v = stundenplan.versionen(self.con, self.lid)[0]["id"]
+        ga = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.kl, "name": "Klasse A"})
+        gb = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.kl, "name": "Klasse B"})
+        for beginn, ende, g in (("07:45", "09:15", gb), ("09:30", "11:00", gb), ("11:30", "13:00", ga), ("13:15", "14:45", ga)):
+            stundenplan.feld_setzen(self.con, self.lid, v, {"wochentag": 4, "beginn": beginn, "ende": ende,
+                                                            "eintraege": [{"klasse_id": self.kl, "gruppe_id": g}]})
+        planung.thema_speichern(self.con, self.lid, self.strang(titel="Robotik-Labor", bloecke=20))
+        pid = pruefungen.pruefung_speichern(self.con, self.lid, self.strang(
+            titel="Robotik", form="termin", teilung="getrennt", bloecke=1, erfassung="gesamt", max_punkte=50,
+            termine=[{"gruppe_id": gb, "datum": "2026-11-19", "beginn": "09:30"}, {"gruppe_id": ga, "datum": "2026-11-19", "beginn": "11:30"}]))
+        p = planung.plan(self.con, self.lid, self.kl, None, self.sj, jetzt="2026-11-15T12:00:00")
+        ka = next(t for t in p["themen"] if t["pruefung_id"] == pid)
+        do = {b["beginn"]: b["thema_id"] == ka["id"] for b in p["bloecke"] if b["datum"] == "2026-11-19"}
+        self.assertEqual(do, {"07:45": False, "09:30": True, "11:30": True, "13:15": False})
+        self.assertEqual(ka["zugeteilt"], 1)
+        andere = [(b["beginn"], b["zweit"]) for b in p["bloecke"] if b["datum"] == "2026-11-19" and b["thema_id"] != ka["id"]]
+        self.assertEqual(andere, [("07:45", False), ("13:15", True)])   # 1. von B und 2. von A: derselbe Stoff
+
     def test_offene_ist_sieht_spaetere_pruefung(self):
         planung.thema_speichern(self.con, self.lid, self.strang(titel="SPS", bloecke=10))
         pruefungen.pruefung_speichern(self.con, self.lid, self.strang(titel="KA", form="termin", datum="2026-12-04", beginn="07:45",

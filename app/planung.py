@@ -439,19 +439,31 @@ class Kalender:
         return nutzbar, weg
 
 
-def schritte_bilden(bloecke, weg=()):
+def schritte_bilden(bloecke, weg=(), fest=()):
     """Fasst Gruppenstunden zusammen: G1 und G2 bekommen nacheinander denselben Stoff und liegen am selben Tag,
     also bilden der n-te Block jeder Gruppe an einem Tag gemeinsam EINEN Schritt der Klasse. Bloecke der ganzen
     Klasse sind je ein Schritt. Die Zaehlung n beruecksichtigt ausgefallene Bloecke (weg), damit ein Ausfall von
-    G1 die Paare nicht verschiebt. Rueckgabe: Liste von Schritten, je eine Liste von Indizes in bloecke (sortiert)."""
+    G1 die Paare nicht verschiebt. fest: Mengen von (datum, beginn), die vorab je einen Schritt bilden (Termine
+    einer getrennt geschriebenen Pruefung); die uebrigen Gruppenstunden des Tages werden danach der Reihe nach
+    gepaart. Rueckgabe: Liste von Schritten (je Liste von Indizes in bloecke), in zeitlicher Reihenfolge."""
+    pos = {(b["datum"], b["beginn"]): i for i, b in enumerate(bloecke)}
+    belegt, schritte = set(), []
+    for menge in fest:
+        idx = sorted(pos[k] for k in menge if k in pos and pos[k] not in belegt)
+        if idx:
+            schritte.append(idx)
+            belegt.update(idx)
+    frei = [b for i, b in enumerate(bloecke) if i not in belegt]
     rang = {}
-    for b in sorted(list(bloecke) + list(weg), key=lambda b: (b["datum"], b["beginn"])):
+    for b in sorted(frei + list(weg), key=lambda b: (b["datum"], b["beginn"])):
         if b.get("gruppe_id"):
             k = (b["datum"], b["gruppe_id"])
             rang[k] = rang.get(k, 0) + 1
             b["_rang"] = rang[k]
-    schritte, platz = [], {}
+    platz = {}
     for i, b in enumerate(bloecke):
+        if i in belegt:
+            continue
         if not b.get("gruppe_id"):
             schritte.append([i])
             continue
@@ -464,7 +476,29 @@ def schritte_bilden(bloecke, weg=()):
             schritte.append([i])
     for b in weg:
         b.pop("_rang", None)
+    schritte.sort(key=lambda g: g[0])
     return schritte
+
+
+def _feste_paare(con, lid, kid, bloecke):
+    """Getrennt geschriebene Pruefungen der Klasse: die Bloecke ihrer Termine an einem Tag bilden zusammen je einen
+    Schritt (bei mehreren Bloecken der k-te Block jeder Gruppe ab ihrem Termin)."""
+    termine = {}
+    for z in con.execute("SELECT t.pruefung_id, t.gruppe_id, t.datum, t.beginn, p.bloecke FROM pruefung_termin t "
+                         "JOIN pruefung p ON p.id = t.pruefung_id WHERE p.lehrkraft_id = ? AND p.klasse_id = ? "
+                         "AND p.form = 'termin' AND p.teilung = 'getrennt'", (lid, kid)):
+        termine.setdefault((z["pruefung_id"], z["datum"]), []).append(z)
+    fest = []
+    for (_, datum), liste in termine.items():
+        reihen = []
+        for z in liste:
+            eigene = [b for b in bloecke if b["datum"] == datum and b["gruppe_id"] == z["gruppe_id"] and b["beginn"] >= z["beginn"]]
+            reihen.append([(b["datum"], b["beginn"]) for b in eigene[:max(1, z["bloecke"])]])
+        for k in range(max(len(r) for r in reihen)):
+            menge = {r[k] for r in reihen if k < len(r)}
+            if len(menge) > 1:
+                fest.append(menge)
+    return fest
 
 
 def _ist_zusammen(staende):
@@ -626,7 +660,7 @@ def _strang_rechnen(con, lid, kid, gid, sj, kal=None, ist=None):
     gnamen = {g["id"]: g["name"] for g in stundenplan.gruppen(con, lid)}
     for b in bloecke + weg:
         b["gruppe"] = gnamen.get(b["gruppe_id"], "") if b["gruppe_id"] else ""
-    gruppen_ = schritte_bilden(bloecke, weg)
+    gruppen_ = schritte_bilden(bloecke, weg, _feste_paare(con, lid, kid, bloecke))
     schritte = []
     for g in gruppen_:
         erster = bloecke[g[0]]
