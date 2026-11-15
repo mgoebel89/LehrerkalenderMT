@@ -579,6 +579,35 @@ def api_planung(h, con, daten):
     h.antwort(200, antwort)
 
 
+def api_stunde(h, con, daten):
+    k = h.konto(con)
+    datum, beginn = h.abfrage("datum"), h.abfrage("beginn")
+    try:
+        datetime.date.fromisoformat(datum or "")
+    except ValueError:
+        raise Fehler(400, "Ungültiges Datum.")
+    h.antwort(200, planung.stunde(con, k["id"], datum, beginn or ""))
+
+
+def api_ist(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        planung.ist_setzen(con, k["id"], daten.get("datum"), daten.get("beginn"), daten.get("stand"))
+    h.antwort(200, planung.stunde(con, k["id"], daten.get("datum"), daten.get("beginn")))
+
+
+def api_ist_offen(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, {"offen": planung.offene_ist(con, k["id"])})
+
+
+def api_ist_alle(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        n = planung.ist_alle_bestaetigen(con, k["id"])
+    h.antwort(200, {"bestaetigt": n})
+
+
 # --- System: Update und Sicherung ---
 
 def api_sicherung(h, con, daten):
@@ -685,6 +714,10 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/baustein/" + ID + "/schieben",
      _planung_schritt(lambda con, k, d, i: planung.baustein_schieben(con, k, i, d.get("richtung") or 1))),
     ("GET", r"/api/planung", api_planung),
+    ("GET", r"/api/stunde", api_stunde),
+    ("POST", r"/api/ist", api_ist),
+    ("GET", r"/api/ist/offen", api_ist_offen),
+    ("POST", r"/api/ist/alle", api_ist_alle),
     ("POST", r"/api/planung/uebernehmen", _planung_schritt(lambda con, k, d, _: planung.aus_bibliothek(con, k["id"], d))),
     ("POST", r"/api/thema", _planung_schritt(lambda con, k, d, _: planung.thema_speichern(con, k["id"], d))),
     ("POST", r"/api/thema/" + ID, _planung_schritt(lambda con, k, d, i: planung.thema_speichern(con, k["id"], d, i))),

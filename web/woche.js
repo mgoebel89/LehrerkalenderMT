@@ -9,6 +9,7 @@ const Woche = (() => {
   let montag = null;       // ISO-Datum der angezeigten Woche (null = aktuelle)
   let mobilTag = null;     // ISO-Datum des Tages in der Handy-Ansicht
   let mitLeiste = true;
+  let offen = [];          // Stunden ohne Ist-Bestaetigung (neueste zuerst)
 
   const tagKurz = iso => L.tag(iso).trim();
   const plusTage = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
@@ -23,7 +24,10 @@ const Woche = (() => {
   }
 
   async function laden() {
-    W = await L.api('GET', '/api/woche' + (montag ? '?montag=' + montag : ''));
+    const [w, o] = await Promise.all([L.api('GET', '/api/woche' + (montag ? '?montag=' + montag : '')),
+      mitLeiste ? L.api('GET', '/api/ist/offen').catch(() => ({ offen: [] })) : Promise.resolve({ offen: [] })]);
+    W = w;
+    offen = o.offen;
     if (!mobilTag || !W.tage.some(t => t.datum === mobilTag)) {
       mobilTag = (W.tage.find(t => t.heute) || W.tage[0]).datum;
     }
@@ -48,6 +52,10 @@ const Woche = (() => {
       el('span', { class: 'chip', title: 'A/B-Woche nach Kalenderwoche', text: W.ab + '-Woche' }),
       el('button', { type: 'button', 'aria-label': 'Nächste Woche', onclick: () => blattern(7) }, L.symbol('rechts')),
       el('button', { type: 'button', onclick: () => { montag = null; mobilTag = null; laden(); } }, L.symbol('heute'), 'Heute'),
+      W.bloecke.some(b => !b.zustand && b.thema && !b.ist && (b.datum < W.heute || (b.datum === W.heute && b.ende <= new Date().toTimeString().slice(0, 5))))
+        ? el('span', { class: 'chip gelb', title: 'Stunden dieser Woche ohne Ist-Bestätigung' }, L.symbol('offen'),
+          W.bloecke.filter(b => !b.zustand && b.thema && !b.ist && (b.datum < W.heute || (b.datum === W.heute && b.ende <= new Date().toTimeString().slice(0, 5)))).length + ' ohne Ist')
+        : null,
       el('span', { class: 'rechts' },
         el('button', { type: 'button', onclick: () => terminBearbeiten(null, (W.tage.find(t => t.heute) || W.tage[0]).datum) }, L.symbol('plus'), 'Termin'),
         el('a', { class: 'knopf', href: '#einstellungen' }, L.symbol('spalten'), 'Stundenplan'))));
@@ -65,6 +73,14 @@ const Woche = (() => {
   function leiste() {
     const heute = W.tage.find(t => t.heute);
     const karten = [];
+    if (offen.length) {
+      karten.push(el('div', { class: 'hinweis gelb' },
+        el('div', { class: 'k' }, L.symbol('offen'), el('b', { text: 'Ist offen' }), el('span', { class: 'zahl', text: offen.length >= 30 ? '30+' : String(offen.length) })),
+        offen.slice(0, 3).map(o => el('button', { type: 'button', class: 'z z-knopf', onclick: () => Stunde.oeffnen(o.datum, o.beginn, laden) },
+          el('span', { class: 'mono', text: tagKurz(o.datum) }), el('span', { text: o.strang + ' · ' + o.thema }))),
+        el('div', { class: 'zeile' }, offen.length > 3 ? el('span', { class: 'leise klein', text: 'und ' + (offen.length - 3) + ' weitere' }) : null,
+          el('button', { type: 'button', class: 'klein rechts', onclick: alleBestaetigen }, L.symbol('ok'), 'Alle wie geplant'))));
+    }
     if (heute) {
       const z = [];
       W.termine.filter(t => t.datum <= heute.datum && (t.bis || t.datum) >= heute.datum).forEach(t =>
@@ -81,6 +97,15 @@ const Woche = (() => {
       }
     }
     return karten.length ? el('div', { class: 'leiste' }, karten) : null;
+  }
+
+  async function alleBestaetigen() {
+    const ok = await L.dialog({
+      titel: 'Alle offenen Stunden bestätigen?', knopf: 'Alle wie geplant',
+      inhalt: el('p', { text: 'Alle ' + (offen.length >= 30 ? 'offenen' : offen.length) + ' Stunden ohne Ist-Bestätigung werden als „wie geplant“ eingetragen. Einzelne kannst du danach im Stunden-Overlay noch ändern.' }),
+      speichern: () => L.api('POST', '/api/ist/alle', {}),
+    });
+    if (ok) { L.meldung(ok.bestaetigt + ' Stunden bestätigt.'); await laden(); }
   }
 
   function kopfzelle(t) {
@@ -145,6 +170,13 @@ const Woche = (() => {
     else if (b.art === 'zusatz') st.push(el('span', { class: 'zus' }, L.symbol('zusatz'), zustandText(b)));
     else if (b.art === 'vertretung') st.push(el('span', {}, L.symbol('vertretung'), zustandText(b)));
     else if (b.jetzt) st.push(el('span', { class: 'jetzt' }, L.symbol('jetzt'), 'jetzt'));
+    if (!b.zustand && b.thema && !b.jetzt) {
+      const vergangen = b.datum < W.heute || (b.datum === W.heute && b.ende <= new Date().toTimeString().slice(0, 5));
+      if (b.ist === 'ok') st.push(el('span', { class: 'ok' }, L.symbol('ok'), 'gehalten'));
+      else if (b.ist === 'mehr') st.push(el('span', { class: 'offen' }, L.symbol('plus'), '1 Block mehr'));
+      else if (b.ist === 'fertig') st.push(el('span', { class: 'ok' }, L.symbol('haken'), 'Thema fertig'));
+      else if (vergangen) st.push(el('span', { class: 'offen' }, L.symbol('offen'), 'Ist fehlt'));
+    }
     const k = el('div', { class: klassen.join(' '), style: '--kl:' + farbe(b.klasse), tabindex: '0', role: 'button',
       'aria-label': name + ', ' + tagKurz(b.datum) + ' ' + b.beginn + (st.length ? ', ' + zustandText(b) : '') + ' – Aktionen' },
     el('div', { class: 'kl' }, el('span', { text: b.klasse ? b.klasse.name : (b.klasse_text || 'Vertretung') }),
@@ -159,12 +191,16 @@ const Woche = (() => {
     el('button', { type: 'button', class: 'mehr', 'aria-label': 'Aktionen für diese Stunde', 'aria-haspopup': 'menu',
       onclick: ev => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); menue(r.right + scrollX - 240, r.bottom + scrollY + 4, b); } },
     L.symbol('mehr')));
-    const oeffnen = ev => { const r = k.getBoundingClientRect(); menue(ev && ev.pageX ? ev.pageX : r.left + scrollX, ev && ev.pageY ? ev.pageY : r.bottom + scrollY, b); };
+    const menueAuf = ev => { const r = k.getBoundingClientRect(); menue(ev && ev.pageX ? ev.pageX : r.left + scrollX, ev && ev.pageY ? ev.pageY : r.bottom + scrollY, b); };
+    const oeffnen = ev => (gehalten(b) ? Stunde.oeffnen(b.datum, b.beginn, laden) : menueAuf(ev));
     k.addEventListener('click', oeffnen);
-    k.addEventListener('contextmenu', ev => { ev.preventDefault(); oeffnen(ev); });
+    k.addEventListener('contextmenu', ev => { ev.preventDefault(); menueAuf(ev); });
     k.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); oeffnen(null); } });
     return k;
   }
+
+  // Stunden, die ich halte (mit Klasse aus der Liste): Klick oeffnet das Stunden-Overlay, sonst das Aktionsmenue
+  const gehalten = b => b.klasse && !b.zustand && ['regulaer', 'zusatz', 'verschoben'].includes(b.art);
 
   function leer(t, z) {
     const d = el('button', { type: 'button', class: 'wp-leer', 'aria-label': 'Freier Block ' + tagKurz(t.datum) + ' ' + z.beginn + ' – Zusatzstunde oder Vertretung',
@@ -232,6 +268,7 @@ const Woche = (() => {
   function menue(x, y, b) {
     const name = blockName(b);
     const punkte = [];
+    if (gehalten(b)) punkte.push(['auge', 'Stunde öffnen', () => Stunde.oeffnen(b.datum, b.beginn, laden)]);
     if (b.art === 'regulaer' && !b.zustand) {
       punkte.push(['ausfall', 'Ausfall eintragen …', () => ausfall(b)]);
       punkte.push(['vertretung', 'Ich werde vertreten …', () => vertreten(b)]);

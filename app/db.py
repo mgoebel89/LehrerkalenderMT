@@ -248,6 +248,21 @@ MIGRATIONEN = [
     CREATE INDEX plan_thema_strang ON plan_thema (lehrkraft_id, klasse_id, schuljahr_id);
     ALTER TABLE stundenplan_eintrag ADD COLUMN lernfeld_id INTEGER REFERENCES lernfeld(id) ON DELETE SET NULL
     """,
+    # 5: Stufe C2: Ist-Stand je gehaltenem Block (wie geplant / braucht 1 Block mehr / schon fertig). Eine Lehrkraft
+    #    haelt zu einer Zeit nur eine Stunde, deshalb ist (Lehrkraft, Datum, Beginn) eindeutig.
+    """
+    CREATE TABLE ist (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        datum TEXT NOT NULL,
+        beginn TEXT NOT NULL,
+        klasse_id INTEGER NOT NULL REFERENCES klasse(id),
+        gruppe_id INTEGER REFERENCES gruppe(id),
+        thema_id INTEGER REFERENCES plan_thema(id) ON DELETE SET NULL,
+        stand TEXT NOT NULL CHECK (stand IN ('ok', 'mehr', 'fertig')),
+        geaendert TEXT NOT NULL,
+        UNIQUE (lehrkraft_id, datum, beginn))
+    """,
 ]
 
 

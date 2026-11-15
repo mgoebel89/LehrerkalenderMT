@@ -55,54 +55,6 @@ const Planung = (() => {
     return i < 0 ? 'var(--leise)' : LF_FARBEN[i % LF_FARBEN.length];
   }
 
-  function zeichnen() {
-    const teile = [];
-    if (!P.schuljahre.length) {
-      teile.push(el('div', { class: 'banner warnung', text: 'Es gibt noch kein Schuljahr. Der Admin legt es unter Grunddaten → Schuljahr und Ferien an (erster und letzter Unterrichtstag).' }));
-      return L.setzen(ort, teile);
-    }
-    const sj = el('select', { 'aria-label': 'Schuljahr', style: 'width:auto', onchange: () => { wahl.schuljahr = Number(sj.value); wahl.klasse = null; neuLaden(); } },
-      P.schuljahre.map(j => el('option', { value: j.id, text: 'Schuljahr ' + j.name, selected: j.id === P.schuljahr_id ? true : null })));
-    teile.push(el('div', { class: 'zeile' }, sj,
-      P.straenge.length ? el('div', { class: 'zeile strang-wahl', role: 'group', 'aria-label': 'Klasse' }, P.straenge.map(s =>
-        el('button', { type: 'button', class: 'chip-knopf' + (s.klasse_id === wahl.klasse && (s.gruppe_id || null) === (wahl.gruppe || null) ? ' an' : ''),
-          onclick: () => { wahl.klasse = s.klasse_id; wahl.gruppe = s.gruppe_id; neuLaden(); } },
-        s.name, s.themen ? el('span', { class: 'chip klein', text: String(s.themen) }) : null))) : null));
-    if (!P.straenge.length) {
-      teile.push(el('div', { class: 'banner' }, 'In diesem Schuljahr steht noch keine Klasse in deinem Stundenplan. ',
-        el('a', { href: '#einstellungen', text: 'Stundenplan einrichten' })));
-      return L.setzen(ort, teile);
-    }
-    const p = P.plan;
-    const s = P.straenge.find(x => x.klasse_id === wahl.klasse && (x.gruppe_id || null) === (wahl.gruppe || null));
-    teile.push(el('div', { class: 'zeile' },
-      el('h2', { text: s ? s.name : '' }),
-      el('span', { class: 'leise klein', text: p.summe.bloecke + ' Blöcke im Schuljahr · ' + p.summe.verplant + ' verplant · ' + p.summe.frei + ' frei' }),
-      p.summe.ueberlauf ? el('span', { class: 'chip rot', text: p.summe.ueberlauf + ' Bl passen nicht mehr' }) : null,
-      p.spuren.length ? el('span', { class: 'chip', title: 'Diese Lernfelder haben eigene Blöcke im Stundenplan', text: 'eigene Blöcke: ' + p.spuren.map(x => x.nummer).join(', ') }) : null,
-      el('span', { class: 'rechts' },
-        el('div', { class: 'segment', role: 'group', 'aria-label': 'Ansicht' },
-          [['bloecke', 'Doppelstunden'], ['schuljahr', 'Schuljahr']].map(([a, t]) =>
-            el('button', { type: 'button', class: wahl.ansicht === a ? 'an' : null, onclick: () => { wahl.ansicht = a; zeichnen(); } }, t))),
-        el('button', { type: 'button', onclick: () => themaBearbeiten(null) }, L.symbol('plus'), 'Thema'),
-        el('a', { class: 'knopf', href: '#planung-bibliothek' }, L.symbol('pakete'), 'Aus Bibliothek'))));
-    if (!p.themen.length) {
-      teile.push(el('div', { class: 'leer' }, 'Noch keine Themen. Übernimm Lernsituationen aus der ',
-        el('a', { href: '#planung-bibliothek', text: 'Bibliothek' }), ' oder lege mit „+ Thema“ eines an.'));
-    }
-    if (p.themen.length) {
-      const tabelle = wahl.ansicht === 'schuljahr' ? rasterSchuljahr(p) : rasterBloecke(p);
-      const scroll = el('div', { class: 'r-scroll' }, tabelle);
-      teile.push(scroll);
-      teile.push(legende(p));
-      L.setzen(ort, teile);
-      const heute = scroll.querySelector('th.ab-heute') || scroll.querySelector('th.heute');   // zur aktuellen Woche springen
-      if (heute) scroll.scrollLeft = Math.max(0, heute.offsetLeft - 260 - 3 * heute.offsetWidth);
-      return;
-    }
-    L.setzen(ort, teile);
-  }
-
   function titelZelle(t, i) {
     const zelle = el('td', { class: 'auf', title: t.titel + (t.ls_titel ? ' · ' + t.ls_titel : '') },
       t.lernfeld ? el('span', { class: 'kz', style: 'color:' + lfFarbe(t.lernfeld_id), text: t.lernfeld }) : null,
@@ -136,26 +88,153 @@ const Planung = (() => {
     return rows;
   }
 
-  function rasterBloecke(p) {
-    const spalten = p.bloecke.map((b, i) => ({ ...b, i, nutzbar: true }))
-      .concat(p.weg.map(b => ({ ...b, nutzbar: false })))
+  function zeichnen() {
+    const teile = [];
+    if (!P.schuljahre.length) {
+      teile.push(el('div', { class: 'banner warnung', text: 'Es gibt noch kein Schuljahr. Der Admin legt es unter Grunddaten → Schuljahr und Ferien an (erster und letzter Unterrichtstag).' }));
+      return L.setzen(ort, teile);
+    }
+    const sj = el('select', { 'aria-label': 'Schuljahr', style: 'width:auto', onchange: () => { wahl.schuljahr = Number(sj.value); wahl.klasse = null; neuLaden(); } },
+      P.schuljahre.map(j => el('option', { value: j.id, text: 'Schuljahr ' + j.name, selected: j.id === P.schuljahr_id ? true : null })));
+    teile.push(el('div', { class: 'zeile' }, sj,
+      P.straenge.length ? el('div', { class: 'zeile strang-wahl', role: 'group', 'aria-label': 'Klasse' }, P.straenge.map(s =>
+        el('button', { type: 'button', class: 'chip-knopf' + (s.klasse_id === wahl.klasse && (s.gruppe_id || null) === (wahl.gruppe || null) ? ' an' : ''),
+          onclick: () => { wahl.klasse = s.klasse_id; wahl.gruppe = s.gruppe_id; neuLaden(); } },
+        s.name, s.themen ? el('span', { class: 'chip klein', text: String(s.themen) }) : null))) : null));
+    if (!P.straenge.length) {
+      teile.push(el('div', { class: 'banner' }, 'In diesem Schuljahr steht noch keine Klasse in deinem Stundenplan. ',
+        el('a', { href: '#einstellungen', text: 'Stundenplan einrichten' })));
+      return L.setzen(ort, teile);
+    }
+    const p = P.plan;
+    const s = P.straenge.find(x => x.klasse_id === wahl.klasse && (x.gruppe_id || null) === (wahl.gruppe || null));
+    teile.push(el('div', { class: 'zeile' },
+      el('h2', { text: s ? s.name : '' }),
+      el('span', { class: 'leise klein', text: p.summe.bloecke + ' Blöcke im Schuljahr · noch ' + p.summe.rest + ' · ' + p.summe.bedarf + ' verplant · ' + p.summe.frei + ' frei' }),
+      p.summe.ueberlauf ? el('span', { class: 'chip rot', text: p.summe.ueberlauf + ' Bl passen nicht mehr' }) : null,
+      p.summe.ist_offen ? el('span', { class: 'chip gelb', title: 'Gehaltene Stunden ohne Ist-Bestätigung' }, L.symbol('offen'), p.summe.ist_offen + ' ohne Ist') : null,
+      p.spuren.length ? el('span', { class: 'chip', title: 'Diese Lernfelder haben eigene Blöcke im Stundenplan', text: 'eigene Blöcke: ' + p.spuren.map(x => x.nummer).join(', ') }) : null,
+      el('span', { class: 'rechts' },
+        el('div', { class: 'segment', role: 'group', 'aria-label': 'Ansicht' },
+          [['bloecke', 'Doppelstunden'], ['tage', 'Tage'], ['schuljahr', 'Schuljahr']].map(([a, t]) =>
+            el('button', { type: 'button', class: wahl.ansicht === a ? 'an' : null, onclick: () => { wahl.ansicht = a; zeichnen(); } }, t))),
+        el('button', { type: 'button', onclick: () => themaBearbeiten(null) }, L.symbol('plus'), 'Thema'),
+        el('a', { class: 'knopf', href: '#planung-bibliothek' }, L.symbol('pakete'), 'Aus Bibliothek'))));
+    if (!p.themen.length) {
+      teile.push(el('div', { class: 'leer' }, 'Noch keine Themen. Übernimm Lernsituationen aus der ',
+        el('a', { href: '#planung-bibliothek', text: 'Bibliothek' }), ' oder lege mit „+ Thema“ eines an.'));
+      return L.setzen(ort, teile);
+    }
+    const tabelle = wahl.ansicht === 'schuljahr' ? rasterSchuljahr(p) : wahl.ansicht === 'tage' ? rasterTage(p) : rasterBloecke(p);
+    const scroll = el('div', { class: 'r-scroll' }, tabelle);
+    teile.push(scroll, legende(p), bilanz(p));
+    L.setzen(ort, teile);
+    const heute = scroll.querySelector('th.ab-heute') || scroll.querySelector('th.heute');   // zur aktuellen Woche springen
+    if (heute) scroll.scrollLeft = Math.max(0, heute.offsetLeft - 270 - 2 * heute.offsetWidth);
+  }
+
+  // Spalten nach Datum: Tage mit ihren Bloecken (auch ausgefallene) und dazwischen die Ferienabschnitte
+  function tagesGruppen(p) {
+    const bl = p.bloecke.map(b => ({ ...b, nutzbar: true })).concat(p.weg.map(b => ({ ...b, nutzbar: false })))
       .sort((a, b) => (a.datum + a.beginn).localeCompare(b.datum + b.beginn));
-    const ersterAbHeute = spalten.find(c => c.datum >= p.heute);
-    const kopf = el('tr', {}, el('th', { class: 'links', text: 'Thema' }), spalten.map(c => el('th', {
-      class: (c.datum === p.heute ? 'heute' : '') + (c === ersterAbHeute ? ' ab-heute' : '') + (c.nutzbar ? '' : ' aus'),
-      title: L.tag(c.datum, true) + ' ' + c.beginn + (c.nutzbar ? (c.art !== 'regulaer' ? ' · ' + (c.art === 'zusatz' ? 'Zusatzstunde' : 'verschoben') : '') : ' · ' + (c.zustand === 'ausfall' ? 'fällt aus' : c.zustand === 'vertreten' ? 'vertreten' : 'verschoben') + (c.grund ? ': ' + c.grund : '')) },
-    L.TAGE[new Date(c.datum + 'T12:00:00').getDay()], el('br'), c.datum.slice(8, 10) + '.' + c.datum.slice(5, 7) + '.')));
-    const zellen = t => spalten.map(c => {
-      const td = el('td', { class: 't' + (c.datum === p.heute ? ' heute' : '') + (c.nutzbar ? ' kann' : ' aus') });
+    const gruppen = [];
+    bl.forEach(c => {
+      const g = gruppen[gruppen.length - 1];
+      if (g && g.datum === c.datum) g.spalten.push(c);
+      else gruppen.push({ typ: 'tag', datum: c.datum, spalten: [c] });
+    });
+    p.ferien.forEach(f => gruppen.push({ typ: 'ferien', datum: f.von, f }));
+    gruppen.sort((a, b) => a.datum.localeCompare(b.datum) || (a.typ === 'ferien' ? -1 : 1));
+    let kwVorher = null;
+    gruppen.forEach(g => {
+      if (g.typ !== 'tag') return;
+      const kw = kwVon(g.datum);
+      g.kw = kw;
+      g.w2 = kw % 2 === 0;                         // Wochen abwechselnd leicht getoent
+      g.neueWoche = kw !== kwVorher;
+      kwVorher = kw;
+    });
+    const ab = gruppen.find(g => g.typ === 'tag' && g.datum >= p.heute);
+    if (ab) ab.abHeute = true;
+    return gruppen;
+  }
+
+  function kwVon(iso) {
+    const d = new Date(iso + 'T12:00:00');
+    d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+    const jan4 = new Date(d.getFullYear(), 0, 4, 12);
+    return 1 + Math.round(((d - jan4) / 864e5 - 3 + ((jan4.getDay() + 6) % 7)) / 7);
+  }
+
+  const tagText = iso => L.TAGE[new Date(iso + 'T12:00:00').getDay()] + ' ' + iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.';
+
+  function ferienKopf(f, rowspan) {
+    return el('th', { class: 'ferien-sp', rowspan: rowspan || null, title: f.name + ': ' + L.tag(f.von, true) + (f.bis !== f.von ? ' – ' + L.tag(f.bis, true) : '') },
+      el('span', { class: 'senkrecht', text: f.name }));
+  }
+
+  function wochenKlasse(g) {
+    return (g.w2 ? ' w2' : '') + (g.neueWoche ? ' wochenstart' : '');
+  }
+
+  // Ist-Markierung an einem belegten Block
+  function istMarke(c) {
+    if (!c.nutzbar || !c.thema_id) return null;
+    if (c.ist === 'ok') return el('span', { class: 'istm ok', title: 'gehalten, wie geplant', text: '✓' });
+    if (c.ist === 'mehr') return el('span', { class: 'istm mehr', title: 'braucht 1 Block mehr', text: '+1' });
+    if (c.ist === 'fertig') return el('span', { class: 'istm fertig', title: 'Thema hier fertig', text: '⊣' });
+    if (c.vergangen) return el('span', { class: 'istm offen', title: 'Ist fehlt' });
+    return null;
+  }
+
+  function rasterBloecke(p) {
+    const gruppen = tagesGruppen(p);
+    const kopf1 = el('tr', {}, el('th', { class: 'links', rowspan: 2, text: 'Thema' }), gruppen.map(g => g.typ === 'ferien' ? ferienKopf(g.f, 2)
+      : el('th', { class: 'tag-kopf tag-start' + wochenKlasse(g) + (g.datum === p.heute ? ' heute' : '') + (g.abHeute ? ' ab-heute' : ''), colspan: g.spalten.length },
+        tagText(g.datum), g.neueWoche ? el('span', { class: 'kw', text: ' KW ' + g.kw }) : null)));
+    const kopf2 = el('tr', {}, gruppen.map(g => g.typ === 'ferien' ? null : g.spalten.map((c, n) => el('th', {
+      class: 'zeit' + (n === 0 ? ' tag-start' : '') + wochenKlasse(g) + (c.nutzbar ? '' : ' aus'),
+      title: L.tag(c.datum, true) + ' ' + c.beginn + (c.nutzbar ? (c.art !== 'regulaer' ? ' · ' + (c.art === 'zusatz' ? 'Zusatzstunde' : 'verschoben') : '')
+        : ' · ' + (c.zustand === 'ausfall' ? 'fällt aus' : c.zustand === 'vertreten' ? 'vertreten' : 'verschoben') + (c.grund ? ': ' + c.grund : '')) },
+    c.beginn))));
+    const zellen = t => gruppen.map(g => g.typ === 'ferien' ? el('td', { class: 'ferien-sp' }) : g.spalten.map((c, n) => {
+      const td = el('td', { class: 't' + (n === 0 ? ' tag-start' : '') + wochenKlasse(g) + (c.datum === p.heute ? ' heute' : '') + (c.nutzbar ? ' kann' : ' aus') });
       if (!c.nutzbar) return td;
       if (c.thema_id === t.id) {
         td.appendChild(el('span', { class: 'bal' + (c.teil === 1 ? ' a' : '') + (c.teil === c.von || c.teil === t.zugeteilt ? ' e' : '') }));
         if (c.teil === 1 && t.nadel === 'ok') td.appendChild(el('span', { class: 'nadel', title: 'festgesetzt' }, L.symbol('pin')));
+        const m = istMarke(c);
+        if (m) td.appendChild(m);
       }
       td.addEventListener('click', ev => blockMenue(ev, t, c));
       return td;
+    }));
+    return el('table', { class: 'lp lp-tage' }, el('thead', {}, kopf1, kopf2), el('tbody', {}, zeilen(p, zellen)));
+  }
+
+  // Tage: eine Spalte je Unterrichtstag, darin je Block ein Abschnitt (geteilte Zelle, wenn zwei Themen den Tag teilen)
+  function rasterTage(p) {
+    const gruppen = tagesGruppen(p);
+    const kopf = el('tr', {}, el('th', { class: 'links', text: 'Thema' }), gruppen.map(g => g.typ === 'ferien' ? ferienKopf(g.f)
+      : el('th', { class: 'tag-start' + wochenKlasse(g) + (g.datum === p.heute ? ' heute' : '') + (g.abHeute ? ' ab-heute' : ''),
+        title: L.tag(g.datum, true) + ' · ' + g.spalten.length + (g.spalten.length === 1 ? ' Block' : ' Blöcke') },
+      L.TAGE[new Date(g.datum + 'T12:00:00').getDay()], el('br'), g.datum.slice(8, 10) + '.' + g.datum.slice(5, 7) + '.',
+      g.neueWoche ? el('span', { class: 'kw-unten', text: 'KW ' + g.kw }) : null)));
+    const zellen = t => gruppen.map(g => {
+      if (g.typ === 'ferien') return el('td', { class: 'ferien-sp' });
+      const meine = g.spalten.filter(c => c.nutzbar && c.thema_id === t.id);
+      const td = el('td', { class: 't tagzelle tag-start' + wochenKlasse(g) + (g.datum === p.heute ? ' heute' : '') + (meine.length ? ' kann' : '') });
+      if (meine.length) {
+        td.appendChild(el('div', { class: 'segmente' }, g.spalten.map(c => el('span', {
+          class: 'seg' + (c.nutzbar && c.thema_id === t.id ? ' an' : '') + (c.nutzbar ? '' : ' aus') }))));
+        const m = istMarke(meine[meine.length - 1]);
+        if (m) td.appendChild(m);
+        td.title = t.titel + ': ' + meine.length + ' von ' + g.spalten.length + (g.spalten.length === 1 ? ' Block' : ' Blöcken') + ' am ' + L.tag(g.datum, true);
+        td.addEventListener('click', ev => blockMenue(ev, t, meine[0]));
+      }
+      return td;
     });
-    return el('table', { class: 'lp' }, el('thead', {}, kopf), el('tbody', {}, zeilen(p, zellen)));
+    return el('table', { class: 'lp lp-tage' }, el('thead', {}, kopf), el('tbody', {}, zeilen(p, zellen)));
   }
 
   function rasterSchuljahr(p) {
@@ -165,7 +244,8 @@ const Planung = (() => {
       if (b.thema_id) (jeWoche[m + ':' + b.thema_id] = (jeWoche[m + ':' + b.thema_id] || 0) + 1);
     });
     const kopf = el('tr', {}, el('th', { class: 'links', text: 'Thema' }), p.wochen.map(w => el('th', {
-      class: (w.heute ? 'heute' : '') + (w.frei ? ' ferien' : ''), title: (w.ferien ? w.ferien + ' · ' : '') + 'ab ' + L.tag(w.montag, true) },
+      class: (w.heute ? 'heute' : '') + (w.frei ? ' ferien' : w.freie_tage ? ' teilfrei' : ''),
+      title: (w.ferien ? w.ferien + (w.frei ? '' : ' (' + w.freie_tage + (w.freie_tage === 1 ? ' Tag' : ' Tage') + ' frei)') + ' · ' : '') + 'ab ' + L.tag(w.montag, true) },
     'KW', el('br'), String(w.kw))));
     const zellen = t => p.wochen.map(w => {
       const n = jeWoche[w.montag + ':' + t.id] || 0;
@@ -187,9 +267,34 @@ const Planung = (() => {
     const lfs = [...new Set(p.themen.map(t => t.lernfeld_id).filter(Boolean))];
     return el('div', { class: 'legende' },
       lfs.map(id => el('span', {}, el('i', { class: 'farbe', style: 'background:' + lfFarbe(id) }), (p.lernfelder.find(l => l.id === id) || {}).nummer || '')),
+      el('span', {}, el('i', { class: 'm-ferien' }), 'Ferien, Feiertag'),
       el('span', {}, el('i', { class: 'm-aus' }), 'Ausfall, vertreten, verschoben'),
-      el('span', {}, L.symbol('pin'), 'festgesetzt (Tipp auf einen Block)'),
-      el('span', { class: 'leise', text: 'Reihenfolge: Thema am Namen ziehen' }));
+      el('span', {}, el('b', { class: 'istm-l ok', text: '✓' }), 'gehalten'),
+      el('span', {}, el('b', { class: 'istm-l mehr', text: '+1' }), '1 Block mehr'),
+      el('span', {}, el('b', { class: 'istm-l fertig', text: '⊣' }), 'fertig'),
+      el('span', {}, el('i', { class: 'istm-l offen' }), 'Ist fehlt'),
+      el('span', {}, L.symbol('pin'), 'festgesetzt'),
+      el('span', { class: 'leise', text: 'Tipp auf einen Block: Stunde öffnen oder festsetzen · Reihenfolge: Thema am Namen ziehen' }));
+  }
+
+  // Bilanz: je Lernfeld Stundenansatz gegen Verplantes und Gehaltenes, fuer den Strang Verplantes gegen Verfuegbares
+  function bilanz(p) {
+    const ende = L.tag(p.schuljahr.ende, true);
+    const passt = p.summe.bedarf - p.summe.ueberlauf;
+    return el('details', { class: 'karte bilanz', open: p.summe.ueberlauf ? true : null },
+      el('summary', { class: 'zeile' }, L.symbol('diagramm' in L.SYMBOLE ? 'diagramm' : 'liste'), el('b', { text: 'Bilanz' }),
+        el('span', { class: 'leise klein', text: 'noch ' + p.summe.rest + ' Blöcke bis ' + ende + ', verplant ' + p.summe.bedarf }),
+        p.summe.ueberlauf ? el('span', { class: 'chip rot', text: p.summe.ueberlauf + ' Bl zu viel' }) : el('span', { class: 'chip gruen', text: 'passt' })),
+      el('div', { class: 'rollbar', style: 'margin-top:10px' }, el('table', { class: 'liste' },
+        el('thead', {}, el('tr', {}, ['Lernfeld', 'Stundenansatz', 'verplant', 'gehalten', 'passt nicht'].map(x => el('th', { text: x })))),
+        el('tbody', {}, p.bilanz.map(b => el('tr', {},
+          el('td', {}, el('b', { class: 'mono', text: b.nummer }), ' ', b.name),
+          el('td', { class: 'mono', text: b.ansatz !== null ? b.ansatz + ' Bl' : '–' }),
+          el('td', { class: 'mono' }, b.verplant + ' Bl',
+            b.ansatz !== null && b.verplant !== b.ansatz ? el('span', { class: 'leise', text: ' (' + (b.verplant > b.ansatz ? '+' : '') + (b.verplant - b.ansatz) + ')' }) : null),
+          el('td', { class: 'mono', text: b.gehalten + ' Bl' }),
+          el('td', { class: 'mono', style: b.ueberlauf ? 'color:var(--rot);font-weight:700' : null, text: b.ueberlauf ? b.ueberlauf + ' Bl' : '–' })))))),
+      el('p', { class: 'leise klein', style: 'margin-top:8px', text: 'Der Stundenansatz gilt für das ganze Lernfeld (1 Block = 2 Stunden). Teilen sich Gruppen oder Kolleginnen und Kollegen ein Lernfeld, ist die Abweichung nur ein Hinweis. ' + passt + ' von ' + p.summe.bedarf + ' verplanten Blöcken passen ins Schuljahr.' }));
   }
 
   function montagVon(iso) {
@@ -200,11 +305,13 @@ const Planung = (() => {
   function plusTage(iso, n) { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return isoVon(d); }
   function isoVon(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 
-  // Tipp auf einen Block in der Zeile eines Themas: festsetzen bzw. Stecknadel loesen
+  // Tipp auf einen Block in der Zeile eines Themas: Stunde oeffnen, festsetzen bzw. Stecknadel loesen
   function blockMenue(ev, t, c) {
     const alt = document.getElementById('wp-menue');
     if (alt) alt.remove();
-    const punkte = [['pin', 'Hier festsetzen: beginnt ' + tagKurz(c.datum) + ' ' + c.beginn, () => festsetzen(t, c.datum, c.beginn)]];
+    const punkte = [];
+    if (c.nutzbar) punkte.push(['auge', 'Stunde öffnen: ' + tagKurz(c.datum) + ' ' + c.beginn, () => Stunde.oeffnen(c.datum, c.beginn, neuLaden)]);
+    punkte.push(['pin', 'Hier festsetzen: beginnt ' + tagKurz(c.datum) + ' ' + c.beginn, () => festsetzen(t, c.datum, c.beginn)]);
     if (t.nadel) punkte.push(['undo', 'Stecknadel lösen (fließt wieder)', () => festsetzen(t, null, null)]);
     punkte.push(['stift', 'Thema bearbeiten …', () => themaBearbeiten(t)]);
     const m = el('div', { class: 'wp-menue', id: 'wp-menue', role: 'menu' }, el('div', { class: 'mk', text: t.titel }),

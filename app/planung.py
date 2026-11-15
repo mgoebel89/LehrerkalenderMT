@@ -368,22 +368,47 @@ class Kalender:
 
 # --- Fliessen ---
 
-def fliessen(themen, bloecke):
+IST_STAENDE = ("ok", "mehr", "fertig")
+
+
+def fliessen(themen, bloecke, ist=None):
     """Verteilt die Themen (in Reihenfolge, mit bloecke, lernfeld_id, fest_datum/fest_beginn) auf die Bloecke.
-    Rueckgabe: (belegung, info) mit belegung[i] = (thema_id, teil, von) fuer Block i oder None und
-    info[thema_id] = {zugeteilt, ueberlauf, erster, letzter, nadel: ok|fehlt|None}."""
+    ist: {(datum, beginn): 'ok'|'mehr'|'fertig'} veraendert den Bedarf des Themas, das gerade in diesem Block liegt:
+    'mehr' = es braucht einen Block mehr, 'fertig' = es endet mit diesem Block. Der Rest rueckt nach bzw. vor.
+    Rueckgabe: (belegung, info) mit belegung[i] = (thema_id, teil, bedarf) fuer Block i oder None und
+    info[thema_id] = {zugeteilt, bedarf, ueberlauf, bloecke, nadel: ok|fehlt|None}."""
+    ist = ist or {}
     spuren = {b["lernfeld_id"] for b in bloecke if b["lernfeld_id"]}
     spur_bloecke = {}
     for i, b in enumerate(bloecke):
         spur_bloecke.setdefault(b["lernfeld_id"] if b["lernfeld_id"] in spuren else None, []).append(i)
     belegung = [None] * len(bloecke)
-    info = {t["id"]: {"zugeteilt": 0, "ueberlauf": 0, "erster": None, "letzter": None, "nadel": None, "bloecke": []} for t in themen}
+    info = {t["id"]: {"bedarf": t["bloecke"], "nadel": None, "bloecke": []} for t in themen}
     spur_themen = {}
     for t in themen:
         spur_themen.setdefault(t["lernfeld_id"] if t["lernfeld_id"] in spuren else None, []).append(t)
+
     for spur, liste in spur_themen.items():
         idx = spur_bloecke.get(spur, [])
         frei = [True] * len(idx)
+
+        def fuellen(t, n):
+            """Belegt ab Position n freie Bloecke fuer t, bis der (durch Ist veraenderliche) Bedarf gedeckt ist.
+            Rueckgabe: Position nach dem letzten geprueften Block."""
+            x = info[t["id"]]
+            while n < len(idx) and len(x["bloecke"]) < x["bedarf"]:
+                if frei[n]:
+                    frei[n] = False
+                    x["bloecke"].append(idx[n])
+                    b = bloecke[idx[n]]
+                    stand = ist.get((b["datum"], b["beginn"]))
+                    if stand == "mehr":
+                        x["bedarf"] += 1
+                    elif stand == "fertig":
+                        x["bedarf"] = len(x["bloecke"])
+                n += 1
+            return n
+
         # 1. festgesetzte Themen ab ihrem Block
         for t in liste:
             if not t.get("fest_datum"):
@@ -393,31 +418,19 @@ def fliessen(themen, bloecke):
                 info[t["id"]]["nadel"] = "fehlt"
                 continue
             info[t["id"]]["nadel"] = "ok"
-            n = start
-            while n < len(idx) and len(info[t["id"]]["bloecke"]) < t["bloecke"]:
-                if frei[n]:
-                    frei[n] = False
-                    info[t["id"]]["bloecke"].append(idx[n])
-                n += 1
+            fuellen(t, start)
         # 2. die uebrigen in Reihenfolge in die freien Bloecke
         zeiger = 0
         for t in liste:
-            if info[t["id"]]["nadel"] == "ok":
-                continue
-            while len(info[t["id"]]["bloecke"]) < t["bloecke"] and zeiger < len(idx):
-                if frei[zeiger]:
-                    frei[zeiger] = False
-                    info[t["id"]]["bloecke"].append(idx[zeiger])
-                zeiger += 1
+            if info[t["id"]]["nadel"] != "ok":
+                zeiger = fuellen(t, zeiger)
     for t in themen:
         x = info[t["id"]]
         x["bloecke"].sort()
         x["zugeteilt"] = len(x["bloecke"])
-        x["ueberlauf"] = t["bloecke"] - x["zugeteilt"]
-        if x["bloecke"]:
-            x["erster"], x["letzter"] = x["bloecke"][0], x["bloecke"][-1]
+        x["ueberlauf"] = max(0, x["bedarf"] - x["zugeteilt"])
         for teil, i in enumerate(x["bloecke"]):
-            belegung[i] = (t["id"], teil + 1, t["bloecke"])
+            belegung[i] = (t["id"], teil + 1, x["bedarf"])
     return belegung, info
 
 
@@ -425,74 +438,231 @@ def _schuljahr_grenzen(sj):
     return datetime.date.fromisoformat(sj["beginn"]), datetime.date.fromisoformat(sj["ende"])
 
 
+def _ist(con, lid, von, bis):
+    return {(z["datum"], z["beginn"]): z["stand"] for z in con.execute(
+        "SELECT datum, beginn, stand FROM ist WHERE lehrkraft_id = ? AND datum BETWEEN ? AND ?", (lid, von.isoformat(), bis.isoformat()))}
+
+
+def ferienabschnitte(frei, von, bis):
+    """Zusammenhaengende unterrichtsfreie Werktage (Ferien, Feiertage) im Zeitraum: [{von, bis, name, tage}].
+    Ein Wochenende dazwischen trennt einen Abschnitt nicht."""
+    abschnitte = []
+    tag = von
+    while tag <= bis:
+        name = frei.get(tag.isoformat())
+        if name and tag.isoweekday() <= 5:
+            letzter = abschnitte[-1] if abschnitte else None
+            zwischen = []
+            if letzter:
+                d = datetime.date.fromisoformat(letzter["bis"]) + datetime.timedelta(days=1)
+                while d < tag:
+                    zwischen.append(d)
+                    d += datetime.timedelta(days=1)
+            if letzter and letzter["name"] == name and all(d.isoweekday() > 5 for d in zwischen):
+                letzter["bis"] = tag.isoformat()
+                letzter["tage"] += 1
+            else:
+                abschnitte.append({"von": tag.isoformat(), "bis": tag.isoformat(), "name": name, "tage": 1})
+        tag += datetime.timedelta(days=1)
+    return abschnitte
+
+
+def _strang_rechnen(con, lid, kid, gid, sj, kal=None, ist=None):
+    """Bloecke, ausgefallene Bloecke, Themen und Fluss eines Strangs im Schuljahr."""
+    von, bis = _schuljahr_grenzen(sj)
+    kal = kal or Kalender(con, lid, von, bis)
+    ist = _ist(con, lid, von, bis) if ist is None else ist
+    bloecke, weg = kal.bloecke(kid, gid)
+    themen = _themen(con, lid, kid, gid, sj["id"])
+    belegung, info = fliessen(themen, bloecke, ist)
+    for i, b in enumerate(bloecke):
+        b["thema_id"], b["teil"], b["von"] = belegung[i] if belegung[i] else (None, None, None)
+        b["ist"] = ist.get((b["datum"], b["beginn"]))
+    return kal, bloecke, weg, themen, info
+
+
 def plan(con, lid, kid, gid, sid, jetzt=None):
-    """Alles fuer die Planungsansicht eines Strangs: Themen mit Fluss-Info, Bloecke mit Belegung, ausgefallene Bloecke,
-    Kalenderwochen mit Ferien, Lernfelder der Klasse."""
+    """Alles fuer die Planungsansicht eines Strangs: Themen mit Fluss-Info, Bloecke mit Belegung und Ist, ausgefallene
+    Bloecke, Ferienabschnitte, Kalenderwochen, Lernfelder der Klasse und die Bilanz."""
     sj = _schuljahr(con, sid)
     von, bis = _schuljahr_grenzen(sj)
     jetzt = jetzt or db.jetzt()
-    kal = Kalender(con, lid, von, bis)
-    bloecke, weg = kal.bloecke(kid, gid)
-    themen = _themen(con, lid, kid, gid, sid)
-    belegung, info = fliessen(themen, bloecke)
-    for i, b in enumerate(bloecke):
-        b["thema_id"], b["teil"], b["von"] = belegung[i] if belegung[i] else (None, None, None)
+    kal, bloecke, weg, themen, info = _strang_rechnen(con, lid, kid, gid, sj)
+    for b in bloecke:
         b["vergangen"] = (b["datum"], b["ende"]) <= (jetzt[:10], jetzt[11:16])
     lf = {z["id"]: dict(z) for z in sorted(con.execute("SELECT l.id, l.nummer, l.name, l.stunden FROM lernfeld l JOIN klasse k "
                                                        "ON k.bildungsgang_id = l.bildungsgang_id WHERE k.id = ?", (kid,)),
                                            key=lambda z: natuerlich(z["nummer"]))}
     for t in themen:
         x = info[t["id"]]
-        t.update(zugeteilt=x["zugeteilt"], ueberlauf=x["ueberlauf"], nadel=x["nadel"],
-                 von=bloecke[x["erster"]]["datum"] if x["erster"] is not None else None,
-                 bis=bloecke[x["letzter"]]["datum"] if x["letzter"] is not None else None,
+        t.update(zugeteilt=x["zugeteilt"], bedarf=x["bedarf"], ueberlauf=x["ueberlauf"], nadel=x["nadel"],
+                 von=bloecke[x["bloecke"][0]]["datum"] if x["bloecke"] else None,
+                 bis=bloecke[x["bloecke"][-1]]["datum"] if x["bloecke"] else None,
+                 gehalten=sum(1 for i in x["bloecke"] if bloecke[i]["vergangen"]),
                  lernfeld=lf.get(t["lernfeld_id"], {}).get("nummer", ""))
     # Kalenderwochen des Schuljahres (fuer die Ansicht "Schuljahr")
     wochen = []
     montag = stundenplan.montag_von(von)
     while montag <= bis:
-        freitag = montag + datetime.timedelta(days=4)
-        frei = sum(1 for n in range(5) if (montag + datetime.timedelta(days=n)).isoformat() in kal.frei)
-        wochen.append({"montag": montag.isoformat(), "kw": montag.isocalendar()[1], "frei": frei >= 5,
-                       "ferien": next((kal.frei[(montag + datetime.timedelta(days=n)).isoformat()] for n in range(5)
-                                       if (montag + datetime.timedelta(days=n)).isoformat() in kal.frei), None),
-                       "heute": montag.isoformat() <= jetzt[:10] <= freitag.isoformat()})
+        tage = [(montag + datetime.timedelta(days=n)).isoformat() for n in range(5)]
+        frei = [kal.frei[t] for t in tage if t in kal.frei]
+        wochen.append({"montag": montag.isoformat(), "kw": montag.isocalendar()[1], "frei": len(frei) >= 5,
+                       "ferien": frei[0] if frei else None, "freie_tage": len(frei),
+                       "heute": tage[0] <= jetzt[:10] <= tage[-1]})
         montag += datetime.timedelta(days=7)
+    # Bilanz je Lernfeld: Stundenansatz (in Bloecken) gegen Verplantes und Gehaltenes
+    bilanz = []
+    for lfid in [x for x in lf if any(t["lernfeld_id"] == x for t in themen)] + ([None] if any(not t["lernfeld_id"] for t in themen) else []):
+        ts = [t for t in themen if t["lernfeld_id"] == lfid]
+        l = lf.get(lfid)
+        bilanz.append({"lernfeld_id": lfid, "nummer": l["nummer"] if l else "ohne Lernfeld", "name": l["name"] if l else "",
+                       "ansatz": round(l["stunden"] / 2) if l and l["stunden"] else None,
+                       "verplant": sum(t["bedarf"] for t in ts), "gehalten": sum(t["gehalten"] for t in ts),
+                       "ueberlauf": sum(t["ueberlauf"] for t in ts)})
+    offen = [b for b in bloecke if b["vergangen"] and b["thema_id"] and not b["ist"]]
     spuren = sorted({b["lernfeld_id"] for b in bloecke if b["lernfeld_id"]})
     return {"schuljahr": sj, "themen": themen, "bloecke": bloecke, "weg": weg, "wochen": wochen,
-            "lernfelder": list(lf.values()), "spuren": [lf.get(s, {"id": s, "nummer": "?"}) for s in spuren],
+            "ferien": ferienabschnitte(kal.frei, von, bis),
+            "lernfelder": list(lf.values()), "spuren": [lf.get(s, {"id": s, "nummer": "?"}) for s in spuren], "bilanz": bilanz,
             "summe": {"bloecke": len(bloecke), "verplant": sum(t["zugeteilt"] for t in themen),
-                      "ueberlauf": sum(t["ueberlauf"] for t in themen), "frei": sum(1 for b in bloecke if b["thema_id"] is None)},
+                      "bedarf": sum(t["bedarf"] for t in themen), "ueberlauf": sum(t["ueberlauf"] for t in themen),
+                      "frei": sum(1 for b in bloecke if b["thema_id"] is None),
+                      "rest": sum(1 for b in bloecke if not b["vergangen"]), "ist_offen": len(offen)},
             "heute": jetzt[:10]}
 
 
+# --- Wochenplan, Stunde und Ist-Stand ---
+
+def _schuljahr_der_woche(con, woche):
+    return grunddaten.schuljahr_zum(con, woche["montag"]) or grunddaten.schuljahr_zum(con, woche["tage"][-1]["datum"])
+
+
 def themen_der_woche(con, lid, woche):
-    """Ergaenzt die Bloecke eines Wochenplans (stundenplan.woche) um das Thema aus der Planung:
-    block["thema"] = {titel, teil, von, lernfeld} oder None."""
-    if not woche["bloecke"]:
-        return woche
-    sj = grunddaten.schuljahr_zum(con, woche["montag"]) or grunddaten.schuljahr_zum(con, woche["tage"][-1]["datum"])
+    """Ergaenzt die Bloecke eines Wochenplans (stundenplan.woche) um Thema und Ist-Stand:
+    block["thema"] = {id, titel, teil, von, lernfeld, ls} oder None, block["ist"] = Stand oder None."""
+    for b in woche["bloecke"]:
+        b["thema"], b["ist"] = None, None
+    sj = _schuljahr_der_woche(con, woche) if woche["bloecke"] else None
     if sj is None:
         return woche
     von, bis = _schuljahr_grenzen(sj)
     kal = Kalender(con, lid, von, bis)
+    ist = _ist(con, lid, von, bis)
     nummern = {z["id"]: z["nummer"] for z in con.execute("SELECT id, nummer FROM lernfeld")}
     straenge_ = {(b["klasse"]["id"], b["gruppe"]["id"] if b["gruppe"] else None) for b in woche["bloecke"]
                  if b["klasse"] and b["art"] in ("regulaer", "zusatz", "verschoben")}
     zuordnung = {}
     for kid, gid in straenge_:
-        themen = _themen(con, lid, kid, gid, sj["id"])
-        if not themen:
-            continue
-        bloecke, _ = kal.bloecke(kid, gid)
-        belegung, _ = fliessen(themen, bloecke)
+        _, bloecke, _, themen, _ = _strang_rechnen(con, lid, kid, gid, sj, kal, ist)
         nach_id = {t["id"]: t for t in themen}
-        for i, b in enumerate(bloecke):
-            if belegung[i]:
-                t = nach_id[belegung[i][0]]
-                zuordnung[(b["datum"], b["beginn"], kid)] = {"id": t["id"], "titel": t["titel"], "teil": belegung[i][1],
-                                                           "von": belegung[i][2], "lernfeld": nummern.get(t["lernfeld_id"], ""),
-                                                           "ls": t["ls_titel"]}
+        for b in bloecke:
+            if b["thema_id"]:
+                t = nach_id[b["thema_id"]]
+                zuordnung[(b["datum"], b["beginn"], kid)] = {"id": t["id"], "titel": t["titel"], "teil": b["teil"], "von": b["von"],
+                                                           "lernfeld": nummern.get(t["lernfeld_id"], ""), "ls": t["ls_titel"]}
     for b in woche["bloecke"]:
-        b["thema"] = zuordnung.get((b["datum"], b["beginn"], b["klasse"]["id"])) if b["klasse"] and not b["zustand"] else None
+        if b["klasse"] and not b["zustand"] and b["art"] in ("regulaer", "zusatz", "verschoben"):
+            b["thema"] = zuordnung.get((b["datum"], b["beginn"], b["klasse"]["id"]))
+            b["ist"] = ist.get((b["datum"], b["beginn"]))
     return woche
+
+
+def _stunden_des_strangs(con, lid, kid, gid, sj, kal, ist):
+    _, bloecke, _, themen, _ = _strang_rechnen(con, lid, kid, gid, sj, kal, ist)
+    return bloecke, {t["id"]: t for t in themen}
+
+
+def stunde(con, lid, datum, beginn, jetzt=None):
+    """Alles fuer das Stunden-Overlay einer gehaltenen Stunde (regulaer, Zusatzstunde oder hierher verschoben):
+    Klasse/Gruppe, Thema mit Teil und Hinweis, Ist-Stand, Merker dieser und der naechsten Stunde, vorige und
+    naechste Stunde des Strangs, Termine des Tages."""
+    jetzt = jetzt or db.jetzt()
+    tag = datetime.date.fromisoformat(datum)
+    woche = stundenplan.woche(con, lid, tag, jetzt)
+    b = next((x for x in woche["bloecke"] if x["datum"] == datum and x["beginn"] == beginn and x["klasse"]
+              and not x["zustand"] and x["art"] in ("regulaer", "zusatz", "verschoben")), None)
+    if b is None:
+        raise PlanungFehler("Zu dieser Zeit hältst du keine Stunde.")
+    kid, gid = b["klasse"]["id"], b["gruppe"]["id"] if b["gruppe"] else None
+    ergebnis = {"datum": datum, "beginn": b["beginn"], "ende": b["ende"], "klasse": b["klasse"], "gruppe": b["gruppe"], "art": b["art"],
+                "zeile": next((z for z in woche["zeilen"] if z["beginn"] == b["beginn"]), None),
+                "thema": None, "ist": None, "merker": b["merker"], "naechste": None, "vorige": None, "naechste_merker": [],
+                "termine": [t for t in woche["termine"] if t["datum"] <= datum <= (t["bis"] or t["datum"])],
+                "vergangen": (datum, b["ende"]) <= (jetzt[:10], jetzt[11:16]), "jetzt": b["jetzt"], "schuljahr": None}
+    sj = grunddaten.schuljahr_zum(con, datum)
+    zeile = con.execute("SELECT stand FROM ist WHERE lehrkraft_id = ? AND datum = ? AND beginn = ?", (lid, datum, beginn)).fetchone()
+    ergebnis["ist"] = zeile["stand"] if zeile else None
+    if sj is None:
+        return ergebnis
+    ergebnis["schuljahr"] = sj["name"]
+    von, bis = _schuljahr_grenzen(sj)
+    kal = Kalender(con, lid, von, bis)
+    bloecke, themen = _stunden_des_strangs(con, lid, kid, gid, sj, kal, _ist(con, lid, von, bis))
+    pos = next((i for i, x in enumerate(bloecke) if x["datum"] == datum and x["beginn"] == beginn), None)
+    if pos is None:
+        return ergebnis
+    x = bloecke[pos]
+    if x["thema_id"]:
+        t = themen[x["thema_id"]]
+        lf = con.execute("SELECT nummer, name FROM lernfeld WHERE id = ?", (t["lernfeld_id"],)).fetchone() if t["lernfeld_id"] else None
+        ergebnis["thema"] = {"id": t["id"], "titel": t["titel"], "teil": x["teil"], "von": x["von"], "ls": t["ls_titel"],
+                             "hinweis": t["hinweis"], "lernfeld": lf["nummer"] if lf else "", "lernfeld_name": lf["name"] if lf else ""}
+    if pos > 0:
+        ergebnis["vorige"] = {"datum": bloecke[pos - 1]["datum"], "beginn": bloecke[pos - 1]["beginn"]}
+    if pos + 1 < len(bloecke):
+        n = bloecke[pos + 1]
+        ergebnis["naechste"] = {"datum": n["datum"], "beginn": n["beginn"],
+                                "thema": themen[n["thema_id"]]["titel"] if n["thema_id"] else None}
+        ergebnis["naechste_merker"] = [{"id": m["id"], "text": m["titel"]} for m in con.execute(
+            "SELECT id, titel FROM termin WHERE lehrkraft_id = ? AND art = 'merker' AND datum = ? AND beginn = ? AND klasse_id = ?",
+            (lid, n["datum"], n["beginn"], kid))]
+    return ergebnis
+
+
+def ist_setzen(con, lid, datum, beginn, stand):
+    """Ist-Stand einer gehaltenen Stunde setzen ('ok', 'mehr', 'fertig') oder mit stand=None zuruecknehmen."""
+    if stand not in IST_STAENDE + (None,):
+        raise PlanungFehler("Unbekannter Ist-Stand.")
+    s = stunde(con, lid, datum, beginn)
+    if stand is None:
+        con.execute("DELETE FROM ist WHERE lehrkraft_id = ? AND datum = ? AND beginn = ?", (lid, datum, beginn))
+        return
+    if stand != "ok" and not s["thema"]:
+        raise PlanungFehler("In dieser Stunde liegt kein Thema aus der Planung.")
+    con.execute("INSERT INTO ist (lehrkraft_id, datum, beginn, klasse_id, gruppe_id, thema_id, stand, geaendert) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (lehrkraft_id, datum, beginn) DO UPDATE SET stand = excluded.stand, thema_id = excluded.thema_id, "
+                "geaendert = excluded.geaendert",
+                (lid, datum, s["beginn"], s["klasse"]["id"], s["gruppe"]["id"] if s["gruppe"] else None,
+                 s["thema"]["id"] if s["thema"] else None, stand, db.jetzt()))
+
+
+def offene_ist(con, lid, jetzt=None, grenze=30):
+    """Vergangene Stunden des laufenden Schuljahres mit Thema, aber ohne Ist-Bestaetigung (neueste zuerst)."""
+    jetzt = jetzt or db.jetzt()
+    sj = grunddaten.schuljahr_zum(con, jetzt[:10])
+    if sj is None:
+        return []
+    von, bis = _schuljahr_grenzen(sj)
+    bis = min(bis, datetime.date.fromisoformat(jetzt[:10]))
+    if bis < von:
+        return []
+    kal = Kalender(con, lid, von, bis)
+    ist = _ist(con, lid, von, bis)
+    offen = []
+    for s in straenge(con, lid, sj["id"]):
+        bloecke, themen = _stunden_des_strangs(con, lid, s["klasse_id"], s["gruppe_id"], sj, kal, ist)
+        for b in bloecke:
+            if b["thema_id"] and not b["ist"] and (b["datum"], b["ende"]) <= (jetzt[:10], jetzt[11:16]):
+                offen.append({"datum": b["datum"], "beginn": b["beginn"], "strang": s["name"], "thema": themen[b["thema_id"]]["titel"],
+                              "klasse_id": s["klasse_id"], "gruppe_id": s["gruppe_id"], "thema_id": b["thema_id"]})
+    offen.sort(key=lambda x: (x["datum"], x["beginn"]), reverse=True)
+    return offen[:grenze]
+
+
+def ist_alle_bestaetigen(con, lid, jetzt=None):
+    """Alle offenen Stunden als 'wie geplant' bestaetigen. Rueckgabe: Anzahl."""
+    offen = offene_ist(con, lid, jetzt, grenze=100000)
+    for o in offen:   # "wie geplant" aendert den Fluss nicht, deshalb direkt eintragen
+        con.execute("INSERT OR IGNORE INTO ist (lehrkraft_id, datum, beginn, klasse_id, gruppe_id, thema_id, stand, geaendert) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'ok', ?)", (lid, o["datum"], o["beginn"], o["klasse_id"], o["gruppe_id"], o["thema_id"], db.jetzt()))
+    return len(offen)

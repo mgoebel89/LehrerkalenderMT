@@ -171,5 +171,65 @@ class Planung(MitPlanung):
             planung.thema_loeschen(self.con, self.r["id"], self.plan()["themen"][0]["id"])
 
 
+class FliessenMitIst(Fliessen):
+    def test_mehr_und_fertig(self):
+        bl = self.bl(6)
+        themen = [self.th(1, 2), self.th(2, 2)]
+        # Block 2 (Thema 1, Teil 2): braucht einen mehr -> Thema 1 hat 3 Bloecke, Thema 2 rutscht
+        belegung, info = planung.fliessen(themen, bl, {("2026-11-02", "07:45"): "mehr"})
+        self.assertEqual([b[0] if b else None for b in belegung], [1, 1, 1, 2, 2, None])
+        self.assertEqual(info[1]["bedarf"], 3)
+        # Block 1: schon fertig -> Thema 2 rueckt vor
+        belegung, info = planung.fliessen(themen, bl, {("2026-11-01", "07:45"): "fertig"})
+        self.assertEqual([b[0] if b else None for b in belegung], [1, 2, 2, None, None, None])
+        self.assertEqual(belegung[0], (1, 1, 1))
+
+    def test_ferienabschnitte(self):
+        frei = {"2026-10-12": "Herbstferien", "2026-10-13": "Herbstferien", "2026-10-16": "Herbstferien", "2026-10-19": "Herbstferien",
+                "2026-11-01": "Allerheiligen"}
+        a = planung.ferienabschnitte(frei, D("2026-10-01"), D("2026-11-30"))
+        self.assertEqual([(x["name"], x["von"], x["bis"]) for x in a],
+                         [("Herbstferien", "2026-10-12", "2026-10-13"), ("Herbstferien", "2026-10-16", "2026-10-19")])
+        # Allerheiligen 2026 ist ein Sonntag: kein Werktag, kein Abschnitt
+
+
+class IstStand(MitPlanung):
+    def setUp(self):
+        super().setUp()
+        planung.thema_speichern(self.con, self.lid, self.strang(titel="SPS", bloecke=2, lernfeld_id=self.lf7))
+        planung.thema_speichern(self.con, self.lid, self.strang(titel="GRAFCET", bloecke=2, lernfeld_id=self.lf7))
+
+    def test_stunde_und_ist(self):
+        s = planung.stunde(self.con, self.lid, "2026-11-20", "07:45", jetzt="2026-11-25T12:00:00")
+        self.assertEqual((s["thema"]["titel"], s["thema"]["teil"], s["thema"]["von"]), ("SPS", 2, 2))
+        self.assertEqual(s["naechste"]["datum"], "2026-11-23")
+        self.assertEqual(s["vorige"]["datum"], "2026-11-16")
+        planung.ist_setzen(self.con, self.lid, "2026-11-20", "07:45", "mehr")
+        p = self.plan()
+        self.assertEqual([(t["titel"], t["bedarf"], t["bis"]) for t in p["themen"]], [("SPS", 3, "2026-11-23"), ("GRAFCET", 2, "2026-12-04")])
+        planung.ist_setzen(self.con, self.lid, "2026-11-20", "07:45", None)   # Rueckgaengig
+        self.assertEqual(self.plan()["themen"][0]["bedarf"], 2)
+        with self.assertRaises(planung.PlanungFehler):                        # dort keine Stunde
+            planung.ist_setzen(self.con, self.lid, "2026-11-17", "07:45", "ok")
+
+    def test_offene_ist_und_alle_bestaetigen(self):
+        offen = planung.offene_ist(self.con, self.lid, jetzt="2026-11-24T08:00:00")
+        self.assertEqual([o["datum"] for o in offen], ["2026-11-23", "2026-11-20", "2026-11-16"])
+        planung.ist_setzen(self.con, self.lid, "2026-11-16", "07:45", "ok")
+        self.assertEqual(len(planung.offene_ist(self.con, self.lid, jetzt="2026-11-24T08:00:00")), 2)
+        self.assertEqual(planung.ist_alle_bestaetigen(self.con, self.lid, jetzt="2026-11-24T08:00:00"), 2)
+        self.assertEqual(planung.offene_ist(self.con, self.lid, jetzt="2026-11-24T08:00:00"), [])
+
+    def test_bilanz_und_wochenplan(self):
+        p = planung.plan(self.con, self.lid, self.k24, None, self.sj, jetzt="2026-11-21T12:00:00")
+        lf7 = next(b for b in p["bilanz"] if b["lernfeld_id"] == self.lf7)
+        self.assertEqual((lf7["ansatz"], lf7["verplant"], lf7["gehalten"]), (40, 4, 2))
+        self.assertEqual(p["summe"]["ist_offen"], 2)
+        self.assertEqual([f["name"] for f in p["ferien"]], ["Brückentag"])
+        planung.ist_setzen(self.con, self.lid, "2026-11-16", "07:45", "fertig")
+        w = planung.themen_der_woche(self.con, self.lid, stundenplan.woche(self.con, self.lid, D("2026-11-16"), "2026-11-21T12:00:00"))
+        self.assertEqual([(b["thema"]["titel"], b["ist"]) for b in w["bloecke"]], [("SPS", "fertig"), ("GRAFCET", None)])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -161,7 +161,7 @@ const L = {
   // Overlay mit einer Frage. inhalt: Element(e); speichern(form) darf einen Fehler werfen: er erscheint im Fenster.
   // Rueckgabe: Promise mit dem Ergebnis von speichern() oder null bei Abbrechen.
   // weitere: [{ text, speichern(form) }] zusaetzliche Knoepfe vor dem Hauptknopf (z. B. "Entwurf speichern")
-  dialog({ titel, inhalt, knopf = 'Speichern', abbrechen = 'Abbrechen', speichern, gefaehrlich = false, breit = false, weitere = [], fuss = null }) {
+  dialog({ titel, inhalt, knopf = 'Speichern', abbrechen = 'Abbrechen', speichern, gefaehrlich = false, breit = false, weitere = [], fuss = null, fokus = true }) {
     return new Promise(fertig => {
       const fehler = L.el('div', { class: 'fehlertext', role: 'alert' });
       const ok = knopf ? L.el('button', { type: 'submit', class: gefaehrlich ? 'warnen' : 'haupt', text: knopf }) : null;
@@ -187,7 +187,7 @@ const L = {
       d.showModal();
       const erstes = form.querySelector('input:not([type=hidden]):not([readonly]), select, textarea');
       // ohne Eingabefeld der Hauptknopf: sonst waehlt die Eingabetaste den ersten Knopf einer Skala aus
-      if (erstes) erstes.focus(); else if (ok) ok.focus();
+      if (erstes && fokus) erstes.focus(); else if (ok) ok.focus();
     });
   },
 

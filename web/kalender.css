@@ -174,3 +174,54 @@ details.lf-karte summary::-webkit-details-marker { display: none; }
 .wp-b .th { font-size: .78rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
 .wp-b .th .teil { color: var(--leise); font-family: var(--mono); font-size: .68rem; }
 .lp tr.paket td .kleben { position: sticky; left: 10px; }
+
+/* ---- Stufe C2: Raster mit Tagen, Ferien, Ist; Stunden-Overlay ---- */
+:root { --ferien: #fbe2b0; --ferien-text: #7a4f00; }
+.lp-tage th.tag-kopf { font-family: var(--schrift); font-size: .7rem; color: var(--text); text-align: left; padding: 5px 6px 2px; }
+.lp-tage th.tag-kopf .kw { color: var(--leise); font-family: var(--mono); font-size: .6rem; font-weight: 700; }
+.lp-tage th.zeit { font-size: .58rem; padding: 2px 0 4px; }
+.lp .tag-start { border-left: 2px solid var(--linie-stark) !important; }
+.lp .wochenstart { border-left: 2px solid var(--blau-mittel) !important; }
+.lp th.w2, .lp td.w2 { background-color: #f7f9fb; }
+.lp th.heute, .lp td.t.heute { background-color: var(--blau-hell); }
+.lp th.ab-heute { box-shadow: inset 0 -3px 0 var(--blau); }
+.lp th.ferien-sp, .lp td.ferien-sp { width: 22px; min-width: 22px; max-width: 22px; padding: 0; background: var(--ferien); border-left: 1px solid #f3c56f; border-right: 1px solid #f3c56f; }
+.lp th.ferien-sp { vertical-align: bottom; padding-bottom: 6px; }
+.lp th.ferien-sp .senkrecht { writing-mode: vertical-rl; transform: rotate(180deg); font-family: var(--schrift); font-size: .64rem; font-weight: 700;
+  color: var(--ferien-text); white-space: nowrap; letter-spacing: .02em; }
+.lp th.ferien, .lp td.t.ferien { background: var(--ferien); opacity: 1; }
+.lp th.ferien { color: var(--ferien-text); }
+.lp th.teilfrei { box-shadow: inset 0 -4px 0 var(--ferien); }
+.lp td.tagzelle { width: 44px; min-width: 44px; }
+.lp td.tagzelle .segmente { position: absolute; left: 4px; right: 4px; top: 11px; height: 11px; display: flex; gap: 2px; pointer-events: none; }
+.lp td.tagzelle .seg { flex: 1; border-radius: 3px; background: transparent; }
+.lp td.tagzelle .seg.an { background: var(--b); }
+.lp td.tagzelle .seg.aus { background: repeating-linear-gradient(135deg, transparent 0 2px, var(--linie-stark) 2px 3px); }
+.lp th .kw-unten { display: block; font-size: .56rem; color: var(--blau); }
+.istm { position: absolute; right: 2px; bottom: 1px; font-size: .58rem; font-weight: 800; line-height: 1; pointer-events: none; font-family: var(--mono); }
+.istm.ok { color: #5c6a00; } .istm.mehr { color: #9a6400; } .istm.fertig { color: var(--rot); }
+.istm.offen { width: 7px; height: 7px; border-radius: 50%; background: var(--gelb); right: 3px; bottom: 3px; }
+.istm-l { font-family: var(--mono); font-size: .72rem; } .istm-l.ok { color: #5c6a00; } .istm-l.mehr { color: #9a6400; } .istm-l.fertig { color: var(--rot); }
+i.istm-l.offen { width: 8px; height: 8px; border-radius: 50%; background: var(--gelb); display: inline-block; }
+.m-ferien { width: 14px; height: 12px; display: inline-block; background: var(--ferien); border: 1px solid #f3c56f; }
+details.bilanz summary { cursor: pointer; list-style: none; }
+details.bilanz summary::-webkit-details-marker { display: none; }
+/* Wochenplan: freie Tage in Ferienfarbe */
+.wp th.frei { background: var(--ferien); }
+.wp th .frei-name { color: var(--ferien-text); }
+.wp td.frei { background: repeating-linear-gradient(135deg, #fdf0d6 0 6px, var(--ferien) 6px 9px); }
+.hinweis .z-knopf { border: none; background: transparent; padding: 2px 0; min-height: 0; justify-content: start; text-align: left; font-weight: 400; font-size: inherit; }
+.hinweis .z-knopf:hover { background: transparent; text-decoration: underline; color: var(--text); }
+/* Stunden-Overlay */
+.ov-kopf { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.ov-kopf .titel { display: grid; gap: 2px; min-width: 0; }
+.ov .gesp { min-height: 1.2em; }
+.ov-ab { border: 1px solid var(--linie); border-radius: 10px 4px 4px 4px; overflow: hidden; }
+.ov-ab .ab-kopf { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--knopf); font-weight: 700; font-size: .85rem; }
+.ov-ab .ab-kopf .rechts { margin-left: auto; }
+.ov-ab .ab-inhalt { padding: 10px 12px; display: grid; gap: 8px; }
+.ov .hinweis-text { white-space: pre-wrap; color: var(--leise); }
+.merker-zeile { flex-wrap: nowrap; }
+.merker-zeile > span:first-child { flex: 1; min-width: 0; }
+.hinweis.gelb { border-color: var(--gelb); background: #fffaf0; }
+.hinweis.gelb .zahl, .hinweis.gelb .k .symbol { color: #9a6400; }
