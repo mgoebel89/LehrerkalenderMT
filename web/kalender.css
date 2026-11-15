@@ -410,3 +410,27 @@ label.haken.gross input { width: 24px; height: 24px; }
 .logo-vorschau { border: 1px dashed var(--linie-stark); border-radius: 8px; padding: 12px; background: #fff; display: flex; justify-content: center; }
 .logo-vorschau img { max-width: 100%; max-height: 110px; object-fit: contain; }
 @media (max-width: 760px) { .kopf .schul-logo { display: none; } }
+
+/* F1: Unterschrift zeichnen (aus dem alten Lehrerkalender) */
+.usz { position: fixed; inset: 0; z-index: 70; background: #eef1f4; display: flex; flex-direction: column; }
+.usz-leiste { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--karte); border-bottom: 1px solid var(--linie); flex-wrap: wrap; }
+.usz-werkzeuge { display: flex; align-items: center; gap: 6px; flex: 1; flex-wrap: wrap; justify-content: center; }
+.usz-k { min-height: 44px; min-width: 44px; padding: 0 12px; gap: 6px; }
+.usz-k.an { border-color: var(--blau); background: var(--blau-hell); color: var(--blau); font-weight: 600; }
+.usz-farbe { width: 16px; height: 16px; border-radius: 50%; display: inline-block; }
+.usz-trenner { width: 1px; height: 28px; background: var(--linie); margin: 0 4px; }
+.usz-hinweis { text-align: center; font-size: 13px; color: var(--leise); padding: 8px 12px 0; }
+.usz-buehne { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+.usz-blatt { position: relative; background: #fff; border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,.12); }
+.usz-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.usz-linie { position: absolute; left: 6%; right: 6%; top: 72%; border-top: 2px dashed #b8c2cc; pointer-events: none; }
+.usz-vorschau { background: #fff; border: 1px solid var(--linie); border-radius: 8px; padding: 24px 24px 12px; display: flex; flex-direction: column; align-items: flex-end; }
+.usz-vorschau.klein { padding: 12px 16px 8px; align-items: flex-start; }
+.usz-v-sig { max-height: 55px; max-width: 200px; display: block; }
+.usz-v-paraphe { max-height: 40px; max-width: 120px; display: block; }
+.usz-v-linie { width: 210px; border-top: 1px solid #000; margin-top: 2px; }
+/* F1: Formularcenter */
+.formular-karten .karte.aus { opacity: .6; }
+.formulare .chip-knopf.stand { min-height: 30px; padding: 2px 12px; border-radius: 999px; }
+.formulare .chip-knopf.stand.gelb { background: #fdf1d6; border-color: #e3b44b; color: #7a4f00; }
+.formulare .chip-knopf.stand.gruen { background: #e7f2c8; border-color: #9fb83a; color: #4d5c00; }

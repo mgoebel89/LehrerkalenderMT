@@ -482,6 +482,30 @@ MIGRATIONEN = [
         zeit TEXT NOT NULL);
     CREATE INDEX pruefung_protokoll_schueler ON pruefung_protokoll (pruefung_id, schueler_id)
     """,
+    # 15: Stufe F1 Formularcenter: Unterschrift und Paraphe je Konto (gezeichnet, PNG), Schul-Vorlagen der Formulare
+    #     (vom Admin hochgeladen, nicht im Repo) und die Ablage der erzeugten Formulare mit Stand.
+    """
+    ALTER TABLE lehrkraft ADD COLUMN unterschrift BLOB;
+    ALTER TABLE lehrkraft ADD COLUMN paraphe BLOB;
+    CREATE TABLE formularvorlage (
+        art TEXT PRIMARY KEY,
+        pdf BLOB NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        hochgeladen TEXT NOT NULL);
+    CREATE TABLE formular (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        art TEXT NOT NULL,
+        betrifft TEXT NOT NULL DEFAULT '',
+        von TEXT,
+        bis TEXT,
+        daten TEXT NOT NULL DEFAULT '{}',
+        pdf BLOB NOT NULL,
+        stand TEXT NOT NULL DEFAULT 'erstellt',
+        erstellt TEXT NOT NULL,
+        geaendert TEXT NOT NULL);
+    CREATE INDEX formular_lehrkraft ON formular (lehrkraft_id, von)
+    """,
 ]
 
 

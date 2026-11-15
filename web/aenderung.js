@@ -21,14 +21,20 @@ const Aenderung = (() => {
     return true;
   }
 
+  // Nach Ausfall/Vertretung: fuer diese Woche gleich die Stundenplanaenderung anbieten
+  async function formularAnbieten(ok, s, grund) {
+    if (ok && typeof Formulare !== 'undefined') await Formulare.nachfragen(s.datum, grund);
+    return ok;
+  }
+
   async function ausfall(s) {
     const [grund, liste] = grundFeld();
-    return !!await L.dialog({
+    return formularAnbieten(!!await L.dialog({
       titel: 'Stunde fällt aus', knopf: 'Ausfall eintragen',
       inhalt: el('div', { class: 'stapel', style: 'gap:10px' }, stundeText(s), L.feld('Grund', grund, 'erscheint im Wochenplan'), liste,
         el('p', { class: 'leise klein', text: 'In der Planung fällt die Stunde heraus, das Thema und alle folgenden rücken nach.' })),
       speichern: () => senden({ art: 'ausfall', datum: s.datum, beginn: s.beginn, grund: grund.value }),
-    });
+    }), s, grund.value);
   }
 
   async function vertreten(s) {
@@ -39,7 +45,7 @@ const Aenderung = (() => {
       ['nein', 'Eigener Stoff', 'Die Stunde zählt nicht: Dein Thema wartet auf deine nächste Stunde.']];
     const knoepfe = wahl.map(([w, text, hilfe]) => el('label', { class: 'wahl-karte' },
       el('input', { type: 'radio', name, value: w }), el('span', {}, el('b', { text }), el('span', { class: 'leise klein', text: hilfe }))));
-    return !!await L.dialog({
+    return formularAnbieten(!!await L.dialog({
       titel: 'Ich werde vertreten', knopf: 'Eintragen',
       inhalt: el('div', { class: 'stapel', style: 'gap:10px' }, stundeText(s),
         el('p', { class: 'leise klein', text: 'Die Stunde findet für die Klasse statt, aber nicht mit dir – anders als ein Ausfall.' }),
@@ -50,7 +56,7 @@ const Aenderung = (() => {
         if (!gewaehlt) throw new Error('Bitte wählen: Übernimmt die Vertretung dein Thema oder macht sie eigenen Stoff?');
         return senden({ art: 'vertreten', datum: s.datum, beginn: s.beginn, wer: wer.value, grund: grund.value, thema_weiter: gewaehlt.value === 'ja' });
       },
-    });
+    }), s, grund.value);
   }
 
   // bloecke: [{ beginn, ende, bezeichnung }] laut Zeitraster der Klasse

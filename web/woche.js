@@ -62,6 +62,8 @@ const Woche = (() => {
         : null,
       el('span', { class: 'rechts' },
         el('button', { type: 'button', onclick: () => terminBearbeiten(null, (W.tage.find(t => t.heute) || W.tage[0]).datum) }, L.symbol('plus'), 'Termin'),
+        el('button', { type: 'button', title: 'Stundenplanänderung / Beurlaubung für diese Woche erstellen',
+          onclick: () => Formulare.neu({ woche: W.montag }) }, L.symbol('formular'), 'Formular'),
         el('a', { class: 'knopf', href: '#einstellungen' }, L.symbol('spalten'), 'Stundenplan'))));
     if (!W.hat_stundenplan) {
       teile.push(el('div', { class: 'banner' }, el('b', { text: 'Noch kein Stundenplan. ' }),
@@ -440,6 +442,7 @@ const Woche = (() => {
     const notiz = el('textarea', { maxlength: 2000, rows: 2 });
     notiz.value = t ? t.notiz : '';
     const weitere = t ? [{ text: 'Löschen', klasse: 'warnen', speichern: () => L.api('POST', '/api/termin/' + t.id + '/loeschen', {}) }] : [];
+    if (t && t.art === 'dienst') weitere.push({ text: 'Stundenplanänderung …', speichern: () => 'formular' });
     const ok = await L.dialog({
       titel: t ? 'Termin' : 'Neuer Termin', knopf: 'Speichern', weitere,
       inhalt: el('div', { class: 'felder' }, L.feld('Titel', titel),
@@ -449,6 +452,7 @@ const Woche = (() => {
       speichern: () => L.api('POST', t ? '/api/termin/' + t.id : '/api/termin', { art: art.value, titel: titel.value, datum: von.value,
         bis: bis.value || null, beginn: beginn.value || null, ende: ende.value || null, notiz: notiz.value }),
     });
+    if (ok === 'formular') { await Formulare.ausTermin(t); return; }
     if (ok) await laden();
   }
 

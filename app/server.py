@@ -19,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, grunddaten, konten, moodle, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates
+from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -204,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
             self.antwort(f.status, {"fehler": f.meldung})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
-                updates.UpdateFehler, schule.SchuleFehler) as f:
+                updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler) as f:
             self.antwort(400, {"fehler": str(f)})
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -410,6 +410,7 @@ def api_grunddaten(h, con, daten):
     alles = grunddaten.alles(con)
     alles["notenschluessel"] = notenschluessel.liste(con, k)
     alles["schule"] = schule.angaben(con)
+    alles["formularvorlagen"] = formulare.vorlagen(con)
     h.antwort(200, alles)
 
 
@@ -792,6 +793,74 @@ def api_moodle_export(h, con, daten, pid):
     h.herunterladen(text.encode("utf-8"), "text/csv; charset=utf-8", "Moodle %s.csv" % p["titel"])
 
 
+# --- Formularcenter (Stufe F1) ---
+
+def api_formulare(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, formulare.uebersicht(con, k["id"]))
+
+
+def api_formular_vorschau(h, con, daten):
+    k = h.konto(con)
+    try:
+        tag = datetime.date.fromisoformat(h.abfrage("woche") or db.heute().isoformat())
+    except ValueError:
+        raise Fehler(400, "Ungültiges Datum.")
+    ae = formulare.woche_aenderungen(con, k["id"], tag)
+    ae["vorhanden"] = formulare.woche_hat_formular(con, k["id"], tag.isoformat())
+    h.antwort(200, ae)
+
+
+def api_formular_erstellen(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        fid = formulare.erstellen(con, k, daten)
+    h.antwort(200, {"id": fid, "formulare": formulare.liste(con, k["id"])})
+
+
+def api_formular_pdf(h, con, daten, fid):
+    k = h.konto(con)
+    inhalt, name = formulare.pdf_von(con, k["id"], _ganzzahl(fid))
+    h.herunterladen(inhalt, "application/pdf", name)
+
+
+def api_formular_stand(h, con, daten, fid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        formulare.stand_setzen(con, k["id"], _ganzzahl(fid), daten.get("stand"))
+    h.antwort(200, {"formulare": formulare.liste(con, k["id"])})
+
+
+def api_formular_loeschen(h, con, daten, fid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        formulare.loeschen(con, k["id"], _ganzzahl(fid))
+    h.antwort(200, {"formulare": formulare.liste(con, k["id"])})
+
+
+def api_unterschrift(h, con, daten, art):
+    """Eigene Unterschrift bzw. Paraphe als PNG (nur fuer das eigene Konto)."""
+    k = h.konto(con)
+    bild = formulare.unterschrift(con, k["id"], art)
+    if not bild:
+        raise Fehler(404, "Noch nicht gezeichnet.")
+    h.antwort(200, bild, "image/png")
+
+
+def api_unterschrift_setzen(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        formulare.unterschrift_setzen(con, k["id"], daten.get("art"), daten.get("bild") or "")
+    h.antwort(200, {"unterschrift": bool(formulare.unterschrift(con, k["id"])), "paraphe": bool(formulare.unterschrift(con, k["id"], "paraphe"))})
+
+
+def api_formularvorlage(h, con, daten):
+    _admin(h, con)
+    with db.transaktion(con):
+        formulare.vorlage_setzen(con, daten.get("art") or "stundenplanaenderung", daten.get("pdf") or "", daten.get("name") or "")
+    h.antwort(200, {"vorlagen": formulare.vorlagen(con)})
+
+
 def api_moodle_vorschau(h, con, daten):
     k = h.konto(con)
     h.antwort(200, moodle.vorschau(con, k["id"], daten))
@@ -901,6 +970,15 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/schule/logo", api_logo),
     ("GET", r"/api/schule/logo/da", api_logo_da),
     ("POST", r"/api/schule", api_schule),
+    ("POST", r"/api/formularvorlage", api_formularvorlage),
+    ("GET", r"/api/formulare", api_formulare),
+    ("GET", r"/api/formulare/vorschau", api_formular_vorschau),
+    ("POST", r"/api/formulare/stundenplanaenderung", api_formular_erstellen),
+    ("GET", r"/api/formular/" + ID + r"\.pdf", api_formular_pdf),
+    ("POST", r"/api/formular/" + ID + "/stand", api_formular_stand),
+    ("POST", r"/api/formular/" + ID + "/loeschen", api_formular_loeschen),
+    ("GET", r"/api/unterschrift/(unterschrift|paraphe)", api_unterschrift),
+    ("POST", r"/api/unterschrift", api_unterschrift_setzen),
     ("POST", r"/api/admin/bildungsgang", _grunddaten_schritt("bildungsgang_angelegt", grunddaten.bildungsgang_speichern)),
     ("POST", r"/api/admin/bildungsgang/" + ID, _grunddaten_schritt("bildungsgang_geaendert",
                                                                    lambda con, d, i: grunddaten.bildungsgang_speichern(con, d, i), True)),

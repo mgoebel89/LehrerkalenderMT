@@ -23,9 +23,9 @@ Das Konzept (Fassung 2, freigegeben am 14.11.2026) liegt in `docs/KONZEPT.html`.
 | D2c | Exporte je Prüfung: Notenspalte für die Excel-Notenliste kopieren (alle Schüler alphabetisch, Dezimalnote mit Komma), PDF-Ergebnisliste mit Notenspiegel, Rückmeldebogen je Schüler zum Aushändigen, CSV fürs Moodle-Bewertungsbuch (E-Mail, Prozent, Note im Feedback); eigener PDF-Schreiber ohne Zusatzpakete | gebaut (0.10.0) |
 | D2d | Moodle-Ergebnisse übernehmen (Bericht „Antworten“/„Bewertungen“ als JSON oder CSV): in eine Prüfung mit Gesamtpunkten (umgerechnet) oder als neue Prüfung (Titel aus dem Dateinamen, Termin am Prüfungstag im passenden Block); bester Versuch, Zuordnung mit Vorschlägen, Nachschreiber-Vermerk, Beginn/Dauer; Schülerlisten-Import aus Moodle wieder funktionsfähig | gebaut (0.11.0) |
 | Schule | Schullogo (Admin, Grunddaten → Schule und Logo; Bild wird im Browser zu JPEG), Schulname und Webadresse; Logo auf der Anmeldeseite und in der Kopfzeile; Dokumente im DRS-Design: Logo oben links, Angaben rechts, feine Linie, Farbband Blau/Grün/Pink/Gelb (4:1:1:1) im Fuß | gebaut (0.12.0) |
-| D2 | Prüfungsmodus am Tablet mit Stoppuhr, Gruppenprüfungen, Moodle-Ergebnisimport, PDF, Exporte | offen |
 | E | Teilen im Kollegium | offen |
-| F | Formularcenter, Unterrichtsbesuche, Paperless | offen |
+| F1 | Formularcenter mit Ablage und Stand (erstellt, abgegeben, genehmigt); Stundenplanänderung/Beurlaubung füllt das Schul-PDF aus Ausfällen und Vertretungen der Woche (Vorlage lädt der Admin hoch, nicht im Repo); Unterschrift und Paraphe mit Stift oder Finger zeichnen; Start auch nach Ausfall/Vertretung, aus der Woche und aus einem Termin (Migration 15; braucht python3-pypdf und python3-reportlab) | gebaut (0.13.0) |
+| F2/F3 | Unterrichtsbesuche, Paperless | offen |
 | G | VPN, Diktat, Feinschliff | offen |
 
 ## Installation (Proxmox)

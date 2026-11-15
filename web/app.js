@@ -10,7 +10,7 @@ const BEREICHE = [
   { a: 'start', text: 'Start', sym: 'start' },
   { a: 'planung', text: 'Planung', sym: 'plan' },
   { a: 'pruefungen', text: 'Prüfungen', sym: 'pruefung' },
-  { a: 'formulare', text: 'Formulare', sym: 'formular', spaeter: 'Stufe F' },
+  { a: 'formulare', text: 'Formulare', sym: 'formular' },
   { a: 'einstellungen', text: 'Einstellungen', sym: 'einstellungen' },
   { a: 'admin-konten', text: 'Konten', sym: 'lehrkraefte', admin: true, gruppe: 'Admin' },
   { a: 'admin-grunddaten', text: 'Grunddaten', sym: 'pakete', admin: true },
@@ -53,6 +53,7 @@ async function zeigen() {
     else if (bereich.a === 'einstellungen') await einstellungenZeigen(ziel === 'einstellungen-konto' ? 'konto' : ziel === 'einstellungen-kalender' ? 'kalender' : 'stundenplan');
     else if (bereich.a === 'planung') await planungZeigen(ziel === 'planung-bibliothek' ? 'bibliothek' : 'planung');
     else if (bereich.a === 'pruefungen') await pruefungenZeigen(ziel);
+    else if (bereich.a === 'formulare') { titelSetzen('Formulare'); await Formulare.zeigen(inhalt); }
     else await Admin.zeigen(bereich.a, inhalt, titelSetzen);
   } catch (e) {
     if (e.status === 401) { location.href = '/anmelden'; return; }
@@ -176,7 +177,8 @@ function kontoZeigen(ort) {
               el('div', { class: 'zeile' },
                 el('button', { type: 'button', onclick: ersatzcodesErneuern }, L.symbol('refresh'), 'Neue Ersatzcodes'),
                 el('button', { type: 'button', class: 'warnen', onclick: faktorAus }, 'Ausschalten')))
-          : el('div', {}, el('button', { type: 'button', class: 'haupt', onclick: faktorEin }, L.symbol('schloss'), 'Einschalten')))));
+          : el('div', {}, el('button', { type: 'button', class: 'haupt', onclick: faktorEin }, L.symbol('schloss'), 'Einschalten'))),
+      Formulare.unterschriftKarte()));
 }
 
 async function faktorEin() {

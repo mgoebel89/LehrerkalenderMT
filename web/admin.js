@@ -175,6 +175,30 @@ const Admin = (() => {
     });
   }
 
+  // Schul-Vorlagen der Formulare (PDF mit Formularfeldern); liegen nur in der Datenbank, nicht im Repo
+  function vorlagenKarte() {
+    const v = (G.formularvorlagen || {}).stundenplanaenderung;
+    const datei = el('input', { type: 'file', accept: 'application/pdf,.pdf' });
+    const senden = async wert => {
+      try { G.formularvorlagen = (await L.api('POST', '/api/formularvorlage', { art: 'stundenplanaenderung', pdf: wert, name: datei.files[0] ? datei.files[0].name : '' })).vorlagen;
+        L.meldung(wert ? 'Vorlage gespeichert.' : 'Vorlage entfernt.'); grunddatenZeichnen(); }
+      catch (e) { L.meldung(e.message, true); }
+    };
+    datei.addEventListener('change', () => {
+      const f = datei.files[0];
+      if (!f) return;
+      const leser = new FileReader();
+      leser.onload = () => senden(leser.result);
+      leser.readAsDataURL(f);
+    });
+    return el('div', { class: 'karte stapel' }, el('h3', { text: 'Formularvorlagen' }),
+      el('div', { class: 'zeile' }, el('b', { text: 'Stundenplanänderung / Beurlaubung' }),
+        v ? el('span', { class: 'chip gruen', text: 'hinterlegt' }) : el('span', { class: 'chip gelb', text: 'fehlt' })),
+      v ? el('p', { class: 'leise klein', text: (v.name || 'PDF') + ' · seit ' + L.tag(v.hochgeladen.slice(0, 10), true) }) : null,
+      el('p', { class: 'leise klein', text: 'Das ausfüllbare Schul-PDF (mit Formularfeldern). Es liegt nur hier in der Datenbank, nicht im öffentlichen Programmcode.' }),
+      el('div', { class: 'zeile' }, L.feld(v ? 'Andere Vorlage' : 'PDF hochladen', datei), v ? L.nebenknopf('Entfernen', () => senden('')) : null));
+  }
+
   function schuleAnsicht() {
     const sch = G.schule;
     const name = el('input', { maxlength: 120, value: sch.name });
@@ -195,6 +219,7 @@ const Admin = (() => {
         el('p', { class: 'leise klein', text: 'Erscheint auf der Anmeldeseite, in der Kopfzeile und oben links auf allen Dokumenten (PDF). Am besten das Logo im Querformat; PNG mit Transparenz bekommt einen weißen Hintergrund.' }),
         el('div', { class: 'zeile' }, L.feld(sch.logo ? 'Anderes Logo hochladen' : 'Logo hochladen', datei),
           sch.logo ? L.nebenknopf('Logo entfernen', () => speichernLogo('')) : null)),
+      vorlagenKarte(),
       el('div', { class: 'karte stapel' }, el('h3', { text: 'Angaben für die Dokumente' }),
         L.feld('Schulname', name, 'steht im Kopf, wenn kein Logo da ist'),
         L.feld('Webadresse', web, 'steht im Fuß unter dem DRS-Farbband'),
