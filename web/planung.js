@@ -58,7 +58,8 @@ const Planung = (() => {
   function titelZelle(t, i) {
     const zelle = el('td', { class: 'auf', title: t.titel + (t.ls_titel ? ' · ' + t.ls_titel : '') },
       t.lernfeld ? el('span', { class: 'kz', style: 'color:' + lfFarbe(t.lernfeld_id), text: t.lernfeld }) : null,
-      el('button', { type: 'button', class: 'leicht thema-name', onclick: () => themaBearbeiten(t) }, t.titel),
+      el('button', { type: 'button', class: 'leicht thema-name', onclick: () => (t.pruefung_id ? (location.hash = '#pruefung-' + t.pruefung_id) : themaBearbeiten(t)) }, t.titel),
+      t.pruefung_id ? el('span', { class: 'chip rot klein', text: 'Prüfung' }) : null,
       el('span', { class: 'art', text: umfang(t.bloecke) }),
       t.ueberlauf ? el('span', { class: 'chip rot klein', text: '−' + t.ueberlauf }) : null,
       t.nadel === 'fehlt' ? el('span', { class: 'chip gelb klein', title: 'Der festgesetzte Block findet nicht statt', text: 'Nadel?' }) : null);
@@ -83,7 +84,7 @@ const Planung = (() => {
     p.themen.forEach((t, i) => {
       if (t.ls_titel && t.ls_titel !== ls) rows.push(el('tr', { class: 'paket' }, el('td', { colspan: 999 }, el('span', { class: 'kleben' }, 'Lernsituation', el('span', { class: 'pm', text: t.ls_titel })))));
       ls = t.ls_titel || null;
-      rows.push(el('tr', { style: '--b:' + lfFarbe(t.lernfeld_id) }, titelZelle(t, i), zellen(t)));
+      rows.push(el('tr', { style: '--b:' + (t.pruefung_id ? 'var(--rot)' : lfFarbe(t.lernfeld_id)) }, titelZelle(t, i), zellen(t)));
     });
     return rows;
   }
@@ -334,11 +335,12 @@ const Planung = (() => {
     if (alt) alt.remove();
     const bloecke = (Array.isArray(c) ? c : [c]).filter(x => x.nutzbar);
     const punkte = [];
-    bloecke.forEach(b => punkte.push(['pin', (bloecke.length > 1 ? b.beginn + ': ' : '') + 'Hier festsetzen – beginnt ' + tagKurz(b.datum) + ' ' + b.beginn,
+    if (t.pruefung_id) punkte.push(['pruefung', 'Prüfung öffnen (Termin dort ändern)', () => { location.hash = '#pruefung-' + t.pruefung_id; }]);
+    else bloecke.forEach(b => punkte.push(['pin', (bloecke.length > 1 ? b.beginn + ': ' : '') + 'Hier festsetzen – beginnt ' + tagKurz(b.datum) + ' ' + b.beginn,
       () => festsetzen(t, b.datum, b.beginn)]));
     bloecke.forEach(b => punkte.push(['auge', 'Stunde öffnen: ' + tagKurz(b.datum) + ' ' + b.beginn, () => Stunde.oeffnen(b.datum, b.beginn, neuLaden)]));
-    if (t.nadel) punkte.push(['undo', 'Stecknadel lösen (fließt wieder)', () => festsetzen(t, null, null)]);
-    punkte.push(['stift', 'Thema bearbeiten …', () => themaBearbeiten(t)]);
+    if (t.nadel && !t.pruefung_id) punkte.push(['undo', 'Stecknadel lösen (fließt wieder)', () => festsetzen(t, null, null)]);
+    if (!t.pruefung_id) punkte.push(['stift', 'Thema bearbeiten …', () => themaBearbeiten(t)]);
     const m = el('div', { class: 'wp-menue', id: 'wp-menue', role: 'menu' }, el('div', { class: 'mk', text: t.titel }),
       punkte.map(([sym, text, aktion]) => el('button', { type: 'button', role: 'menuitem', onclick: () => { m.remove(); aktion(); } }, L.symbol(sym), text)));
     document.body.appendChild(m);

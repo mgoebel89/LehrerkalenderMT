@@ -238,6 +238,7 @@ def thema_speichern(con, lid, daten, tid=None):
         kid, gid, sid = _strang_aus(con, lid, daten)
     else:
         alt = _thema(con, lid, tid)
+        _keine_pruefung(alt)
         kid, gid, sid = alt["klasse_id"], alt["gruppe_id"], alt["schuljahr_id"]
     werte = (_text(daten.get("titel"), "einen Titel"), _bloecke(daten.get("bloecke") or 1),
              _lernfeld_der_klasse(con, kid, daten.get("lernfeld_id")), _text(daten.get("ls_titel"), "die Lernsituation", 200, False),
@@ -252,8 +253,13 @@ def thema_speichern(con, lid, daten, tid=None):
     return tid
 
 
+def _keine_pruefung(t):
+    if t["pruefung_id"]:
+        raise PlanungFehler("Dieses Thema ist eine Prüfung. Termin und Umfang änderst du unter Prüfungen.")
+
+
 def thema_loeschen(con, lid, tid):
-    _thema(con, lid, tid)
+    _keine_pruefung(_thema(con, lid, tid))
     con.execute("DELETE FROM plan_thema WHERE id = ?", (tid,))
 
 
@@ -279,7 +285,7 @@ def thema_an_stelle(con, lid, tid, stelle):
 
 def festsetzen(con, lid, tid, datum, beginn):
     """Stecknadel: das Thema beginnt genau in diesem Block (datum + beginn). Ohne datum wird sie geloest."""
-    _thema(con, lid, tid)
+    _keine_pruefung(_thema(con, lid, tid))
     if not datum:
         con.execute("UPDATE plan_thema SET fest_datum = NULL, fest_beginn = NULL WHERE id = ?", (tid,))
         return
@@ -577,7 +583,8 @@ def themen_der_woche(con, lid, woche):
             if b["thema_id"]:
                 t = nach_id[b["thema_id"]]
                 zuordnung[(b["datum"], b["beginn"], kid)] = {"id": t["id"], "titel": t["titel"], "teil": b["teil"], "von": b["von"],
-                                                           "lernfeld": nummern.get(t["lernfeld_id"], ""), "ls": t["ls_titel"]}
+                                                           "lernfeld": nummern.get(t["lernfeld_id"], ""), "ls": t["ls_titel"],
+                                                           "pruefung_id": t["pruefung_id"]}
     for b in woche["bloecke"]:
         if _gehalten_oder_weiter(b):
             b["thema"] = zuordnung.get((b["datum"], b["beginn"], b["klasse"]["id"]))

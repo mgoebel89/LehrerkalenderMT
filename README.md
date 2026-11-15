@@ -15,7 +15,8 @@ Das Konzept (Fassung 2, freigegeben am 14.11.2026) liegt in `docs/KONZEPT.html`.
 | B | Stundenplan von Hand mit Versionen und A/B-Wochen, Feiertage RLP, Wochenplan nach Uhrzeit mit Ausfall, Vertretung (beide Richtungen), Verschieben, Zusatzstunde, eigene Termine und Merker, Startseite; eigene Gruppen je Klasse (0.2.1) | gebaut (0.2.1) |
 | C1 | Schuljahr (Admin), Bibliothek je Lernfeld, Themenfolge je Klasse/Gruppe, Fließen auf die Blöcke (Stecknadel, Lernfeld-Spuren), Raster Doppelstunden und Schuljahr, Thema im Wochenplan | gebaut (0.3.0) |
 | C2 | Stunden-Overlay mit Ist-Stand und Rückgängig, Lehrstoff kopieren, Merker für die nächste Stunde, Tagesansicht, Bilanz, „Ist offen“ auf der Startseite, Tage und Ferien im Raster deutlich abgehoben; Vertretung mit oder ohne eigenes Thema, Ausfall/Vertretung/Verschieben im Overlay (0.4.1); erster/letzter Unterrichtstag je Klasse, z. B. Ausschulung (0.4.2); Sonderstundenplan von–bis, z. B. Einführungswoche, und Knopf „Schuljahresbeginn“ (0.4.3); Kalender-Abos (ICS): Ferien und Schultermine (Admin), eigene z. B. Outlook (0.4.4) | gebaut (0.4.4) |
-| D | Prüfungen und Bewertung | offen |
+| D1 | Schülerlisten (Moodle-CSV, von Hand), Prüfungen (fester Termin in der Planung oder Fenster mit Frist), Erfassung je Aufgabe, Gesamtpunkte oder Feedbackbogen, Notenberechnung mit Rechenweg, Schlüsselwahl, Abschließen, Notenspiegel, eigene Notenschlüssel und Standard | gebaut (0.5.0) |
+| D2 | Prüfungsmodus am Tablet mit Stoppuhr, Gruppenprüfungen, Moodle-Ergebnisimport, PDF, Exporte | offen |
 | E | Teilen im Kollegium | offen |
 | F | Formularcenter, Unterrichtsbesuche, Paperless | offen |
 | G | VPN, Diktat, Feinschliff | offen |

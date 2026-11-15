@@ -19,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, grunddaten, konten, notenschluessel, planung, qr, stundenplan, totp, updates
+from . import VERSION, abos, db, grunddaten, konten, notenschluessel, planung, pruefungen, qr, stundenplan, totp, updates
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -203,7 +203,8 @@ class Handler(BaseHTTPRequestHandler):
         except Fehler as f:
             self.antwort(f.status, {"fehler": f.meldung})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
-                stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, updates.UpdateFehler) as f:
+                stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
+                updates.UpdateFehler) as f:
             self.antwort(400, {"fehler": str(f)})
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -657,6 +658,80 @@ def abos_im_hintergrund(db_pfad):
         time.sleep(ABO_TAKT)
 
 
+# --- Pruefungen und Bewertung (Stufe D1) ---
+
+def _pr_schritt(funktion, antwort=None):
+    """Aenderung; Antwort {ok, id} bzw. was antwort(con, k, daten, oid, neu) liefert."""
+    def schritt(h, con, daten, oid=None):
+        k = h.konto(con)
+        with db.transaktion(con):
+            neu = funktion(con, k, daten, None if oid is None else _ganzzahl(oid))
+        h.antwort(200, antwort(con, k, daten, None if oid is None else int(oid), neu) if antwort else {"ok": True, "id": neu})
+    return schritt
+
+
+def api_schueler(h, con, daten):
+    k = h.konto(con)
+    kid = h.abfrage("klasse")
+    h.antwort(200, {"schueler": pruefungen.schueler(con, k["id"], _ganzzahl(kid)) if kid else []})
+
+
+def api_moodle_csv(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        r = pruefungen.moodle_csv(con, k["id"], _ganzzahl(daten.get("klasse_id")), daten.get("text"))
+    h.antwort(200, r)
+
+
+def api_pruefungen(h, con, daten):
+    k = h.konto(con)
+    kid, sid = h.abfrage("klasse"), h.abfrage("schuljahr")
+    gid = h.abfrage("gruppe")
+    liste = pruefungen.pruefungen(con, k["id"], _ganzzahl(kid), _ganzzahl(gid) if gid else None, _ganzzahl(sid)) if kid and sid else []
+    h.antwort(200, {"pruefungen": liste, "vorlagen": pruefungen.vorlagen(con, k["id"]),
+                    "schluessel": notenschluessel.liste(con, k), "standard": pruefungen.standard_schluessel(con, k["id"])})
+
+
+def api_pruefung(h, con, daten, pid):
+    k = h.konto(con)
+    h.antwort(200, pruefungen.ergebnis(con, k["id"], _ganzzahl(pid)))
+
+
+def api_bewertung(h, con, daten, pid, sid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        pruefungen.bewertung_setzen(con, k["id"], _ganzzahl(pid), _ganzzahl(sid), daten)
+    h.antwort(200, pruefungen.ergebnis(con, k["id"], int(pid)))
+
+
+def api_abschliessen(h, con, daten, pid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        warnungen = pruefungen.abschliessen(con, k["id"], _ganzzahl(pid))
+    e = pruefungen.ergebnis(con, k["id"], int(pid))
+    e["warnungen"] = warnungen
+    h.antwort(200, e)
+
+
+def api_wieder_oeffnen(h, con, daten, pid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        pruefungen.wieder_oeffnen(con, k["id"], _ganzzahl(pid))
+    h.antwort(200, pruefungen.ergebnis(con, k["id"], int(pid)))
+
+
+def api_pruefung_hinweise(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, {"hinweise": pruefungen.hinweise(con, k["id"])})
+
+
+def api_standard_schluessel(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        pruefungen.standard_setzen(con, k["id"], daten.get("notenschluessel_id"))
+    h.antwort(200, {"standard": pruefungen.standard_schluessel(con, k["id"])})
+
+
 # --- System: Update und Sicherung ---
 
 def api_sicherung(h, con, daten):
@@ -757,6 +832,24 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
      _stundenplan_schritt(lambda con, lid, d, gid: stundenplan.gruppe_loeschen(con, lid, gid))),
     ("GET", r"/api/woche", api_woche),
     ("GET", r"/api/abos", api_abos),
+    ("GET", r"/api/schueler", api_schueler),
+    ("POST", r"/api/schueler", _pr_schritt(lambda con, k, d, _: pruefungen.schueler_speichern(con, k["id"], d))),
+    ("POST", r"/api/schueler/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.schueler_speichern(con, k["id"], d, i))),
+    ("POST", r"/api/schueler/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.schueler_loeschen(con, k["id"], i))),
+    ("POST", r"/api/schueler/moodle", api_moodle_csv),
+    ("POST", r"/api/vorlage", _pr_schritt(lambda con, k, d, _: pruefungen.vorlage_speichern(con, k["id"], d))),
+    ("POST", r"/api/vorlage/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.vorlage_speichern(con, k["id"], d, i))),
+    ("POST", r"/api/vorlage/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.vorlage_loeschen(con, k["id"], i))),
+    ("GET", r"/api/pruefungen", api_pruefungen),
+    ("GET", r"/api/pruefungen/hinweise", api_pruefung_hinweise),
+    ("POST", r"/api/pruefung", _pr_schritt(lambda con, k, d, _: pruefungen.pruefung_speichern(con, k["id"], d))),
+    ("GET", r"/api/pruefung/" + ID, api_pruefung),
+    ("POST", r"/api/pruefung/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.pruefung_speichern(con, k["id"], d, i))),
+    ("POST", r"/api/pruefung/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.pruefung_loeschen(con, k["id"], i))),
+    ("POST", r"/api/pruefung/" + ID + "/bewertung/" + ID, api_bewertung),
+    ("POST", r"/api/pruefung/" + ID + "/abschliessen", api_abschliessen),
+    ("POST", r"/api/pruefung/" + ID + "/oeffnen", api_wieder_oeffnen),
+    ("POST", r"/api/notenschluessel/standard", api_standard_schluessel),
     ("POST", r"/api/abo", _abo_schritt(lambda con, k, d, _: abos.speichern(con, k, d), "abo_angelegt")),
     ("POST", r"/api/abo/" + ID, _abo_schritt(lambda con, k, d, i: abos.speichern(con, k, d, i), "abo_geaendert")),
     ("POST", r"/api/abo/" + ID + "/loeschen", _abo_schritt(lambda con, k, d, i: abos.loeschen(con, k, i), "abo_geloescht")),

@@ -342,7 +342,8 @@ def klasse_speichern(con, daten, kid=None):
 def klasse_loeschen(con, kid):
     # an der Klasse haengen Stundenplaene und Aenderungen aller Lehrkraefte: dann nur noch "nicht aktiv"
     if con.execute("SELECT 1 FROM stundenplan_eintrag WHERE klasse_id = ? UNION SELECT 1 FROM aenderung WHERE klasse_id = ? "
-                   "UNION SELECT 1 FROM plan_thema WHERE klasse_id = ? UNION SELECT 1 FROM ist WHERE klasse_id = ?",
-                   (kid, kid, kid, kid)).fetchone():
+                   "UNION SELECT 1 FROM plan_thema WHERE klasse_id = ? UNION SELECT 1 FROM ist WHERE klasse_id = ? "
+                   "UNION SELECT 1 FROM pruefung WHERE klasse_id = ? UNION SELECT 1 FROM schueler WHERE klasse_id = ?",
+                   (kid, kid, kid, kid, kid, kid)).fetchone():
         raise GrunddatenFehler("Die Klasse steht in Stundenplänen. Bitte stattdessen auf „nicht aktiv“ stellen.")
     con.execute("DELETE FROM klasse WHERE id = ?", (kid,))

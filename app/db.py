@@ -314,6 +314,64 @@ MIGRATIONEN = [
     CREATE INDEX abo_termin_datum ON abo_termin (abo_id, datum);
     ALTER TABLE ferien ADD COLUMN abo_id INTEGER REFERENCES kalender_abo(id) ON DELETE CASCADE
     """,
+    # 10: Stufe D1: Schuelerlisten (privat je Lehrkraft und Klasse), Feedbackbogen-Vorlagen, Pruefungen (fester Termin,
+    #     belegt als festgesetztes Thema Bloecke in der Planung, oder Fenster mit Frist) und Bewertungen. Gespeichert
+    #     werden Punkte bzw. Stufen; Prozent und Note entstehen erst ueber den Notenschluessel.
+    """
+    CREATE TABLE schueler (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        klasse_id INTEGER NOT NULL REFERENCES klasse(id),
+        gruppe_id INTEGER REFERENCES gruppe(id) ON DELETE SET NULL,
+        nachname TEXT NOT NULL,
+        vorname TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
+        aktiv INTEGER NOT NULL DEFAULT 1,
+        erstellt TEXT NOT NULL);
+    CREATE INDEX schueler_klasse ON schueler (lehrkraft_id, klasse_id);
+    CREATE TABLE vorlage (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        art TEXT NOT NULL,
+        struktur TEXT NOT NULL,
+        erstellt TEXT NOT NULL,
+        geaendert TEXT NOT NULL);
+    CREATE TABLE pruefung (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        klasse_id INTEGER NOT NULL REFERENCES klasse(id),
+        gruppe_id INTEGER REFERENCES gruppe(id),
+        schuljahr_id INTEGER NOT NULL REFERENCES schuljahr(id),
+        titel TEXT NOT NULL,
+        art TEXT NOT NULL,
+        form TEXT NOT NULL CHECK (form IN ('termin', 'fenster')),
+        datum TEXT,
+        beginn TEXT,
+        bloecke INTEGER NOT NULL DEFAULT 1,
+        fenster_von TEXT,
+        fenster_bis TEXT,
+        erfassung TEXT NOT NULL CHECK (erfassung IN ('aufgaben', 'gesamt', 'bogen')),
+        struktur TEXT NOT NULL DEFAULT '{"bereiche": []}',
+        max_punkte REAL,
+        notenschluessel_id INTEGER REFERENCES notenschluessel(id) ON DELETE SET NULL,
+        lernfeld_id INTEGER REFERENCES lernfeld(id) ON DELETE SET NULL,
+        stand TEXT NOT NULL DEFAULT 'geplant',
+        schluessel_fest TEXT,
+        erstellt TEXT NOT NULL,
+        geaendert TEXT NOT NULL);
+    CREATE INDEX pruefung_strang ON pruefung (lehrkraft_id, klasse_id, schuljahr_id);
+    CREATE TABLE bewertung (
+        id INTEGER PRIMARY KEY,
+        pruefung_id INTEGER NOT NULL REFERENCES pruefung(id) ON DELETE CASCADE,
+        schueler_id INTEGER NOT NULL REFERENCES schueler(id) ON DELETE CASCADE,
+        werte TEXT NOT NULL DEFAULT '{}',
+        fehlt INTEGER NOT NULL DEFAULT 0,
+        notiz TEXT NOT NULL DEFAULT '',
+        geaendert TEXT NOT NULL,
+        UNIQUE (pruefung_id, schueler_id));
+    ALTER TABLE plan_thema ADD COLUMN pruefung_id INTEGER REFERENCES pruefung(id) ON DELETE CASCADE
+    """,
 ]
 
 

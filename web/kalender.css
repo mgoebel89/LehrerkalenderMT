@@ -244,3 +244,34 @@ fieldset.wahl-gruppe legend { font-size: .85em; font-weight: 600; color: var(--l
 .wp-ev.abo { background: #eef3f8; border-color: var(--blau-mittel); color: var(--blau-dunkel); border-style: dashed; }
 .ka.aus { opacity: .6; }
 .wp-ev.privat { background: var(--knopf); border-color: var(--linie-stark); color: var(--text); }
+
+/* ---- Stufe D1: Pruefungen ---- */
+.wp-b.pr { border-left-color: var(--rot); background: var(--rot-hell); }
+.wp-b.pr .th { color: var(--rot); font-weight: 700; }
+table.bewerten th.zahl, table.bewerten td.zahl { text-align: right; white-space: nowrap; }
+table.bewerten th { vertical-align: bottom; }
+table.bewerten input.punkte { width: 64px; min-height: 32px; padding: 3px 6px; text-align: right; font-family: var(--mono); }
+input.punkte.fehler { border-color: var(--rot); box-shadow: 0 0 0 2px var(--rot-hell); }
+.note-knopf { min-height: 28px; padding: 2px 10px; font-weight: 800; font-family: var(--mono); }
+.note-knopf.unvollstaendig { border-color: var(--gelb); background: #fffaf0; }
+.bogen-knopf { margin-left: 8px; }
+.rechenweg-zeile { background: var(--knopf); border-radius: 6px 2px 2px 2px; padding: 4px 8px; }
+.kriterium { display: grid; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--linie); }
+.kriterium:last-child { border-bottom: none; }
+.stufen-wahl { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; }
+.stufen-wahl button { display: grid; gap: 2px; justify-items: start; text-align: left; white-space: normal; padding: 6px 10px; min-height: 44px; }
+.stufen-wahl button.an { border-color: var(--blau); background: var(--blau-hell); box-shadow: inset 0 0 0 1.5px var(--blau); }
+.bogen-ergebnis { display: grid; gap: 6px; border-top: 2px solid var(--blau); padding-top: 10px; }
+svg.spiegel { width: 100%; max-width: 420px; height: auto; max-height: 220px; }
+svg.spiegel .balken { fill: var(--blau); }
+svg.spiegel .achse { font: 700 11px var(--mono); fill: var(--leise); }
+svg.spiegel .wert { font: 700 11px var(--mono); fill: var(--text); }
+.anteil { height: 10px; background: var(--knopf); border-radius: 5px; overflow: hidden; }
+.anteil span { display: block; height: 100%; background: var(--blau-mittel); }
+.vorlage-karte { text-align: left; font: inherit; align-content: start; }
+.bereich-ed { border: 1px solid var(--linie-stark); border-radius: 10px 4px 4px 4px; padding: 10px; display: grid; gap: 8px; }
+.kriterium-ed { display: grid; gap: 4px; padding-left: 12px; border-left: 3px solid var(--blau-hell); }
+.kriterium-ed .zeile > input:first-child { flex: 1; min-width: 0; }
+.bereich-ed > .zeile > input:first-child { flex: 1; min-width: 0; font-weight: 700; }
+a.z-knopf { text-decoration: none; color: var(--text); }
+a.z-knopf:hover span:last-child { text-decoration: underline; }

@@ -9,7 +9,7 @@ const S = { konto: null, update: null };
 const BEREICHE = [
   { a: 'start', text: 'Start', sym: 'start' },
   { a: 'planung', text: 'Planung', sym: 'plan' },
-  { a: 'pruefungen', text: 'Prüfungen', sym: 'pruefung', spaeter: 'Stufe D' },
+  { a: 'pruefungen', text: 'Prüfungen', sym: 'pruefung' },
   { a: 'formulare', text: 'Formulare', sym: 'formular', spaeter: 'Stufe F' },
   { a: 'einstellungen', text: 'Einstellungen', sym: 'einstellungen' },
   { a: 'admin-konten', text: 'Konten', sym: 'lehrkraefte', admin: true, gruppe: 'Admin' },
@@ -43,7 +43,8 @@ function navigation(aktiv) {
 
 async function zeigen() {
   const ziel = (location.hash || '#start').slice(1);
-  const haupt = ziel.startsWith('einstellungen') ? 'einstellungen' : ziel.startsWith('planung') ? 'planung' : ziel;
+  const haupt = ziel.startsWith('einstellungen') ? 'einstellungen' : ziel.startsWith('planung') ? 'planung'
+    : ziel.startsWith('pruefung') ? 'pruefungen' : ziel;
   const bereich = BEREICHE.find(b => b.a === haupt && !b.spaeter && (!b.admin || S.konto.rolle === 'admin')) || BEREICHE[0];
   navigation(bereich.a);
   L.setzen(inhalt, el('p', { class: 'leise', text: 'Lädt …' }));
@@ -51,6 +52,7 @@ async function zeigen() {
     if (bereich.a === 'start') await startZeigen();
     else if (bereich.a === 'einstellungen') await einstellungenZeigen(ziel === 'einstellungen-konto' ? 'konto' : ziel === 'einstellungen-kalender' ? 'kalender' : 'stundenplan');
     else if (bereich.a === 'planung') await planungZeigen(ziel === 'planung-bibliothek' ? 'bibliothek' : 'planung');
+    else if (bereich.a === 'pruefungen') await pruefungenZeigen(ziel);
     else await Admin.zeigen(bereich.a, inhalt, titelSetzen);
   } catch (e) {
     if (e.status === 401) { location.href = '/anmelden'; return; }
@@ -107,6 +109,24 @@ async function planungZeigen(reiter) {
         tab('planung', 'planung', 'Planung', 'plan'), tab('bibliothek', 'planung-bibliothek', 'Bibliothek', 'pakete'))),
     ort);
   await Planung.zeigen(ort, reiter);
+}
+
+// --- Pruefungen: Pruefungen, Schuelerlisten, Vorlagen, Notenschluessel ---
+
+async function pruefungenZeigen(ziel) {
+  const reiter = ziel.startsWith('pruefung-') ? 'pruefungen' : ({ 'pruefungen-schueler': 'schueler', 'pruefungen-vorlagen': 'vorlagen',
+    'pruefungen-schluessel': 'schluessel' })[ziel] || 'pruefungen';
+  const titel = { pruefungen: 'Prüfungen', schueler: 'Schülerlisten', vorlagen: 'Vorlagen', schluessel: 'Notenschlüssel' }[reiter];
+  titelSetzen(titel);
+  const ort = el('div', { class: 'stapel' });
+  const tab = (id, hash, text, sym) => el('a', { class: 'knopf' + (reiter === id ? ' an' : ''), href: '#' + hash }, L.symbol(sym), text);
+  L.setzen(inhalt,
+    el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: titel }),
+      el('div', { class: 'segment', role: 'group', 'aria-label': 'Prüfungen' },
+        tab('pruefungen', 'pruefungen', 'Prüfungen', 'pruefung'), tab('schueler', 'pruefungen-schueler', 'Schülerlisten', 'klassen'),
+        tab('vorlagen', 'pruefungen-vorlagen', 'Vorlagen', 'formular'), tab('schluessel', 'pruefungen-schluessel', 'Notenschlüssel', 'schluessel'))),
+    ort);
+  await Pruefungen.zeigen(ort, ziel.startsWith('pruefung-') ? ziel : reiter);
 }
 
 // --- Einstellungen: Stundenplan und Konto ---

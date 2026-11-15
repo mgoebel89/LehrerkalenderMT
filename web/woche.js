@@ -10,6 +10,7 @@ const Woche = (() => {
   let mobilTag = null;     // ISO-Datum des Tages in der Handy-Ansicht
   let mitLeiste = true;
   let offen = [];          // Stunden ohne Ist-Bestaetigung (neueste zuerst)
+  let pruefHinweise = [];  // anstehende Pruefungen, laufende Fenster, nicht abgeschlossene
 
   const tagKurz = iso => L.tag(iso).trim();
   const plusTage = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
@@ -24,10 +25,12 @@ const Woche = (() => {
   }
 
   async function laden() {
-    const [w, o] = await Promise.all([L.api('GET', '/api/woche' + (montag ? '?montag=' + montag : '')),
-      mitLeiste ? L.api('GET', '/api/ist/offen').catch(() => ({ offen: [] })) : Promise.resolve({ offen: [] })]);
+    const [w, o, h] = await Promise.all([L.api('GET', '/api/woche' + (montag ? '?montag=' + montag : '')),
+      mitLeiste ? L.api('GET', '/api/ist/offen').catch(() => ({ offen: [] })) : Promise.resolve({ offen: [] }),
+      mitLeiste ? L.api('GET', '/api/pruefungen/hinweise').catch(() => ({ hinweise: [] })) : Promise.resolve({ hinweise: [] })]);
     W = w;
     offen = o.offen;
+    pruefHinweise = h.hinweise;
     if (!mobilTag || !W.tage.some(t => t.datum === mobilTag)) {
       mobilTag = (W.tage.find(t => t.heute) || W.tage[0]).datum;
     }
@@ -74,6 +77,14 @@ const Woche = (() => {
   function leiste() {
     const heute = W.tage.find(t => t.heute);
     const karten = [];
+    if (pruefHinweise.length) {
+      const art = { bald: 'demnächst', fenster: 'Fenster läuft, Frist', offen: 'nicht abgeschlossen' };
+      karten.push(el('div', { class: 'hinweis' },
+        el('div', { class: 'k' }, L.symbol('pruefung'), el('b', { text: 'Prüfungen' }), el('span', { class: 'zahl', text: String(pruefHinweise.length) })),
+        pruefHinweise.slice(0, 4).map(x => el('a', { class: 'z z-knopf', href: '#pruefung-' + x.id },
+          el('span', { class: 'mono', text: x.art === 'offen' ? 'offen' : tagKurz(x.wann) }),
+          el('span', { text: x.klasse + ' · ' + x.titel + (x.art === 'fenster' ? ' (Frist)' : '') })))));
+    }
     if (offen.length) {
       karten.push(el('div', { class: 'hinweis gelb' },
         el('div', { class: 'k' }, L.symbol('offen'), el('b', { text: 'Ist offen' }), el('span', { class: 'zahl', text: offen.length >= 30 ? '30+' : String(offen.length) })),
@@ -177,6 +188,7 @@ const Woche = (() => {
     if (b.zustand === 'vertreten') klassen.push('vertreten');
     if (b.art === 'vertretung' || b.zustand === 'vertreten') klassen.push('vertr');
     if (b.art === 'zusatz' || b.art === 'verschoben') klassen.push('zusatz');
+    if (b.thema && b.thema.pruefung_id) klassen.push('pr');
     const st = [];
     if (b.zustand === 'ausfall') st.push(el('span', {}, L.symbol('ausfall'), zustandText(b)));
     else if (b.zustand === 'vertreten') st.push(el('span', {}, L.symbol('vertretung'), zustandText(b)));
@@ -294,6 +306,8 @@ const Woche = (() => {
       punkte.push(['muell', (b.art === 'verschoben' ? 'Verschiebung zurücknehmen' : b.art === 'zusatz' ? 'Zusatzstunde entfernen' : 'Vertretung entfernen'),
         () => zuruecknehmen(b), 'warnen']);
     }
+    if (b.thema && b.thema.pruefung_id) punkte.push(['pruefung', 'Prüfung öffnen', () => { location.hash = '#pruefung-' + b.thema.pruefung_id; }]);
+    else if (gehalten(b)) punkte.push(['pruefung', 'Prüfung hier anlegen …', () => Pruefungen.ausWochenplan(b, laden)]);
     if (b.klasse) {
       b.merker.forEach(m => punkte.push(['merker', 'Merker: ' + (m.text.length > 28 ? m.text.slice(0, 27) + '…' : m.text), () => merker(b, m)]));
       if (!b.merker.length) punkte.push(['merker', 'Merker für diese Stunde …', () => merker(b, null)]);

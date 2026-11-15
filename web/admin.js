@@ -447,8 +447,11 @@ const Admin = (() => {
     return el('div', { class: 'notenband', 'aria-label': 'Notenbänder von 100 bis 0 Prozent' }, teile);
   }
 
-  async function schluesselBearbeiten(b, s) {
-    const name = el('input', { value: s ? s.name : 'Konferenzschlüssel ' + (b.kuerzel || b.name), maxlength: 60 });
+  // b: Bildungsgang (Konferenzschluessel) oder null mit eigen: true (eigener Schluessel einer Lehrkraft)
+  async function schluesselBearbeiten(b, s, optionen = {}) {
+    const eigen = !!optionen.eigen;
+    const danach = optionen.danach || noten;
+    const name = el('input', { value: s ? s.name : (eigen ? 'Mein Notenschlüssel' : 'Konferenzschlüssel ' + (b.kuerzel || b.name)), maxlength: 60 });
     const system = el('select', {}, Object.entries(SYSTEMNAME).map(([w, t]) => el('option', { value: w, text: t, selected: s && s.system === w ? true : null })));
     const tabelleOrt = el('div', { class: 'rollbar' });
     const bandOrt = el('div');
@@ -497,22 +500,22 @@ const Admin = (() => {
     const start = s ? { grenzen: s.grenzen, stufen: s.stufen } : await L.api('GET', '/api/notenschluessel/vorgabe?system=' + system.value);
     aufbauen(start.grenzen, start.stufen);
     const r = await L.dialog({
-      titel: 'Konferenzschlüssel · ' + b.name, breit: true,
+      titel: eigen ? (s ? s.name : 'Eigener Notenschlüssel') : 'Konferenzschlüssel · ' + b.name, breit: true,
       inhalt: el('div', { class: 'stapel', style: 'gap:12px' },
         el('div', { class: 'felder zwei' }, L.feld('Name', name), L.feld('Notensystem', system)),
-        el('p', { class: 'leise klein', text: system.value === 'zehntel' ? '' : 'Du trägst je Note nur „ab %“ ein; „bis %“ ergibt sich. Vorbelegt sind die Werte aus dem alten Lehrerkalender – bitte auf den Konferenzbeschluss anpassen.' }),
+        el('p', { class: 'leise klein', text: 'Du trägst je Note nur „ab %“ ein; „bis %“ ergibt sich. ' + (eigen ? 'Eigene Schlüssel stehen in Prüfungen als „abweichender Schlüssel“.' : 'Vorbelegt sind die Werte aus dem alten Lehrerkalender – bitte auf den Konferenzbeschluss anpassen.') }),
         el('p', { class: 'leise klein', text: 'Bei Zehntelnoten trägst du die Grenzen der ganzen Noten ein, die Zehntel werden dazwischen gleichmäßig verteilt.' }),
         pruefung, bandOrt, tabelleOrt,
         s ? L.nebenknopf('Schlüssel löschen …', async () => {
-          const ok = await L.dialog({ titel: 'Konferenzschlüssel löschen?', knopf: 'Löschen', gefaehrlich: true,
-            inhalt: el('p', { text: 'Klassen dieses Bildungsgangs haben danach keinen Schlüssel mehr.' }),
+          const ok = await L.dialog({ titel: (eigen ? 'Notenschlüssel' : 'Konferenzschlüssel') + ' löschen?', knopf: 'Löschen', gefaehrlich: true,
+            inhalt: el('p', { text: eigen ? 'Prüfungen, die ihn gewählt haben, nutzen danach wieder den automatischen Schlüssel; abgeschlossene bleiben unverändert.' : 'Klassen dieses Bildungsgangs haben danach keinen Schlüssel mehr.' }),
             speichern: () => L.api('POST', '/api/notenschluessel/' + s.id + '/loeschen', {}) });
-          if (ok) noten();
+          if (ok) danach();
         }) : null),
       speichern: () => L.api('POST', s ? '/api/notenschluessel/' + s.id : '/api/notenschluessel',
-        { name: name.value, art: 'konferenz', bildungsgang_id: b.id, system: system.value, grenzen: lesen() }),
+        { name: name.value, art: eigen ? 'eigen' : 'konferenz', bildungsgang_id: b ? b.id : null, system: system.value, grenzen: lesen() }),
     });
-    if (r) { L.meldung('Gespeichert.'); noten(); }
+    if (r) { L.meldung('Gespeichert.'); danach(); }
   }
 
   // --- System: Update, Sicherung, Protokoll ---
@@ -559,5 +562,5 @@ const Admin = (() => {
     catch (e) { L.meldung(e.message, true); }
   }
 
-  return { zeigen };
+  return { zeigen, schluesselBearbeiten };
 })();

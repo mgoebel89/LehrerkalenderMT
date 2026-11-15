@@ -1,0 +1,690 @@
+"""Pruefungen und Bewertung (Stufe D1).
+
+Grundregeln (Konzept Abschnitt 5):
+  - Die Schuelerliste ist die Wahrheit: ein Import legt nur neue Schueler an und aendert nie Namen.
+  - Gespeichert werden Punkte bzw. gewaehlte Stufen; Prozent und Note entstehen erst ueber den Notenschluessel.
+  - Jede Note hat einen sichtbaren Rechenweg.
+
+Erfassung einer Pruefung:
+  aufgaben  Punkte je Aufgabe (z. B. Klassenarbeit): Prozent = Summe erreicht / Summe maximal
+  gesamt    nur Gesamtpunkte je Schueler: Prozent = erreicht / maximal
+  bogen     Feedbackbogen (aus einer Vorlage kopiert): Bereiche mit Gewicht, Kriterien als Stufen (mit Punkten),
+            Punkte, Abhaken (nur Information) oder Freitext. Kriterium -> Prozent, Bereich = gewichteter Schnitt der
+            bewerteten Kriterien, gesamt = gewichteter Schnitt der bewerteten Bereiche. Unbewertetes zaehlt nicht,
+            wird aber gemeldet.
+
+Welcher Notenschluessel gilt: in der Pruefung gewaehlt -> Schluessel der Klasse -> persoenlicher Standard der
+Lehrkraft -> Konferenzschluessel des Bildungsgangs. Beim Abschliessen wird der Schluessel eingefroren.
+
+Zeitform: fester Termin (belegt als festgesetztes Thema der Planung seine Bloecke) oder Fenster mit Frist (belegt
+keine Bloecke, laeuft nebenher).
+"""
+import csv
+import datetime
+import io
+import json
+import re
+import unicodedata
+
+from . import db, grunddaten, notenschluessel, stundenplan
+
+ARTEN = {"schriftlich": "schriftlich", "muendlich": "mündlich", "praktisch": "praktisch", "portfolio": "Portfolio"}
+ERFASSUNGEN = ("aufgaben", "gesamt", "bogen")
+TYPEN = ("stufen", "punkte", "haken", "text")
+STAENDE = ("geplant", "angekuendigt", "durchgefuehrt", "ausgewertet")
+STANDARD_STUFEN = [{"name": "nicht erkennbar", "punkte": 0}, {"name": "ansatzweise", "punkte": 1},
+                   {"name": "überwiegend", "punkte": 2}, {"name": "vollständig", "punkte": 3}]
+
+
+class PruefungFehler(Exception):
+    """Fehler mit einer Meldung, die direkt in der Oberflaeche erscheinen darf."""
+
+
+def _text(wert, feld, max_len=200, pflicht=True):
+    wert = wert.strip() if isinstance(wert, str) else ""
+    if pflicht and not wert:
+        raise PruefungFehler("Bitte %s angeben." % feld)
+    if len(wert) > max_len:
+        raise PruefungFehler("%s darf höchstens %d Zeichen haben." % (feld[0].upper() + feld[1:], max_len))
+    return wert
+
+
+def _id(wert):
+    if wert in (None, "", 0, "0"):
+        return None
+    try:
+        return int(wert)
+    except (TypeError, ValueError):
+        raise PruefungFehler("Ungültige Auswahl.")
+
+
+def _zahl(wert, feld, minimum=0.0, maximum=10000.0):
+    try:
+        zahl = float(str(wert).replace(",", "."))
+    except (TypeError, ValueError):
+        raise PruefungFehler("Bitte bei %s eine Zahl angeben." % feld)
+    if not minimum <= zahl <= maximum:
+        raise PruefungFehler("%s muss zwischen %s und %s liegen." % (feld, _fmt(minimum), _fmt(maximum)))
+    return zahl
+
+
+def _fmt(zahl, stellen=1):
+    """Zahl deutsch: 12 / 12,5 / 76,7."""
+    if zahl is None:
+        return "–"
+    if abs(zahl - round(zahl)) < 1e-9:
+        return str(int(round(zahl)))
+    return ("%.*f" % (stellen, zahl)).replace(".", ",")
+
+
+def normalisiert(text):
+    """Namen robust vergleichen: Umlaute ausschreiben, Akzente weg, nur Buchstaben, klein."""
+    t = (text or "").lower().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+    t = unicodedata.normalize("NFKD", t)
+    return re.sub(r"[^a-z]", "", "".join(c for c in t if not unicodedata.combining(c)))
+
+
+# --- Schuelerlisten ---
+
+def _klasse(con, kid):
+    if kid is None or con.execute("SELECT 1 FROM klasse WHERE id = ?", (kid,)).fetchone() is None:
+        raise PruefungFehler("Bitte eine Klasse wählen.")
+    return kid
+
+
+def schueler(con, lid, kid, nur_aktive=False):
+    zeilen = con.execute("SELECT s.*, g.name AS gruppe FROM schueler s LEFT JOIN gruppe g ON g.id = s.gruppe_id "
+                         "WHERE s.lehrkraft_id = ? AND s.klasse_id = ?" + (" AND s.aktiv = 1" if nur_aktive else ""), (lid, kid)).fetchall()
+    liste = [{"id": z["id"], "nachname": z["nachname"], "vorname": z["vorname"], "email": z["email"], "gruppe_id": z["gruppe_id"],
+              "gruppe": z["gruppe"], "aktiv": bool(z["aktiv"]), "name": z["nachname"] + (", " + z["vorname"] if z["vorname"] else "")}
+             for z in zeilen]
+    liste.sort(key=lambda s: (not s["aktiv"], normalisiert(s["nachname"]), normalisiert(s["vorname"])))
+    return liste
+
+
+def _schueler_zeile(con, lid, sid):
+    z = con.execute("SELECT * FROM schueler WHERE id = ? AND lehrkraft_id = ?", (sid, lid)).fetchone()
+    if z is None:
+        raise PruefungFehler("Diesen Schüler gibt es nicht.")
+    return z
+
+
+def schueler_speichern(con, lid, daten, sid=None):
+    if sid is None:
+        kid = _klasse(con, _id(daten.get("klasse_id")))
+    else:
+        kid = _schueler_zeile(con, lid, sid)["klasse_id"]
+    nachname = _text(daten.get("nachname"), "den Nachnamen", 80)
+    vorname = _text(daten.get("vorname"), "den Vornamen", 80, pflicht=False)
+    email = _text(daten.get("email"), "die E-Mail", 120, pflicht=False)
+    gid = _id(daten.get("gruppe_id"))
+    if gid is not None:
+        stundenplan._gruppe_pruefen(con, lid, kid, gid)
+    aktiv = 0 if daten.get("aktiv") is False else 1
+    if sid is None:
+        return con.execute("INSERT INTO schueler (lehrkraft_id, klasse_id, gruppe_id, nachname, vorname, email, aktiv, erstellt) "
+                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (lid, kid, gid, nachname, vorname, email, aktiv, db.jetzt())).lastrowid
+    con.execute("UPDATE schueler SET gruppe_id = ?, nachname = ?, vorname = ?, email = ?, aktiv = ? WHERE id = ?",
+                (gid, nachname, vorname, email, aktiv, sid))
+    return sid
+
+
+def schueler_loeschen(con, lid, sid):
+    _schueler_zeile(con, lid, sid)
+    if con.execute("SELECT 1 FROM bewertung WHERE schueler_id = ? AND (werte != '{}' OR fehlt = 1 OR notiz != '')", (sid,)).fetchone():
+        raise PruefungFehler("Für diesen Schüler gibt es Bewertungen. Bitte stattdessen auf „nicht mehr in der Klasse“ stellen.")
+    con.execute("DELETE FROM schueler WHERE id = ?", (sid,))
+
+
+SPALTEN = {
+    "vorname": ("vorname", "firstname", "first name"), "nachname": ("nachname", "lastname", "last name", "surname", "name"),
+    "email": ("emailadresse", "email", "emailaddress", "mail"),
+}
+
+
+def moodle_csv(con, lid, kid, text):
+    """Teilnehmerliste aus Moodle (CSV) einlesen: neue Schueler anlegen, vorhandene (gleiche E-Mail oder gleicher Name)
+    nur erkennen, nie umbenennen. Rueckgabe {neu: [namen], vorhanden: [namen], leer: anzahl}."""
+    kid = _klasse(con, kid)
+    text = (text or "").lstrip("﻿")
+    if not text.strip():
+        raise PruefungFehler("Die Datei ist leer.")
+    erste = text.splitlines()[0]
+    trenner = ";" if erste.count(";") > erste.count(",") else ("\t" if erste.count("\t") > erste.count(",") else ",")
+    leser = csv.reader(io.StringIO(text), delimiter=trenner)
+    kopf = [re.sub(r"[^a-z ]", "", (k or "").lower().replace("-", "")).strip() for k in next(leser, [])]
+    spalte = {}
+    for feld, namen in SPALTEN.items():
+        for i, k in enumerate(kopf):
+            if k.replace(" ", "") in [n.replace(" ", "") for n in namen] and feld not in spalte:
+                spalte[feld] = i
+    if "nachname" not in spalte:
+        raise PruefungFehler("In der Datei fehlt die Spalte „Nachname“ (Moodle: Teilnehmer/innen → Download als CSV).")
+    vorhanden = schueler(con, lid, kid)
+    nach_mail = {s["email"].lower(): s for s in vorhanden if s["email"]}
+    nach_name = {normalisiert(s["nachname"]) + "|" + normalisiert(s["vorname"]): s for s in vorhanden}
+    ergebnis = {"neu": [], "vorhanden": [], "leer": 0}
+    for zeile in leser:
+        wert = lambda f: zeile[spalte[f]].strip() if f in spalte and spalte[f] < len(zeile) else ""   # noqa: E731
+        nachname, vorname, email = wert("nachname"), wert("vorname"), wert("email")
+        if not nachname:
+            ergebnis["leer"] += 1
+            continue
+        treffer = nach_mail.get(email.lower()) if email else None
+        treffer = treffer or nach_name.get(normalisiert(nachname) + "|" + normalisiert(vorname))
+        if treffer:
+            if email and not treffer["email"]:   # nur fehlende E-Mail ergaenzen, Namen bleiben
+                con.execute("UPDATE schueler SET email = ? WHERE id = ?", (email[:120], treffer["id"]))
+            ergebnis["vorhanden"].append(treffer["name"])
+            continue
+        neu = schueler_speichern(con, lid, {"klasse_id": kid, "nachname": nachname, "vorname": vorname, "email": email})
+        s = {"id": neu, "nachname": nachname, "vorname": vorname, "email": email, "name": nachname + (", " + vorname if vorname else "")}
+        nach_name[normalisiert(nachname) + "|" + normalisiert(vorname)] = s
+        if email:
+            nach_mail[email.lower()] = s
+        ergebnis["neu"].append(s["name"])
+    return ergebnis
+
+
+# --- Struktur (Feedbackbogen bzw. Aufgaben) ---
+
+def struktur_pruefen(struktur):
+    """Prueft und vervollstaendigt eine Struktur {bereiche: [{name, gewicht, kriterien: [{key, name, typ, max, gewicht,
+    stufen}]}]}; vergibt fehlende Schluessel k1, k2 ..."""
+    if not isinstance(struktur, dict) or not isinstance(struktur.get("bereiche"), list):
+        raise PruefungFehler("Ungültiger Aufbau.")
+    bereiche = struktur["bereiche"]
+    if not 1 <= len(bereiche) <= 12:
+        raise PruefungFehler("Ein Bogen braucht 1 bis 12 Bereiche.")
+    vergeben = {k.get("key") for b in bereiche if isinstance(b, dict) for k in (b.get("kriterien") or []) if isinstance(k, dict)}
+    naechster = 1
+    sauber = []
+    for b in bereiche:
+        if not isinstance(b, dict):
+            raise PruefungFehler("Ungültiger Bereich.")
+        name = _text(b.get("name"), "einen Namen für jeden Bereich", 80)
+        gewicht = _zahl(b.get("gewicht") if b.get("gewicht") not in (None, "") else 1, "Gewicht von „%s“" % name, 0.01, 1000)
+        kriterien = b.get("kriterien") or []
+        if not 1 <= len(kriterien) <= 60:
+            raise PruefungFehler("Bereich „%s“ braucht 1 bis 60 Kriterien bzw. Aufgaben." % name)
+        ks = []
+        for k in kriterien:
+            if not isinstance(k, dict):
+                raise PruefungFehler("Ungültiges Kriterium.")
+            kname = _text(k.get("name"), "einen Namen für jedes Kriterium", 120)
+            typ = k.get("typ") or "punkte"
+            if typ not in TYPEN:
+                raise PruefungFehler("Unbekannte Art bei „%s“." % kname)
+            key = k.get("key")
+            if not key or not re.fullmatch(r"k\d{1,4}", str(key)):
+                while "k%d" % naechster in vergeben:
+                    naechster += 1
+                key = "k%d" % naechster
+                vergeben.add(key)
+            neu = {"key": key, "name": kname, "typ": typ}
+            if typ == "punkte":
+                neu["max"] = _zahl(k.get("max"), "Höchstpunkte von „%s“" % kname, 0.5, 1000)
+            if typ == "stufen":
+                stufen = k.get("stufen") or STANDARD_STUFEN
+                if not isinstance(stufen, list) or not 2 <= len(stufen) <= 8:
+                    raise PruefungFehler("„%s“ braucht 2 bis 8 Stufen." % kname)
+                neu["stufen"] = [{"name": _text(st.get("name"), "einen Namen für jede Stufe", 60),
+                                  "punkte": _zahl(st.get("punkte"), "Punkte einer Stufe von „%s“" % kname, 0, 100),
+                                  "text": _text(st.get("text"), "die Beschreibung", 300, pflicht=False)} for st in stufen]
+                if max(st["punkte"] for st in neu["stufen"]) <= 0:
+                    raise PruefungFehler("Bei „%s“ muss mindestens eine Stufe Punkte bringen." % kname)
+            if typ in ("stufen", "punkte") and k.get("gewicht") not in (None, ""):
+                neu["gewicht"] = _zahl(k.get("gewicht"), "Gewicht von „%s“" % kname, 0.01, 100)
+            ks.append(neu)
+        sauber.append({"name": name, "gewicht": gewicht, "kriterien": ks})
+    return {"bereiche": sauber}
+
+
+def _kriterien(struktur):
+    return [k for b in struktur["bereiche"] for k in b["kriterien"]]
+
+
+# --- Berechnung ---
+
+def _kriterium_prozent(k, wert):
+    """Anteil (0..1) eines bewerteten Kriteriums, sonst None; dazu Text fuer den Rechenweg."""
+    if wert in (None, ""):
+        return None, None
+    if k["typ"] == "punkte":
+        p = float(wert)
+        return p / k["max"], "%s %s/%s P" % (k["name"], _fmt(p), _fmt(k["max"]))
+    if k["typ"] == "stufen":
+        hoechst = max(st["punkte"] for st in k["stufen"])
+        st = k["stufen"][int(wert)]
+        return st["punkte"] / hoechst, "%s „%s“ %s/%s" % (k["name"], st["name"], _fmt(st["punkte"]), _fmt(hoechst))
+    return None, None
+
+
+def berechnen(erfassung, struktur, max_punkte, werte):
+    """Prozent (0..100) mit Rechenweg. Rueckgabe {prozent, rechenweg: [zeilen], fehlend: [namen], bereiche: [...]}"""
+    werte = werte or {}
+    if erfassung == "gesamt":
+        if werte.get("gesamt") in (None, ""):
+            return {"prozent": None, "rechenweg": [], "fehlend": ["Gesamtpunkte"], "bereiche": []}
+        p = float(werte["gesamt"])
+        prozent = 100.0 * p / max_punkte
+        return {"prozent": prozent, "fehlend": [], "bereiche": [],
+                "rechenweg": ["%s von %s Punkten = %s %%" % (_fmt(p), _fmt(max_punkte), _fmt(prozent))]}
+    rechenweg, fehlend, bereiche = [], [], []
+    summe_gewicht = summe = 0.0
+    for b in struktur["bereiche"]:
+        teile = []
+        bg = bz = 0.0
+        punkte_erreicht = punkte_max = 0.0
+        for k in b["kriterien"]:
+            if k["typ"] not in ("punkte", "stufen"):
+                continue
+            anteil, text = _kriterium_prozent(k, werte.get(k["key"]))
+            if anteil is None:
+                fehlend.append(k["name"])
+                continue
+            # Punkte zaehlen standardmaessig mit ihren Hoechstpunkten (Klassenarbeit: Summe/Summe), Stufen mit 1
+            g = k.get("gewicht", k["max"] if k["typ"] == "punkte" else 1.0)
+            bg += g
+            bz += g * anteil
+            if k["typ"] == "punkte":
+                punkte_erreicht += float(werte[k["key"]])
+                punkte_max += k["max"]
+            teile.append(text + (" ×" + _fmt(k["gewicht"]) if "gewicht" in k else ""))
+        if bg == 0:
+            bereiche.append({"name": b["name"], "gewicht": b["gewicht"], "prozent": None})
+            continue
+        bp = 100.0 * bz / bg
+        bereiche.append({"name": b["name"], "gewicht": b["gewicht"], "prozent": bp})
+        summe_gewicht += b["gewicht"]
+        summe += b["gewicht"] * bp
+        if erfassung == "aufgaben":
+            rechenweg.append("%s von %s Punkten = %s %%" % (_fmt(punkte_erreicht), _fmt(punkte_max), _fmt(bp)))
+        else:
+            rechenweg.append("%s (Gewicht %s): %s → %s %%" % (b["name"], _fmt(b["gewicht"]), "; ".join(teile), _fmt(bp)))
+    if summe_gewicht == 0:
+        return {"prozent": None, "rechenweg": rechenweg, "fehlend": fehlend, "bereiche": bereiche}
+    prozent = summe / summe_gewicht
+    gewertet = [b for b in bereiche if b["prozent"] is not None]
+    if len(gewertet) > 1:
+        rechenweg.append("Gesamt: (" + " + ".join("%s × %s" % (_fmt(b["gewicht"]), _fmt(b["prozent"])) for b in gewertet)
+                         + ") / %s = %s %%" % (_fmt(summe_gewicht), _fmt(prozent)))
+    return {"prozent": prozent, "rechenweg": rechenweg, "fehlend": fehlend, "bereiche": bereiche}
+
+
+# --- Vorlagen (Feedbackbogen) ---
+
+def vorlagen(con, lid):
+    return [{"id": z["id"], "name": z["name"], "art": z["art"], "struktur": json.loads(z["struktur"]), "geaendert": z["geaendert"]}
+            for z in con.execute("SELECT * FROM vorlage WHERE lehrkraft_id = ? ORDER BY name", (lid,))]
+
+
+def vorlage_speichern(con, lid, daten, vid=None):
+    name = _text(daten.get("name"), "einen Namen", 120)
+    art = daten.get("art") if daten.get("art") in ARTEN else "muendlich"
+    struktur = struktur_pruefen(daten.get("struktur"))
+    jetzt = db.jetzt()
+    if vid is None:
+        return con.execute("INSERT INTO vorlage (lehrkraft_id, name, art, struktur, erstellt, geaendert) VALUES (?, ?, ?, ?, ?, ?)",
+                           (lid, name, art, json.dumps(struktur, ensure_ascii=False), jetzt, jetzt)).lastrowid
+    if con.execute("SELECT 1 FROM vorlage WHERE id = ? AND lehrkraft_id = ?", (vid, lid)).fetchone() is None:
+        raise PruefungFehler("Diese Vorlage gibt es nicht.")
+    con.execute("UPDATE vorlage SET name = ?, art = ?, struktur = ?, geaendert = ? WHERE id = ?",
+                (name, art, json.dumps(struktur, ensure_ascii=False), jetzt, vid))
+    return vid
+
+
+def vorlage_loeschen(con, lid, vid):
+    if con.execute("SELECT 1 FROM vorlage WHERE id = ? AND lehrkraft_id = ?", (vid, lid)).fetchone() is None:
+        raise PruefungFehler("Diese Vorlage gibt es nicht.")
+    con.execute("DELETE FROM vorlage WHERE id = ?", (vid,))   # Pruefungen behalten ihre Kopie
+
+
+# --- Notenschluessel einer Pruefung ---
+
+def standard_schluessel(con, lid):
+    wert = db.einstellung(con, "standard_schluessel:%d" % lid)
+    return int(wert) if wert else None
+
+
+def standard_setzen(con, lid, sid):
+    sid = _id(sid)
+    if sid is not None:
+        s = notenschluessel.holen(con, sid)
+        if s is None or (s["art"] == "eigen" and s["besitzer_id"] != lid):
+            raise PruefungFehler("Diesen Notenschlüssel gibt es nicht.")
+    db.einstellung_setzen(con, "standard_schluessel:%d" % lid, str(sid) if sid else "")
+
+
+def schluessel_fuer(con, lid, p):
+    """(schluessel, herkunft) nach der Reihenfolge Pruefung -> Klasse -> Standard -> Konferenz; abgeschlossene
+    Pruefungen nutzen den eingefrorenen Schluessel."""
+    if p["schluessel_fest"]:
+        return json.loads(p["schluessel_fest"]), "beim Abschließen festgehalten"
+    if p["notenschluessel_id"]:
+        s = notenschluessel.holen(con, p["notenschluessel_id"])
+        if s:
+            return s, "in der Prüfung gewählt"
+    k = con.execute("SELECT notenschluessel_id, bildungsgang_id FROM klasse WHERE id = ?", (p["klasse_id"],)).fetchone()
+    if k and k["notenschluessel_id"]:
+        s = notenschluessel.holen(con, k["notenschluessel_id"])
+        if s:
+            return s, "Schlüssel der Klasse"
+    std = standard_schluessel(con, lid)
+    if std:
+        s = notenschluessel.holen(con, std)
+        if s:
+            return s, "dein Standard"
+    z = con.execute("SELECT id FROM notenschluessel WHERE art = 'konferenz' AND bildungsgang_id = ?",
+                    (k["bildungsgang_id"] if k else None,)).fetchone()
+    if z:
+        return notenschluessel.holen(con, z["id"]), "Konferenzschlüssel des Bildungsgangs"
+    return None, "kein Schlüssel – der Admin trägt den Konferenzschlüssel ein"
+
+
+# --- Pruefungen ---
+
+def _pruefung(con, lid, pid):
+    z = con.execute("SELECT * FROM pruefung WHERE id = ? AND lehrkraft_id = ?", (pid, lid)).fetchone()
+    if z is None:
+        raise PruefungFehler("Diese Prüfung gibt es nicht.")
+    return z
+
+
+def _strang(con, lid, daten):
+    kid = _klasse(con, _id(daten.get("klasse_id")))
+    gid = _id(daten.get("gruppe_id"))
+    if gid is not None:
+        stundenplan._gruppe_pruefen(con, lid, kid, gid)
+    sid = _id(daten.get("schuljahr_id"))
+    if sid is None or con.execute("SELECT 1 FROM schuljahr WHERE id = ?", (sid,)).fetchone() is None:
+        raise PruefungFehler("Bitte ein Schuljahr wählen.")
+    return kid, gid, sid
+
+
+def pruefung_speichern(con, lid, daten, pid=None):
+    """Pruefung anlegen bzw. aendern. Fester Termin -> festgesetztes Thema in der Planung (belegt die Bloecke)."""
+    if pid is None:
+        kid, gid, sid = _strang(con, lid, daten)
+        alt = None
+    else:
+        alt = _pruefung(con, lid, pid)
+        kid, gid, sid = alt["klasse_id"], alt["gruppe_id"], alt["schuljahr_id"]
+    titel = _text(daten.get("titel"), "einen Titel", 120)
+    art = daten.get("art") if daten.get("art") in ARTEN else "schriftlich"
+    form = daten.get("form") if daten.get("form") in ("termin", "fenster") else "termin"
+    datum = beginn = von = bis = None
+    bloecke = 1
+    if form == "termin":
+        datum = stundenplan._datum(daten.get("datum"), "den Tag der Prüfung").isoformat()
+        beginn = stundenplan._uhrzeit(daten.get("beginn"), "den Block")
+        bloecke = int(_zahl(daten.get("bloecke") or 1, "Blöcke", 1, 20))
+    else:
+        von = stundenplan._datum(daten.get("fenster_von"), "den Beginn des Fensters").isoformat()
+        bis = stundenplan._datum(daten.get("fenster_bis"), "die Frist").isoformat()
+        if bis < von:
+            raise PruefungFehler("Die Frist liegt vor dem Beginn des Fensters.")
+    erfassung = daten.get("erfassung") if daten.get("erfassung") in ERFASSUNGEN else (alt["erfassung"] if alt else "aufgaben")
+    max_punkte = None
+    if erfassung == "gesamt":
+        max_punkte = _zahl(daten.get("max_punkte"), "Höchstpunkte", 0.5, 10000)
+        struktur = {"bereiche": []}
+    elif erfassung == "aufgaben":
+        aufgaben = daten.get("aufgaben")
+        if aufgaben is None and alt is not None and alt["erfassung"] == "aufgaben":
+            struktur = json.loads(alt["struktur"])
+        else:
+            if not isinstance(aufgaben, list) or not aufgaben:
+                raise PruefungFehler("Bitte mindestens eine Aufgabe mit Höchstpunkten angeben.")
+            struktur = struktur_pruefen({"bereiche": [{"name": "Aufgaben", "gewicht": 1, "kriterien": [
+                {"key": a.get("key"), "name": a.get("name") or "Aufgabe %d" % (i + 1), "typ": "punkte", "max": a.get("max")}
+                for i, a in enumerate(aufgaben) if isinstance(a, dict)]}]})
+    else:
+        vid = _id(daten.get("vorlage_id"))
+        if daten.get("struktur") is not None:
+            struktur = struktur_pruefen(daten["struktur"])
+        elif vid is not None:
+            v = con.execute("SELECT struktur FROM vorlage WHERE id = ? AND lehrkraft_id = ?", (vid, lid)).fetchone()
+            if v is None:
+                raise PruefungFehler("Diese Vorlage gibt es nicht.")
+            struktur = json.loads(v["struktur"])
+        elif alt is not None and alt["erfassung"] == "bogen":
+            struktur = json.loads(alt["struktur"])
+        else:
+            raise PruefungFehler("Bitte eine Feedbackbogen-Vorlage wählen.")
+    nsid = _id(daten.get("notenschluessel_id"))
+    if nsid is not None:
+        s = notenschluessel.holen(con, nsid)
+        if s is None or (s["art"] == "eigen" and s["besitzer_id"] != lid):
+            raise PruefungFehler("Diesen Notenschlüssel gibt es nicht.")
+    lfid = _id(daten.get("lernfeld_id"))
+    if lfid is not None and con.execute("SELECT 1 FROM lernfeld l JOIN klasse k ON k.bildungsgang_id = l.bildungsgang_id "
+                                        "WHERE l.id = ? AND k.id = ?", (lfid, kid)).fetchone() is None:
+        raise PruefungFehler("Das Lernfeld gehört nicht zum Bildungsgang der Klasse.")
+    stand = daten.get("stand") if daten.get("stand") in STAENDE[:3] else (alt["stand"] if alt and alt["stand"] != "ausgewertet" else "geplant")
+    werte = (titel, art, form, datum, beginn, bloecke, von, bis, erfassung, json.dumps(struktur, ensure_ascii=False), max_punkte,
+             nsid, lfid, db.jetzt())
+    if alt is None:
+        pid = con.execute("INSERT INTO pruefung (titel, art, form, datum, beginn, bloecke, fenster_von, fenster_bis, erfassung, struktur, "
+                          "max_punkte, notenschluessel_id, lernfeld_id, geaendert, lehrkraft_id, klasse_id, gruppe_id, schuljahr_id, stand, "
+                          "erstellt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                          werte + (lid, kid, gid, sid, stand, db.jetzt())).lastrowid
+    else:
+        if alt["stand"] == "ausgewertet" and (erfassung != alt["erfassung"] or json.dumps(struktur, ensure_ascii=False) != alt["struktur"]):
+            raise PruefungFehler("Die Prüfung ist abgeschlossen. Bitte zuerst wieder öffnen.")
+        con.execute("UPDATE pruefung SET titel = ?, art = ?, form = ?, datum = ?, beginn = ?, bloecke = ?, fenster_von = ?, fenster_bis = ?, "
+                    "erfassung = ?, struktur = ?, max_punkte = ?, notenschluessel_id = ?, lernfeld_id = ?, geaendert = ?, stand = ? WHERE id = ?",
+                    werte + (stand if alt["stand"] != "ausgewertet" else "ausgewertet", pid))
+    _planung_abgleichen(con, lid, pid)
+    return pid
+
+
+def _planung_abgleichen(con, lid, pid):
+    """Fester Termin: ein festgesetztes Thema mit den Bloecken der Pruefung in der Planung; Fenster: keins."""
+    p = _pruefung(con, lid, pid)
+    vorhanden = con.execute("SELECT id FROM plan_thema WHERE pruefung_id = ?", (pid,)).fetchone()
+    if p["form"] != "termin":
+        con.execute("DELETE FROM plan_thema WHERE pruefung_id = ?", (pid,))
+        return
+    if vorhanden:
+        con.execute("UPDATE plan_thema SET titel = ?, bloecke = ?, lernfeld_id = ?, fest_datum = ?, fest_beginn = ?, klasse_id = ?, "
+                    "gruppe_id = ?, schuljahr_id = ? WHERE id = ?",
+                    (p["titel"], p["bloecke"], p["lernfeld_id"], p["datum"], p["beginn"], p["klasse_id"], p["gruppe_id"],
+                     p["schuljahr_id"], vorhanden["id"]))
+        return
+    reihe = con.execute("SELECT COALESCE(MAX(reihenfolge), 0) + 1 FROM plan_thema WHERE lehrkraft_id = ? AND klasse_id = ? "
+                        "AND COALESCE(gruppe_id, 0) = ? AND schuljahr_id = ?", (lid, p["klasse_id"], p["gruppe_id"] or 0, p["schuljahr_id"])).fetchone()[0]
+    con.execute("INSERT INTO plan_thema (lehrkraft_id, klasse_id, gruppe_id, schuljahr_id, reihenfolge, titel, bloecke, lernfeld_id, "
+                "fest_datum, fest_beginn, pruefung_id, erstellt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (lid, p["klasse_id"], p["gruppe_id"], p["schuljahr_id"], reihe, p["titel"], p["bloecke"], p["lernfeld_id"],
+                 p["datum"], p["beginn"], pid, db.jetzt()))
+
+
+def pruefung_loeschen(con, lid, pid):
+    _pruefung(con, lid, pid)
+    con.execute("DELETE FROM pruefung WHERE id = ?", (pid,))   # Bewertungen und Planungs-Thema gehen mit
+
+
+def _aus_zeile(z):
+    p = dict(z)
+    p["struktur"] = json.loads(p["struktur"])
+    p["artname"] = ARTEN.get(p["art"], p["art"])
+    return p
+
+
+def pruefungen(con, lid, kid, gid, sid):
+    """Pruefungen eines Strangs mit kurzer Statistik (bewertet/Schnitt), nach Termin sortiert."""
+    liste = []
+    for z in con.execute("SELECT * FROM pruefung WHERE lehrkraft_id = ? AND klasse_id = ? AND COALESCE(gruppe_id, 0) = ? AND schuljahr_id = ?",
+                         (lid, kid, gid or 0, sid)).fetchall():
+        e = ergebnis(con, lid, z["id"])
+        p = e["pruefung"]
+        p["statistik"] = e["statistik"]
+        p["schluessel"] = e["schluessel"]["name"] if e["schluessel"] else None
+        liste.append(p)
+    liste.sort(key=lambda p: (p["datum"] or p["fenster_bis"] or "", p["titel"]))
+    return liste
+
+
+def _werte_pruefen(p, werte):
+    """Neue Werte einer Bewertung gegen die Struktur pruefen; None/'' loescht einen Wert."""
+    if not isinstance(werte, dict):
+        raise PruefungFehler("Ungültige Werte.")
+    sauber = {}
+    if p["erfassung"] == "gesamt":
+        for key, wert in werte.items():
+            if key != "gesamt":
+                raise PruefungFehler("Unbekanntes Feld.")
+            sauber[key] = None if wert in (None, "") else _zahl(wert, "Punkte", 0, p["max_punkte"])
+        return sauber
+    kriterien = {k["key"]: k for k in _kriterien(p["struktur"])}
+    for key, wert in werte.items():
+        k = kriterien.get(key)
+        if k is None:
+            raise PruefungFehler("Unbekanntes Kriterium.")
+        if wert in (None, ""):
+            sauber[key] = None
+        elif k["typ"] == "punkte":
+            sauber[key] = _zahl(wert, k["name"], 0, k["max"])
+        elif k["typ"] == "stufen":
+            i = int(_zahl(wert, k["name"], 0, len(k["stufen"]) - 1))
+            sauber[key] = i
+        elif k["typ"] == "haken":
+            sauber[key] = bool(wert)
+        else:
+            sauber[key] = _text(wert, k["name"], 2000, pflicht=False)
+    return sauber
+
+
+def bewertung_setzen(con, lid, pid, sid, daten):
+    """Werte (einzeln oder mehrere) einer Bewertung setzen; fehlt/notiz optional. Rueckgabe: Zeile wie in ergebnis()."""
+    p = _aus_zeile(_pruefung(con, lid, pid))
+    if p["stand"] == "ausgewertet":
+        raise PruefungFehler("Die Prüfung ist abgeschlossen. Bitte zuerst wieder öffnen.")
+    s = _schueler_zeile(con, lid, sid)
+    if s["klasse_id"] != p["klasse_id"]:
+        raise PruefungFehler("Der Schüler gehört nicht zur Klasse der Prüfung.")
+    alt = con.execute("SELECT * FROM bewertung WHERE pruefung_id = ? AND schueler_id = ?", (pid, sid)).fetchone()
+    werte = json.loads(alt["werte"]) if alt else {}
+    for key, wert in _werte_pruefen(p, daten.get("werte") or {}).items():
+        if wert is None:
+            werte.pop(key, None)
+        else:
+            werte[key] = wert
+    fehlt = (1 if daten["fehlt"] else 0) if "fehlt" in daten else (alt["fehlt"] if alt else 0)
+    notiz = _text(daten["notiz"], "die Notiz", 4000, pflicht=False) if "notiz" in daten else (alt["notiz"] if alt else "")
+    con.execute("INSERT INTO bewertung (pruefung_id, schueler_id, werte, fehlt, notiz, geaendert) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (pruefung_id, schueler_id) DO UPDATE SET werte = excluded.werte, fehlt = excluded.fehlt, "
+                "notiz = excluded.notiz, geaendert = excluded.geaendert",
+                (pid, sid, json.dumps(werte, ensure_ascii=False), fehlt, notiz, db.jetzt()))
+    if p["stand"] in ("geplant", "angekuendigt") and werte:
+        con.execute("UPDATE pruefung SET stand = 'durchgefuehrt' WHERE id = ?", (pid,))
+
+
+def _ganze_note(system, n):
+    """Stufe der ganzen Note fuer den Notenspiegel."""
+    if system == "punkte":
+        return n["stufe"]
+    return n["stufe"][0]
+
+
+def ergebnis(con, lid, pid):
+    """Alles zur Bewertung einer Pruefung: Pruefung, Schluessel, Schueler mit Werten, Prozent, Note, Rechenweg, Statistik."""
+    p = _aus_zeile(_pruefung(con, lid, pid))
+    schluessel, herkunft = schluessel_fuer(con, lid, p)
+    bew = {z["schueler_id"]: z for z in con.execute("SELECT * FROM bewertung WHERE pruefung_id = ?", (pid,))}
+    zeilen = []
+    gruppe = p["gruppe_id"]
+    for s in schueler(con, lid, p["klasse_id"]):
+        if gruppe and s["gruppe_id"] != gruppe:
+            continue
+        b = bew.get(s["id"])
+        if not s["aktiv"] and not b:
+            continue
+        werte = json.loads(b["werte"]) if b else {}
+        fehlt = bool(b["fehlt"]) if b else False
+        r = berechnen(p["erfassung"], p["struktur"], p["max_punkte"], werte) if not fehlt else \
+            {"prozent": None, "rechenweg": [], "fehlend": [], "bereiche": []}
+        note = None
+        if r["prozent"] is not None and schluessel:
+            note = notenschluessel.note(schluessel["system"], schluessel["grenzen"], r["prozent"])
+            r["rechenweg"].append("%s (%s): %s %% → %s" % (schluessel["name"], notenschluessel.SYSTEMNAME[schluessel["system"]],
+                                                       _fmt(round(r["prozent"]), 0), note["text"]))
+        zeilen.append({"id": s["id"], "name": s["name"], "gruppe": s["gruppe"], "aktiv": s["aktiv"], "werte": werte, "fehlt": fehlt,
+                       "notiz": b["notiz"] if b else "", "prozent": r["prozent"], "note": note, "rechenweg": r["rechenweg"],
+                       "fehlend": r["fehlend"], "bereiche": r["bereiche"]})
+    # Statistik
+    noten = [z for z in zeilen if z["note"]]
+    spiegel = {}
+    if schluessel:
+        reihe = notenschluessel.STUFEN[schluessel["system"]]
+        stufen = reihe if schluessel["system"] == "punkte" else sorted({st[0] for st in reihe})
+        spiegel = {st: 0 for st in stufen}
+        for z in noten:
+            spiegel[_ganze_note(schluessel["system"], z["note"])] += 1
+    aufgaben = []
+    for k in _kriterien(p["struktur"]):
+        if k["typ"] not in ("punkte", "stufen"):
+            continue
+        anteile = [a for a in (_kriterium_prozent(k, z["werte"].get(k["key"]))[0] for z in zeilen if not z["fehlt"]) if a is not None]
+        aufgaben.append({"key": k["key"], "name": k["name"], "max": k.get("max"), "anzahl": len(anteile),
+                         "prozent": 100.0 * sum(anteile) / len(anteile) if anteile else None})
+    statistik = {"schueler": len([z for z in zeilen if z["aktiv"]]), "bewertet": len(noten),
+                 "fehlt": len([z for z in zeilen if z["fehlt"]]),
+                 "offen": len([z for z in zeilen if z["aktiv"] and not z["fehlt"] and z["prozent"] is None]),
+                 "unvollstaendig": len([z for z in zeilen if z["prozent"] is not None and z["fehlend"]]),
+                 "schnitt": round(sum(z["note"]["dezimal"] for z in noten) / len(noten), 2) if noten else None,
+                 "prozent": round(sum(z["prozent"] for z in noten) / len(noten), 1) if noten else None,
+                 "spiegel": spiegel, "aufgaben": aufgaben}
+    return {"pruefung": p, "schluessel": schluessel, "herkunft": herkunft, "schueler": zeilen, "statistik": statistik}
+
+
+def abschliessen(con, lid, pid):
+    """Pruefung abschliessen: Schluessel einfrieren, Stand 'ausgewertet'. Rueckgabe: Warnungen (offene/unvollstaendige)."""
+    e = ergebnis(con, lid, pid)
+    if e["schluessel"] is None:
+        raise PruefungFehler("Ohne Notenschlüssel lässt sich nicht abschließen. Der Admin trägt den Konferenzschlüssel ein.")
+    con.execute("UPDATE pruefung SET stand = 'ausgewertet', schluessel_fest = ?, geaendert = ? WHERE id = ?",
+                (json.dumps(e["schluessel"], ensure_ascii=False), db.jetzt(), pid))
+    st = e["statistik"]
+    warnungen = []
+    if st["offen"]:
+        warnungen.append("%d ohne Bewertung" % st["offen"])
+    if st["unvollstaendig"]:
+        warnungen.append("%d mit unbewerteten Kriterien (nicht mitgerechnet)" % st["unvollstaendig"])
+    return warnungen
+
+
+def wieder_oeffnen(con, lid, pid):
+    _pruefung(con, lid, pid)
+    con.execute("UPDATE pruefung SET stand = 'durchgefuehrt', schluessel_fest = NULL, geaendert = ? WHERE id = ?", (db.jetzt(), pid))
+
+
+def hinweise(con, lid, heute=None, tage=21):
+    """Fuer die Startseite: anstehende Pruefungen (naechste drei Wochen), laufende Fenster, nicht abgeschlossene."""
+    heute = (heute or db.heute()).isoformat()
+    bis = (datetime.date.fromisoformat(heute) + datetime.timedelta(days=tage)).isoformat()
+    namen = {k["id"]: k["name"] for k in grunddaten.klassen(con)}
+    ergebnis_ = []
+    for z in con.execute("SELECT * FROM pruefung WHERE lehrkraft_id = ? AND stand != 'ausgewertet' ORDER BY COALESCE(datum, fenster_bis)", (lid,)):
+        if z["form"] == "termin":
+            if heute <= z["datum"] <= bis:
+                art = "bald"
+            elif z["datum"] < heute:
+                art = "offen"
+            else:
+                continue
+            wann = z["datum"]
+        else:
+            if z["fenster_von"] <= heute <= z["fenster_bis"]:
+                art = "fenster"
+            elif z["fenster_bis"] < heute:
+                art = "offen"
+            elif z["fenster_von"] <= bis:
+                art = "bald"
+            else:
+                continue
+            wann = z["fenster_bis"]
+        ergebnis_.append({"id": z["id"], "titel": z["titel"], "klasse": namen.get(z["klasse_id"], "?"), "art": art, "wann": wann,
+                          "form": z["form"]})
+    return ergebnis_
