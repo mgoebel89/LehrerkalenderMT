@@ -180,6 +180,16 @@ const Woche = (() => {
     return '';
   }
 
+  // Farbiges Band oben auf der Karte fuer Stunden, die nicht wie geplant stattfinden
+  function zustandBand(b) {
+    if (b.zustand === 'ausfall') return { art: 'ausfall', symbol: 'ausfall', titel: 'Fällt aus', text: b.grund || '' };
+    if (b.zustand === 'vertreten') return { art: 'vertreten', symbol: 'vertretung', titel: 'Vertreten',
+      text: [b.wer ? 'durch ' + b.wer : '', b.thema_weiter ? 'mit deinem Thema' : 'eigener Stoff', b.grund || ''].filter(Boolean).join(' · ') };
+    if (b.zustand === 'verschoben') return { art: 'verschoben', symbol: 'verschieben', titel: 'Verschoben', text: 'auf ' + tagKurz(b.ziel.datum) + ' ' + b.ziel.beginn };
+    if (b.art === 'vertretung') return { art: 'vertretung', symbol: 'vertretung', titel: 'Vertretung', text: [b.wer ? 'für ' + b.wer : '', b.grund || ''].filter(Boolean).join(' · ') };
+    return null;
+  }
+
   function karte(b) {
     const name = blockName(b);
     const klassen = ['wp-b'];
@@ -190,12 +200,11 @@ const Woche = (() => {
     if (b.art === 'zusatz' || b.art === 'verschoben') klassen.push('zusatz');
     if (b.thema && b.thema.pruefung_id) klassen.push('pr');
     const st = [];
-    if (b.zustand === 'ausfall') st.push(el('span', {}, L.symbol('ausfall'), zustandText(b)));
-    else if (b.zustand === 'vertreten') st.push(el('span', {}, L.symbol('vertretung'), zustandText(b)));
-    else if (b.zustand === 'verschoben') st.push(el('span', {}, L.symbol('verschieben'), zustandText(b)));
+    const band = zustandBand(b);
+    if (band) klassen.push('hat-band', 'band-' + band.art);
+    if (band) { /* Ausfall, Vertretung, verschoben: steht im Band oben */ }
     else if (b.art === 'verschoben') st.push(el('span', { class: 'zus' }, L.symbol('verschieben'), zustandText(b)));
     else if (b.art === 'zusatz') st.push(el('span', { class: 'zus' }, L.symbol('zusatz'), zustandText(b)));
-    else if (b.art === 'vertretung') st.push(el('span', {}, L.symbol('vertretung'), zustandText(b)));
     else if (b.jetzt) st.push(el('span', { class: 'jetzt' }, L.symbol('jetzt'), 'jetzt'));
     if ((!b.zustand || b.thema_weiter) && b.thema && !b.jetzt) {
       const vergangen = b.datum < W.heute || (b.datum === W.heute && b.ende <= new Date().toTimeString().slice(0, 5));
@@ -205,7 +214,8 @@ const Woche = (() => {
       else if (vergangen && !b.zustand) st.push(el('span', { class: 'offen' }, L.symbol('offen'), 'Ist fehlt'));
     }
     const k = el('div', { class: klassen.join(' '), style: '--kl:' + farbe(b.klasse), tabindex: '0', role: 'button',
-      'aria-label': name + ', ' + tagKurz(b.datum) + ' ' + b.beginn + (st.length ? ', ' + zustandText(b) : '') + ' – Aktionen' },
+      'aria-label': name + ', ' + tagKurz(b.datum) + ' ' + b.beginn + (zustandText(b) ? ', ' + zustandText(b) : '') + ' – Aktionen' },
+    band ? el('div', { class: 'band' }, L.symbol(band.symbol), el('b', { text: band.titel }), band.text ? el('span', { text: band.text }) : null) : null,
     el('div', { class: 'kl' }, el('span', { text: b.klasse ? b.klasse.name : (b.klasse_text || 'Vertretung') }),
       b.gruppe ? el('span', { class: 'chip gr', text: b.gruppe.name }) : null,
       b.klasse && b.klasse.stufe ? el('span', { class: 'chip', text: b.klasse.stufe }) : null,
@@ -264,8 +274,10 @@ const Woche = (() => {
     return el('div', { class: 'legende' },
       Object.values(benutzt).sort((a, b) => a.name.localeCompare(b.name)).map(k =>
         el('span', {}, el('i', { class: 'farbe', style: 'background:' + farbe(k) }), k.name)),
-      el('span', {}, L.symbol('jetzt'), 'jetzt'), el('span', {}, L.symbol('ausfall'), 'Ausfall'),
-      el('span', {}, L.symbol('vertretung'), 'Vertretung (gestrichelt)'), el('span', {}, L.symbol('zusatz'), 'Zusatzstunde'),
+      el('span', {}, L.symbol('jetzt'), 'jetzt'),
+      el('span', {}, el('i', { class: 'band-l ausfall' }), 'fällt aus'), el('span', {}, el('i', { class: 'band-l vertreten' }), 'vertreten (meine Stunde)'),
+      el('span', {}, el('i', { class: 'band-l vertretung' }), 'Vertretung für andere'), el('span', {}, el('i', { class: 'band-l verschoben' }), 'verschoben'),
+      el('span', {}, L.symbol('zusatz'), 'Zusatzstunde'),
       el('span', {}, L.symbol('merker'), 'Merker'));
   }
 

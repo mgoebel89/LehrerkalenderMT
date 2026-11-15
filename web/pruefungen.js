@@ -7,7 +7,8 @@ const Pruefungen = (() => {
   const el = L.el;
   const ARTEN = [['schriftlich', 'schriftlich'], ['muendlich', 'mündlich'], ['praktisch', 'praktisch'], ['portfolio', 'Portfolio']];
   const STAND = { geplant: ['geplant', ''], angekuendigt: ['angekündigt', 'blau'], durchgefuehrt: ['durchgeführt', 'gelb'], ausgewertet: ['abgeschlossen', 'gruen'] };
-  const ERFASSUNG = { aufgaben: 'Punkte je Aufgabe', gesamt: 'Gesamtpunkte', bogen: 'Feedbackbogen' };
+  const ERFASSUNG = { aufgaben: 'Punkte je Aufgabe', gesamt: 'Gesamtpunkte', bogen: 'Feedbackbogen', checkliste: 'Checkliste (Labor)' };
+  const hatTeams = p => p.erfassung === 'checkliste' || (p.erfassung === 'bogen' && p.struktur.bereiche.some(b => b.team));
   const wahl = { schuljahr: null, klasse: null, gruppe: null };
   let ort = null;
   let G = null;   // Grunddaten (Lernfelder, Zeitraster, Schuljahre)
@@ -207,7 +208,56 @@ const Pruefungen = (() => {
     const teilBogen = el('div', { class: 'stapel', style: 'gap:6px' },
       p && p.erfassung === 'bogen' ? el('p', { class: 'leise klein', text: 'Bogen dieser Prüfung: ' + p.struktur.bereiche.map(b => b.name).join(', ') + '. Eine andere Vorlage ersetzt ihn.' }) : null,
       L.feld(p && p.erfassung === 'bogen' ? 'Andere Vorlage übernehmen' : 'Vorlage', vorlage));
-    const zeigeErfassung = w => { erfassung = w; teilAufgaben.hidden = w !== 'aufgaben'; teilGesamt.hidden = w !== 'gesamt'; teilBogen.hidden = w !== 'bogen'; };
+    // Bogen: Bereiche, die fuers ganze Team gelten
+    const teamOrt = el('div', { class: 'stapel', style: 'gap:4px' });
+    let teamHaken = [];
+    const teamBereicheZeigen = () => {
+      const v = R.vorlagen.find(x => String(x.id) === vorlage.value);
+      const bereiche = v ? v.struktur.bereiche : p && p.erfassung === 'bogen' ? p.struktur.bereiche : [];
+      teamHaken = bereiche.map(b => el('input', { type: 'checkbox', checked: !v && b.team ? true : null }));
+      L.setzen(teamOrt, bereiche.length ? [el('span', { class: 'leise klein', text: 'Gilt fürs ganze Team (Teams legst du in der Prüfung an):' }),
+        bereiche.map((b, i) => el('label', { class: 'haken' }, teamHaken[i], b.name))] : []);
+    };
+    vorlage.addEventListener('change', teamBereicheZeigen);
+    teamBereicheZeigen();
+    teilBogen.appendChild(teamOrt);
+    // Checkliste: Versuche mit Haken (je Haken Punkte), Versuch im Team oder einzeln
+    const versucheOrt = el('div', { class: 'stapel', style: 'gap:10px' });
+    const versuche = [];
+    const versuchNeu = v => {
+      const name = el('input', { maxlength: 80, value: v ? v.name : 'Versuch ' + (versuche.length + 1), 'aria-label': 'Name des Versuchs' });
+      let team = v ? !!v.team : true;
+      const hakenOrt = el('div', { class: 'stapel', style: 'gap:4px' });
+      const eintrag = { name, haken: [], get team() { return team; } };
+      const hakenNeu = h => {
+        const hn = el('input', { maxlength: 120, value: h ? h.name : '', placeholder: 'z. B. Aufbau abgenommen', 'aria-label': 'Haken' });
+        const hp = el('input', { inputmode: 'decimal', value: h ? fmt(h.max) : '1', style: 'width:70px', 'aria-label': 'Punkte' });
+        const he = { key: h ? h.key : null, hn, hp };
+        const zeile = el('div', { class: 'zeile', style: 'flex-wrap:nowrap' }, el('span', { class: 'leise', text: '☐' }), hn, hp, el('span', { class: 'leise klein', text: 'P' }),
+          el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Haken entfernen', onclick: () => { eintrag.haken.splice(eintrag.haken.indexOf(he), 1); zeile.remove(); } }, L.symbol('zu')));
+        eintrag.haken.push(he);
+        hakenOrt.appendChild(zeile);
+      };
+      (v ? v.kriterien : [{ name: 'Aufbau', max: 1 }, { name: 'Messung', max: 1 }, { name: 'Protokoll', max: 2 }]).forEach(hakenNeu);
+      const karte = el('div', { class: 'ka stapel', style: 'gap:6px' },
+        el('div', { class: 'zeile', style: 'flex-wrap:nowrap' }, name,
+          segment([['team', 'im Team'], ['einzeln', 'einzeln']], team ? 'team' : 'einzeln', w => { team = w === 'team'; }),
+          el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Versuch entfernen', onclick: () => { versuche.splice(versuche.indexOf(eintrag), 1); karte.remove(); } }, L.symbol('zu'))),
+        hakenOrt,
+        el('div', {}, el('button', { type: 'button', class: 'leicht klein', onclick: () => hakenNeu(null) }, L.symbol('plus'), 'Haken')));
+      versuche.push(eintrag);
+      versucheOrt.appendChild(karte);
+    };
+    (p && p.erfassung === 'checkliste' ? p.struktur.bereiche : [null]).forEach(versuchNeu);
+    const testat = el('input', { type: 'checkbox', checked: p && p.struktur.testat ? true : null });
+    const teilCheckliste = el('div', { class: 'stapel', style: 'gap:8px' }, versucheOrt,
+      el('div', { class: 'zeile' }, el('button', { type: 'button', class: 'klein', onclick: () => versuchNeu(null) }, L.symbol('plus'), 'Versuch'),
+        el('label', { class: 'haken' }, testat, 'nur Testat (abhaken ohne Note)')),
+      el('p', { class: 'leise klein', text: 'Jeder Haken bringt seine Punkte; Note = abgehakte Punkte / alle Punkte. „Im Team“: ein Haken gilt für alle im Team.' }));
+    const zeigeErfassung = w => {
+      erfassung = w; teilAufgaben.hidden = w !== 'aufgaben'; teilGesamt.hidden = w !== 'gesamt'; teilBogen.hidden = w !== 'bogen'; teilCheckliste.hidden = w !== 'checkliste';
+      if (w === 'checkliste' && !p && form === 'termin') { const b = segForm.querySelector('[data-w="fenster"]'); if (b) b.click(); }   // Laborreihe: meist Fenster mit Frist
+    };
     const segErfassung = segment(Object.entries(ERFASSUNG), erfassung, zeigeErfassung);
     zeigeErfassung(erfassung);
     // Notenschluessel und Stand
@@ -223,7 +273,7 @@ const Pruefungen = (() => {
         el('div', { class: 'felder zwei' }, L.feld('Titel', titel), L.feld('Art', art)),
         el('div', { class: 'felder zwei' }, L.feld('Lernfeld', lf), p && p.stand !== 'ausgewertet' ? L.feld('Stand', stand) : el('span')),
         el('div', { class: 'stapel', style: 'gap:8px' }, el('span', { class: 'etikett', text: 'Zeit' }), segForm, teilTermin, teilFenster),
-        el('div', { class: 'stapel', style: 'gap:8px' }, el('span', { class: 'etikett', text: 'Erfassung' }), segErfassung, teilAufgaben, teilGesamt, teilBogen),
+        el('div', { class: 'stapel', style: 'gap:8px' }, el('span', { class: 'etikett', text: 'Erfassung' }), segErfassung, teilAufgaben, teilGesamt, teilBogen, teilCheckliste),
         L.feld('Notenschlüssel', schl, 'Ein eigener Schlüssel erscheint in der Prüfung als abweichender Schlüssel.'),
         p ? el('div', {}, L.nebenknopf('Prüfung löschen …', () => loeschen(p))) : null),
       speichern: () => L.api('POST', p ? '/api/pruefung/' + p.id : '/api/pruefung', Object.assign(p ? {} : { klasse_id: vorgabe.klasse_id, gruppe_id: vorgabe.gruppe_id, schuljahr_id: vorgabe.schuljahr_id }, {
@@ -232,7 +282,11 @@ const Pruefungen = (() => {
         fenster_von: von.value, fenster_bis: bis.value, erfassung, notenschluessel_id: schl.value || null, stand: stand.value,
         aufgaben: erfassung === 'aufgaben' ? aufgaben.map(a => ({ key: a.key, name: a.name.value, max: a.max.value })) : undefined,
         max_punkte: erfassung === 'gesamt' ? maxPunkte.value : undefined,
-        vorlage_id: erfassung === 'bogen' && vorlage.value ? Number(vorlage.value) : undefined })),
+        vorlage_id: erfassung === 'bogen' && vorlage.value ? Number(vorlage.value) : undefined,
+        team_bereiche: erfassung === 'bogen' ? teamHaken.map((h, i) => h.checked ? i : null).filter(i => i !== null) : undefined,
+        versuche: erfassung === 'checkliste' ? versuche.map(v => ({ name: v.name.value, team: v.team,
+          haken: v.haken.map(h => ({ key: h.key, name: h.hn.value, punkte: h.hp.value.replace(',', '.') })) })) : undefined,
+        testat: erfassung === 'checkliste' ? testat.checked : undefined })),
     });
     if (!r) return;
     if (danach) danach(r.id);
@@ -266,6 +320,7 @@ const Pruefungen = (() => {
   }
 
   function schluesselText() {
+    if (E.pruefung.struktur.testat) return el('span', { class: 'chip', text: 'Testat · ohne Note' });
     if (!E.schluessel) return el('span', { class: 'chip rot', text: 'Kein Notenschlüssel: der Admin trägt den Konferenzschlüssel ein' });
     return el('span', { class: 'chip' + (E.schluessel.art === 'eigen' ? ' gelb' : ''), title: E.herkunft },
       L.symbol('schluessel'), E.schluessel.name + ' · ' + E.schluessel.systemname + (E.schluessel.art === 'eigen' ? ' · abweichender Schlüssel' : ''));
@@ -287,7 +342,8 @@ const Pruefungen = (() => {
       el('div', { class: 'zeile leise klein' }, el('span', { text: p.artname + ' · ' + ERFASSUNG[p.erfassung] + ' · ' + wannText(p) }), schluesselText(),
         el('span', { text: E.herkunft })),
       el('div', { class: 'zeile' },
-        segment([['bewerten', 'Bewerten'], ['auswertung', 'Auswertung']], reiter, w => { reiter = w; detailZeichnen(); }),
+        segment([['bewerten', 'Bewerten']].concat(hatTeams(p) ? [['teams', 'Teams' + (p.teams.length ? ' (' + p.teams.length + ')' : '')]] : [], [['auswertung', 'Auswertung']]),
+          reiter, w => { reiter = w; detailZeichnen(); }),
         kopfStatistik(st)),
       fertig ? el('div', { class: 'banner', text: 'Abgeschlossen: Der Notenschlüssel ist festgehalten, Bewertungen sind gesperrt. „Wieder öffnen“ hebt das auf.' }) : null,
       p.hinweise && p.hinweise.length ? el('div', { class: 'banner warnung' }, p.hinweise.map(h => el('div', { text: h }))) : null,
@@ -296,6 +352,12 @@ const Pruefungen = (() => {
   }
 
   function kopfStatistik(st) {
+    if (E.pruefung.erfassung === 'checkliste') {
+      const fertig = E.schueler.filter(z => z.aktiv && !z.fehlt && z.versuche.every(v => v.erledigt === v.gesamt)).length;
+      return el('span', { class: 'zeile pr-statistik' },
+        el('span', { class: 'leise klein', text: fertig + ' von ' + st.schueler + ' haben alle Versuche' + (st.fehlt ? ' · ' + st.fehlt + ' gefehlt' : '') }),
+        st.schnitt !== null ? el('span', { class: 'chip blau', text: 'Ø ' + fmt(st.schnitt, 2) + ' · ' + fmt(st.prozent) + ' %' }) : null);
+    }
     return el('span', { class: 'zeile pr-statistik' },
       el('span', { class: 'leise klein', text: st.bewertet + ' von ' + st.schueler + ' bewertet' + (st.fehlt ? ' · ' + st.fehlt + ' gefehlt' : '') }),
       st.schnitt !== null ? el('span', { class: 'chip blau', text: 'Ø ' + fmt(st.schnitt, 2) + ' · ' + fmt(st.prozent) + ' %' }) : null);
@@ -305,7 +367,9 @@ const Pruefungen = (() => {
     if (!E.schueler.length) {
       return L.setzen(rumpf, el('div', { class: 'leer' }, 'Für diese Klasse gibt es noch keine Schülerliste. ', el('a', { href: '#pruefungen-schueler', text: 'Schülerliste anlegen' })));
     }
-    L.setzen(rumpf, reiter === 'auswertung' ? auswertung() : bewertenTabelle());
+    if (reiter === 'teams' && !hatTeams(E.pruefung)) reiter = 'bewerten';
+    L.setzen(rumpf, reiter === 'auswertung' ? auswertung() : reiter === 'teams' ? teamsAnsicht()
+      : E.pruefung.erfassung === 'checkliste' ? checklisteMatrix() : bewertenTabelle());
   }
 
   async function speichern(sid, daten) {
@@ -367,6 +431,7 @@ const Pruefungen = (() => {
       };
       const meine = [];
       tr.appendChild(el('td', {}, el('b', { text: z.name }), z.gruppe ? el('span', { class: 'chip klein gr', text: z.gruppe }) : null,
+        z.team ? el('span', { class: 'chip klein team', text: z.team }) : null,
         z.notiz ? el('span', { class: 'leise klein', title: z.notiz, text: ' ✎' }) : null));
       if (p.erfassung === 'aufgaben') kriterien.forEach(k => { const i = feld(k.key, z.werte[k.key], k.max); meine.push(i); tr.appendChild(el('td', { class: 'zahl' }, i)); });
       if (p.erfassung === 'gesamt') { const i = feld('gesamt', z.werte.gesamt, p.max_punkte); meine.push(i); tr.appendChild(el('td', { class: 'zahl' }, i)); }
@@ -390,6 +455,115 @@ const Pruefungen = (() => {
         : 'Eintippen und mit Tab oder Enter weiter; jede Eingabe wird sofort gespeichert. Leeres Feld = nicht bewertet. Tipp auf die Note zeigt den Rechenweg; eine gelb umrandete Note hat unbewertete Aufgaben.' }));
   }
 
+  // --- Teams einer Pruefung ---
+  async function teamAktion(pfad, daten) {
+    try { E = await L.api('POST', '/api/pruefung/' + E.pruefung.id + pfad, daten || {}); detailZeichnen(); return true; }
+    catch (e) { L.meldung(e.message, true); return false; }
+  }
+
+  function teamsAnsicht() {
+    const p = E.pruefung;
+    const fertig = p.stand === 'ausgewertet';
+    const name = id => (E.schueler.find(z => z.id === id) || {}).name || '?';
+    const ohne = E.schueler.filter(z => z.aktiv && !z.team_id);
+    const groesse = el('select', { 'aria-label': 'Teamgröße', style: 'width:auto' }, [2, 3, 4, 5].map(n => el('option', { value: n, text: n + 'er-Teams', selected: n === 3 ? true : null })));
+    const bilden = async () => {
+      if (p.teams.length && !await L.dialog({ titel: 'Teams neu bilden?', knopf: 'Neu bilden', gefaehrlich: true, speichern: () => true,
+        inhalt: el('p', { text: 'Die bisherigen ' + p.teams.length + ' Teams und ihre Team-Haken bzw. Teamwerte werden ersetzt.' }) })) return;
+      teamAktion('/teams/bilden', { groesse: Number(groesse.value) });
+    };
+    return el('div', { class: 'stapel' },
+      !fertig ? el('div', { class: 'zeile' },
+        el('button', { type: 'button', onclick: () => teamDialog(null) }, L.symbol('plus'), 'Team'),
+        el('span', { class: 'leise klein', text: 'oder zufällig:' }), groesse, el('button', { type: 'button', onclick: bilden }, 'Teams bilden')) : null,
+      p.teams.length ? el('div', { class: 'raster' }, p.teams.map(t => el('div', { class: 'karte stapel', style: 'gap:6px' },
+        el('div', { class: 'zeile' }, el('h3', { text: t.name }), el('span', { class: 'leise klein', text: t.mitglieder.length + ' Schüler' }),
+          !fertig ? el('span', { class: 'rechts' }, el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Team bearbeiten', onclick: () => teamDialog(t) }, L.symbol('stift'))) : null),
+        el('div', { class: 'zeile' }, t.mitglieder.map(id => el('span', { class: 'chip', text: name(id) }))))))
+        : el('div', { class: 'leer', text: 'Noch keine Teams. Lege sie an oder lass sie zufällig bilden. Ohne Team wird jeder einzeln bewertet.' }),
+      ohne.length && p.teams.length ? el('p', { class: 'leise klein', text: 'Ohne Team (wird einzeln bewertet): ' + ohne.map(z => z.name).join(' · ') }) : null);
+  }
+
+  async function teamDialog(t) {
+    const p = E.pruefung;
+    const name = el('input', { maxlength: 60, value: t ? t.name : 'Team ' + (p.teams.length + 1) });
+    const haken = E.schueler.filter(z => z.aktiv || (t && t.mitglieder.includes(z.id))).map(z => {
+      const c = el('input', { type: 'checkbox', checked: t && t.mitglieder.includes(z.id) ? true : null, value: z.id });
+      return el('label', { class: 'haken' }, c, z.name, z.team_id && (!t || z.team_id !== t.id) ? el('span', { class: 'leise klein', text: ' (jetzt ' + z.team + ')' }) : null);
+    });
+    const weitere = t ? [{ text: 'Team auflösen', klasse: 'warnen', speichern: () => L.api('POST', '/api/pruefung/' + p.id + '/team/' + t.id + '/loeschen', {}) }] : [];
+    const r = await L.dialog({
+      titel: t ? 'Team bearbeiten' : 'Neues Team', weitere,
+      inhalt: el('div', { class: 'stapel', style: 'gap:8px' }, L.feld('Name', name),
+        el('span', { class: 'etikett', text: 'Mitglieder' }), el('div', { class: 'stapel team-wahl', style: 'gap:2px' }, haken),
+        el('p', { class: 'leise klein', text: 'Wer schon in einem anderen Team ist, wechselt hierher.' })),
+      speichern: () => L.api('POST', '/api/pruefung/' + p.id + '/team' + (t ? '/' + t.id : ''), {
+        name: name.value, schueler_ids: haken.map(l => l.querySelector('input')).filter(c => c.checked).map(c => Number(c.value)) }),
+    });
+    if (r) { E = r.pruefung ? r : await L.api('GET', '/api/pruefung/' + p.id); detailZeichnen(); }
+  }
+
+  // --- Checkliste: Matrix Schueler (nach Teams) x Versuche ---
+  function checklisteMatrix() {
+    const p = E.pruefung;
+    const fertig = p.stand === 'ausgewertet';
+    const versuche = p.struktur.bereiche;
+    const ordnung = [];
+    p.teams.forEach(t => E.schueler.filter(z => z.team_id === t.id).forEach(z => ordnung.push(z)));
+    E.schueler.filter(z => !z.team_id).forEach(z => ordnung.push(z));
+    const kopf = el('tr', {}, el('th', { text: 'Schüler' }),
+      versuche.map((v, i) => el('th', { class: 'zahl', title: v.kriterien.map(k => k.name + ' (' + fmt(k.max) + ' P)').join(', ') },
+        v.name, el('br'), el('span', { class: 'leise', text: (v.team ? 'Team · ' : 'einzeln · ') + E.statistik.fortschritt[i] + ' fertig' }))),
+      el('th', { class: 'zahl', text: '%' }), p.struktur.testat ? null : el('th', { text: 'Note' }), el('th', { text: 'fehlt' }));
+    let teamVorher = null;
+    const zeilen = [];
+    ordnung.forEach(z => {
+      if (z.team_id && z.team_id !== teamVorher) {
+        const t = p.teams.find(x => x.id === z.team_id);
+        zeilen.push(el('tr', { class: 'team-kopf' }, el('td', { colspan: 999 }, el('span', { class: 'chip klein team', text: t.name }),
+          el('span', { class: 'leise klein', text: ' Team-Haken gelten für alle ' + t.mitglieder.length }))));
+      }
+      teamVorher = z.team_id;
+      const tr = el('tr', { class: z.aktiv ? null : 'aus' }, el('td', {}, el('b', { text: z.name }), z.gruppe ? el('span', { class: 'chip klein gr', text: z.gruppe }) : null));
+      versuche.forEach((v, i) => {
+        const f = z.versuche[i];
+        const art = f.erledigt === f.gesamt ? 'fertig' : f.erledigt ? 'teil' : 'offen';
+        tr.appendChild(el('td', { class: 'zahl' }, el('button', { type: 'button', class: 'versuch ' + art, disabled: z.fehlt ? true : null,
+          title: v.name + ': ' + v.kriterien.map(k => (z.werte[k.key] ? '✓ ' : '☐ ') + k.name).join(', '),
+          onclick: () => abhaken(z.id, i) }, art === 'fertig' ? '✓' : f.erledigt + '/' + f.gesamt)));
+      });
+      tr.appendChild(el('td', { class: 'zahl mono', text: z.prozent !== null && !z.fehlt ? fmt(z.prozent) : '–' }));
+      if (!p.struktur.testat) tr.appendChild(noteZelle(z));
+      const fehlt = el('input', { type: 'checkbox', checked: z.fehlt ? true : null, disabled: fertig ? true : null, 'aria-label': z.name + ' fehlt' });
+      fehlt.addEventListener('change', async () => { if (await speichern(z.id, { fehlt: fehlt.checked })) detailZeichnen(); });
+      tr.appendChild(el('td', {}, fehlt));
+      zeilen.push(tr);
+    });
+    return el('div', { class: 'stapel', style: 'gap:8px' },
+      el('div', { class: 'r-scroll' }, el('table', { class: 'liste bewerten checkliste' }, el('thead', {}, kopf), el('tbody', {}, zeilen))),
+      el('p', { class: 'leise klein', text: 'Tipp auf einen Versuch: Haken setzen. ✓ = alle Haken, 1/3 = angefangen. Bei Team-Versuchen gilt der Haken für das ganze Team.' + (hatTeams(p) && !p.teams.length ? ' Teams legst du im Reiter „Teams“ an.' : '') }));
+  }
+
+  async function abhaken(sid, i) {
+    const p = E.pruefung;
+    const fertig = p.stand === 'ausgewertet';
+    const v = p.struktur.bereiche[i];
+    const z = E.schueler.find(x => x.id === sid);
+    const t = v.team && z.team_id ? p.teams.find(x => x.id === z.team_id) : null;
+    const wer = t ? t.mitglieder.map(id => (E.schueler.find(x => x.id === id) || {}).name).filter(Boolean).join(', ') : z.name;
+    await L.dialog({
+      titel: v.name, knopf: 'Fertig', abbrechen: null, fokus: false, speichern: () => true,
+      inhalt: el('div', { class: 'stapel', style: 'gap:8px' },
+        el('p', { class: 'klein' }, t ? el('span', { class: 'chip klein team', text: t.name }) : null, ' ' + wer),
+        el('div', { class: 'stapel abhaken' }, v.kriterien.map(k => el('label', { class: 'haken gross' },
+          el('input', { type: 'checkbox', checked: z.werte[k.key] ? true : null, disabled: fertig ? true : null,
+            onchange: ev => speichern(sid, { werte: { [k.key]: ev.target.checked ? true : null } }) }),
+          el('span', { text: k.name }), el('span', { class: 'leise klein', text: fmt(k.max) + ' P' })))),
+        v.team && !z.team_id ? el('p', { class: 'leise klein', text: 'Ohne Team: der Haken gilt nur für diesen Schüler.' }) : null),
+    });
+    detailZeichnen();
+  }
+
   // Feedbackbogen eines Schuelers im Overlay
   async function bogen(sid) {
     const p = E.pruefung;
@@ -404,8 +578,13 @@ const Pruefungen = (() => {
       z.rechenweg.map(r => el('div', { class: 'mono klein rechenweg-zeile', text: r })));
     };
     const setze = async (key, wert) => { if (await speichern(sid, { werte: { [key]: wert } })) zeigeErgebnis(); };
+    const teamText = b => {
+      if (!b.team || !z.team_id) return null;
+      const t = p.teams.find(x => x.id === z.team_id);
+      return el('span', { class: 'chip klein team', title: 'Gilt für alle im Team', text: 'Team ' + (t ? t.name + ': ' + t.mitglieder.length + ' Schüler' : '') });
+    };
     const bereiche = p.struktur.bereiche.map(b => el('section', { class: 'ov-ab' },
-      el('div', { class: 'ab-kopf' }, el('span', { text: b.name }), el('span', { class: 'leise klein', text: 'Gewicht ' + fmt(b.gewicht) })),
+      el('div', { class: 'ab-kopf' }, el('span', { text: b.name }), teamText(b), el('span', { class: 'leise klein', text: 'Gewicht ' + fmt(b.gewicht) })),
       el('div', { class: 'ab-inhalt' }, b.kriterien.map(k => {
         const wert = z.werte[k.key];
         let eingabe;
@@ -426,6 +605,9 @@ const Pruefungen = (() => {
         } else if (k.typ === 'haken') {
           eingabe = el('label', { class: 'haken' }, el('input', { type: 'checkbox', checked: wert ? true : null, disabled: fertig ? true : null,
             onchange: ev => setze(k.key, ev.target.checked ? true : null) }), 'erledigt (nur Information)');
+        } else if (k.typ === 'check') {
+          eingabe = el('label', { class: 'haken' }, el('input', { type: 'checkbox', checked: wert ? true : null, disabled: fertig ? true : null,
+            onchange: ev => setze(k.key, ev.target.checked ? true : null) }), fmt(k.max) + ' P');
         } else {
           const t = el('textarea', { rows: 2, disabled: fertig ? true : null, onchange: ev => setze(k.key, ev.target.value) });
           t.value = wert || '';
@@ -446,6 +628,23 @@ const Pruefungen = (() => {
 
   // Auswertung: Notenspiegel, Schnitt, Aufgaben bzw. Kriterien
   function auswertung() {
+    const st = E.statistik;
+    if (E.pruefung.erfassung === 'checkliste') {
+      const n = E.schueler.filter(z => z.aktiv && !z.fehlt).length || 1;
+      const fortschritt = el('div', { class: 'karte stapel' }, el('h3', { text: 'Fortschritt je Versuch' }),
+        el('table', { class: 'liste' }, el('tbody', {}, E.pruefung.struktur.bereiche.map((v, i) => el('tr', {},
+          el('td', { text: v.name + (v.team ? ' (Team)' : '') }),
+          el('td', { style: 'width:45%' }, el('div', { class: 'anteil' }, el('span', { style: 'width:' + Math.round(100 * st.fortschritt[i] / n) + '%' }))),
+          el('td', { class: 'mono zahl', text: st.fortschritt[i] + ' / ' + n }))))));
+      if (E.pruefung.struktur.testat) return fortschritt;
+      const rest = auswertungNoten();
+      rest.appendChild(fortschritt);
+      return rest;
+    }
+    return auswertungNoten();
+  }
+
+  function auswertungNoten() {
     const st = E.statistik;
     const stufen = Object.keys(st.spiegel);
     const hoechst = Math.max(1, ...Object.values(st.spiegel));

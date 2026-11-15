@@ -329,3 +329,38 @@ a.z-knopf:hover span:last-child { text-decoration: underline; }
 .lp tr.pruef-zeile td.auf { color: var(--rot); font-size: .8rem; font-weight: 600; }
 .lp tr.pruef-zeile td.auf .symbol { width: 15px; height: 15px; vertical-align: middle; margin-right: 4px; }
 .lp tr.pruef-zeile td.t.kann:hover { box-shadow: inset 0 0 0 2px var(--rot); cursor: pointer; }
+
+/* Wochenplan: Ausfall, Vertretung, verschoben deutlich als Band oben auf der Karte */
+:root { --b-ausfall: #c4314b; --b-vertreten: #c77800; --b-vertretung: #0f7f7f; --b-verschoben: #5d6b7a; }
+.wp-b .band { margin: -5px -28px 1px -8px; padding: 3px 30px 3px 8px; border-radius: 4px 2px 0 0; color: #fff; font-size: .7rem; line-height: 1.25;
+  display: flex; flex-wrap: wrap; gap: 2px 5px; align-items: center; }
+.wp-b .band b { text-transform: uppercase; letter-spacing: .04em; font-size: .66rem; }
+.wp-b .band span { font-weight: 500; opacity: .95; }
+.wp-b .band .symbol { width: 13px; height: 13px; }
+.wp-b.hat-band .mehr { color: #fff; top: 0; }
+.wp-b.band-ausfall { background: repeating-linear-gradient(135deg, #fdf2f4 0 5px, #f7dde2 5px 7px); border-color: #eab3bd; border-left-color: var(--kl); }
+.wp-b.band-ausfall .band { background: var(--b-ausfall); }
+.wp-b.band-ausfall .kl, .wp-b.band-ausfall .th { opacity: .6; }
+.wp-b.band-vertreten { background: #fff5e2; border: 1.5px dashed #e3a63b; border-left: 4px solid var(--kl); }
+.wp-b.band-vertreten .band { background: var(--b-vertreten); }
+.wp-b.band-vertretung { background: #e8f5f5; border: 1.5px dashed #6bb8b8; border-left: 4px solid var(--kl); }
+.wp-b.band-vertretung .band { background: var(--b-vertretung); }
+.wp-b.band-verschoben .band { background: var(--b-verschoben); }
+.wp-b.band-verschoben .kl, .wp-b.band-verschoben .th { opacity: .6; }
+.legende i.band-l { width: 16px; height: 10px; border-radius: 2px; display: inline-block; }
+.legende i.band-l.ausfall { background: var(--b-ausfall); } .legende i.band-l.vertreten { background: var(--b-vertreten); }
+.legende i.band-l.vertretung { background: var(--b-vertretung); } .legende i.band-l.verschoben { background: var(--b-verschoben); }
+
+/* D2a: Teams und Checkliste */
+.chip.team { background: #efe8f7; border-color: #c9b3e3; color: #5b3a8a; }
+.bewerten tr.team-kopf td { background: #f6f2fb; padding-top: 6px; padding-bottom: 4px; }
+.checkliste button.versuch { min-height: 32px; min-width: 52px; padding: 2px 8px; font-family: var(--mono); font-weight: 700; border-radius: 6px; }
+.checkliste button.versuch.fertig { background: #e7f2c8; border-color: #9fb83a; color: #4d5c00; }
+.checkliste button.versuch.teil { background: #fdf1d6; border-color: #e3b44b; color: #7a4f00; }
+.checkliste button.versuch.offen { background: var(--karte); color: var(--leise); }
+.abhaken label.haken.gross { display: flex; gap: 10px; align-items: center; min-height: 48px; padding: 6px 10px; border: 1px solid var(--linie); border-radius: 8px; font-size: 1rem; }
+.abhaken label.haken.gross input { width: 24px; height: 24px; }
+.abhaken label.haken.gross .leise { margin-left: auto; }
+.team-wahl { max-height: 50vh; overflow: auto; }
+.ka .segment { flex: none; white-space: nowrap; }
+.ka .segment button { white-space: nowrap; }

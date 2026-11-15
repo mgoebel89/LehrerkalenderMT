@@ -23,14 +23,15 @@ import csv
 import datetime
 import io
 import json
+import random
 import re
 import unicodedata
 
 from . import db, grunddaten, notenschluessel, stundenplan
 
 ARTEN = {"schriftlich": "schriftlich", "muendlich": "mündlich", "praktisch": "praktisch", "portfolio": "Portfolio"}
-ERFASSUNGEN = ("aufgaben", "gesamt", "bogen")
-TYPEN = ("stufen", "punkte", "haken", "text")
+ERFASSUNGEN = ("aufgaben", "gesamt", "bogen", "checkliste")
+TYPEN = ("stufen", "punkte", "haken", "text", "check")   # check = Haken mit Punkten (Checkliste)
 STAENDE = ("geplant", "angekuendigt", "durchgefuehrt", "ausgewertet")
 STANDARD_STUFEN = [{"name": "nicht erkennbar", "punkte": 0}, {"name": "ansatzweise", "punkte": 1},
                    {"name": "überwiegend", "punkte": 2}, {"name": "vollständig", "punkte": 3}]
@@ -224,6 +225,8 @@ def struktur_pruefen(struktur):
             neu = {"key": key, "name": kname, "typ": typ}
             if typ == "punkte":
                 neu["max"] = _zahl(k.get("max"), "Höchstpunkte von „%s“" % kname, 0.5, 1000)
+            if typ == "check":
+                neu["max"] = _zahl(k.get("max") if k.get("max") not in (None, "") else 1, "Punkte von „%s“" % kname, 0.5, 1000)
             if typ == "stufen":
                 stufen = k.get("stufen") or STANDARD_STUFEN
                 if not isinstance(stufen, list) or not 2 <= len(stufen) <= 8:
@@ -236,8 +239,11 @@ def struktur_pruefen(struktur):
             if typ in ("stufen", "punkte") and k.get("gewicht") not in (None, ""):
                 neu["gewicht"] = _zahl(k.get("gewicht"), "Gewicht von „%s“" % kname, 0.01, 100)
             ks.append(neu)
-        sauber.append({"name": name, "gewicht": gewicht, "kriterien": ks})
-    return {"bereiche": sauber}
+        sauber.append({"name": name, "gewicht": gewicht, "kriterien": ks, "team": bool(b.get("team"))})
+    ergebnis_ = {"bereiche": sauber}
+    if struktur.get("testat"):
+        ergebnis_["testat"] = True
+    return ergebnis_
 
 
 def _kriterien(struktur):
@@ -248,11 +254,15 @@ def _kriterien(struktur):
 
 def _kriterium_prozent(k, wert):
     """Anteil (0..1) eines bewerteten Kriteriums, sonst None; dazu Text fuer den Rechenweg."""
-    if wert in (None, ""):
+    if k["typ"] == "check":
+        wert = bool(wert)
+    elif wert in (None, ""):
         return None, None
     if k["typ"] == "punkte":
         p = float(wert)
         return p / k["max"], "%s %s/%s P" % (k["name"], _fmt(p), _fmt(k["max"]))
+    if k["typ"] == "check":
+        return (1.0 if wert else 0.0), "%s %s" % (k["name"], ("✓ " + _fmt(k["max"]) + " P") if wert else "–")
     if k["typ"] == "stufen":
         hoechst = max(st["punkte"] for st in k["stufen"])
         st = k["stufen"][int(wert)]
@@ -277,36 +287,46 @@ def berechnen(erfassung, struktur, max_punkte, werte):
         bg = bz = 0.0
         punkte_erreicht = punkte_max = 0.0
         for k in b["kriterien"]:
-            if k["typ"] not in ("punkte", "stufen"):
+            if k["typ"] not in ("punkte", "stufen", "check"):
                 continue
             anteil, text = _kriterium_prozent(k, werte.get(k["key"]))
             if anteil is None:
                 fehlend.append(k["name"])
                 continue
             # Punkte zaehlen standardmaessig mit ihren Hoechstpunkten (Klassenarbeit: Summe/Summe), Stufen mit 1
-            g = k.get("gewicht", k["max"] if k["typ"] == "punkte" else 1.0)
+            g = k.get("gewicht", k["max"] if k["typ"] in ("punkte", "check") else 1.0)
             bg += g
             bz += g * anteil
             if k["typ"] == "punkte":
                 punkte_erreicht += float(werte[k["key"]])
+                punkte_max += k["max"]
+            elif k["typ"] == "check":
+                punkte_erreicht += k["max"] * anteil
                 punkte_max += k["max"]
             teile.append(text + (" ×" + _fmt(k["gewicht"]) if "gewicht" in k else ""))
         if bg == 0:
             bereiche.append({"name": b["name"], "gewicht": b["gewicht"], "prozent": None})
             continue
         bp = 100.0 * bz / bg
-        bereiche.append({"name": b["name"], "gewicht": b["gewicht"], "prozent": bp})
-        summe_gewicht += b["gewicht"]
-        summe += b["gewicht"] * bp
+        gewicht = punkte_max if erfassung == "checkliste" else b["gewicht"]   # Checkliste: Summe der Punkte / Summe
+        bereiche.append({"name": b["name"], "gewicht": gewicht, "prozent": bp})
+        summe_gewicht += gewicht
+        summe += gewicht * bp
         if erfassung == "aufgaben":
             rechenweg.append("%s von %s Punkten = %s %%" % (_fmt(punkte_erreicht), _fmt(punkte_max), _fmt(bp)))
+        elif erfassung == "checkliste":
+            rechenweg.append("%s: %s von %s Punkten" % (b["name"], _fmt(punkte_erreicht), _fmt(punkte_max)))
         else:
             rechenweg.append("%s (Gewicht %s): %s → %s %%" % (b["name"], _fmt(b["gewicht"]), "; ".join(teile), _fmt(bp)))
     if summe_gewicht == 0:
         return {"prozent": None, "rechenweg": rechenweg, "fehlend": fehlend, "bereiche": bereiche}
+    if erfassung == "checkliste" and not any(werte.get(k["key"]) for k in _kriterien(struktur)):
+        return {"prozent": None, "rechenweg": [], "fehlend": [], "bereiche": bereiche}   # noch nichts abgehakt: keine Note
     prozent = summe / summe_gewicht
     gewertet = [b for b in bereiche if b["prozent"] is not None]
-    if len(gewertet) > 1:
+    if erfassung == "checkliste":
+        rechenweg.append("Gesamt: %s von %s Punkten = %s %%" % (_fmt(summe / 100.0), _fmt(summe_gewicht), _fmt(prozent)))
+    elif len(gewertet) > 1:
         rechenweg.append("Gesamt: (" + " + ".join("%s × %s" % (_fmt(b["gewicht"]), _fmt(b["prozent"])) for b in gewertet)
                          + ") / %s = %s %%" % (_fmt(summe_gewicht), _fmt(prozent)))
     return {"prozent": prozent, "rechenweg": rechenweg, "fehlend": fehlend, "bereiche": bereiche}
@@ -445,6 +465,19 @@ def pruefung_speichern(con, lid, daten, pid=None):
             struktur = struktur_pruefen({"bereiche": [{"name": "Aufgaben", "gewicht": 1, "kriterien": [
                 {"key": a.get("key"), "name": a.get("name") or "Aufgabe %d" % (i + 1), "typ": "punkte", "max": a.get("max")}
                 for i, a in enumerate(aufgaben) if isinstance(a, dict)]}]})
+    elif erfassung == "checkliste":
+        versuche = daten.get("versuche")
+        if versuche is None and alt is not None and alt["erfassung"] == "checkliste":
+            struktur = json.loads(alt["struktur"])
+        else:
+            if not isinstance(versuche, list) or not versuche:
+                raise PruefungFehler("Bitte mindestens einen Versuch mit Haken anlegen.")
+            struktur = {"bereiche": [{"name": v.get("name"), "gewicht": 1, "team": bool(v.get("team")), "kriterien": [
+                {"key": h.get("key"), "name": h.get("name"), "typ": "check", "max": h.get("punkte")}
+                for h in (v.get("haken") or []) if isinstance(h, dict)]} for v in versuche if isinstance(v, dict)]}
+        if "testat" in daten:
+            struktur["testat"] = bool(daten.get("testat"))
+        struktur = struktur_pruefen(struktur)
     else:
         vid = _id(daten.get("vorlage_id"))
         if daten.get("struktur") is not None:
@@ -458,6 +491,10 @@ def pruefung_speichern(con, lid, daten, pid=None):
             struktur = json.loads(alt["struktur"])
         else:
             raise PruefungFehler("Bitte eine Feedbackbogen-Vorlage wählen.")
+        team = daten.get("team_bereiche")
+        if isinstance(team, list):                       # Bereiche, die fuers ganze Team gelten
+            for i, b in enumerate(struktur["bereiche"]):
+                b["team"] = i in team
     nsid = _id(daten.get("notenschluessel_id"))
     if nsid is not None:
         s = notenschluessel.holen(con, nsid)
@@ -509,6 +546,88 @@ def _termine_pruefen(con, lid, kid, termine):
                          "beginn": stundenplan._uhrzeit(t.get("beginn"), "den Block")})
     ergebnis.sort(key=lambda t: (t["datum"], t["beginn"]))
     return ergebnis
+
+
+# --- Teams einer Pruefung ---
+
+def _team_keys(struktur):
+    """Schluessel der Kriterien in Team-Bereichen."""
+    return {k["key"] for b in struktur["bereiche"] if b.get("team") for k in b["kriterien"]}
+
+
+def teams(con, pid):
+    """[{id, name, mitglieder: [schueler_id], werte}] in Reihenfolge."""
+    mitglieder = {}
+    for z in con.execute("SELECT team_id, schueler_id FROM pruefung_team_mitglied WHERE pruefung_id = ?", (pid,)):
+        mitglieder.setdefault(z["team_id"], []).append(z["schueler_id"])
+    return [{"id": z["id"], "name": z["name"], "mitglieder": mitglieder.get(z["id"], []), "werte": json.loads(z["werte"])}
+            for z in con.execute("SELECT * FROM pruefung_team WHERE pruefung_id = ? ORDER BY reihenfolge, id", (pid,))]
+
+
+def _team(con, pid, tid):
+    z = con.execute("SELECT * FROM pruefung_team WHERE id = ? AND pruefung_id = ?", (tid, pid)).fetchone()
+    if z is None:
+        raise PruefungFehler("Dieses Team gibt es nicht.")
+    return z
+
+
+def _mitglieder_setzen(con, lid, p, tid, ids):
+    if not isinstance(ids, list):
+        raise PruefungFehler("Ungültige Mitglieder.")
+    erlaubt = {s["id"] for s in schueler(con, lid, p["klasse_id"])}
+    ids = [i for i in (_id(x) for x in ids) if i is not None]
+    if any(i not in erlaubt for i in ids):
+        raise PruefungFehler("Ein Schüler gehört nicht zur Klasse der Prüfung.")
+    con.execute("DELETE FROM pruefung_team_mitglied WHERE team_id = ?", (tid,))
+    for i in ids:   # wer schon in einem anderen Team ist, wechselt hierher
+        con.execute("DELETE FROM pruefung_team_mitglied WHERE pruefung_id = ? AND schueler_id = ?", (p["id"], i))
+        con.execute("INSERT INTO pruefung_team_mitglied (pruefung_id, team_id, schueler_id) VALUES (?, ?, ?)", (p["id"], tid, i))
+
+
+def team_speichern(con, lid, pid, daten, tid=None):
+    """Team anlegen bzw. aendern: name, schueler_ids (Schueler wechseln aus anderen Teams hierher)."""
+    p = _pruefung(con, lid, pid)
+    if p["stand"] == "ausgewertet":
+        raise PruefungFehler("Die Prüfung ist abgeschlossen. Bitte zuerst wieder öffnen.")
+    if tid is None:
+        n = con.execute("SELECT COUNT(*) FROM pruefung_team WHERE pruefung_id = ?", (pid,)).fetchone()[0]
+        name = _text(daten.get("name"), "einen Namen", 60, pflicht=False) or "Team %d" % (n + 1)
+        tid = con.execute("INSERT INTO pruefung_team (pruefung_id, name, reihenfolge, geaendert) VALUES (?, ?, ?, ?)",
+                          (pid, name, n + 1, db.jetzt())).lastrowid
+    else:
+        _team(con, pid, tid)
+        if "name" in daten:
+            con.execute("UPDATE pruefung_team SET name = ? WHERE id = ?", (_text(daten.get("name"), "einen Namen", 60), tid))
+    if "schueler_ids" in daten:
+        _mitglieder_setzen(con, lid, p, tid, daten.get("schueler_ids"))
+    return tid
+
+
+def team_loeschen(con, lid, pid, tid):
+    _pruefung(con, lid, pid)
+    _team(con, pid, tid)
+    con.execute("DELETE FROM pruefung_team WHERE id = ?", (tid,))
+
+
+def teams_bilden(con, lid, pid, groesse, zufall=None):
+    """Alle Teams neu bilden: aktive Schueler zufaellig in Teams der Groesse 2-6; ein Rest von einem kommt ins letzte
+    Team. Vorhandene Teams (samt ihren Teamwerten) werden ersetzt."""
+    p = _pruefung(con, lid, pid)
+    if p["stand"] == "ausgewertet":
+        raise PruefungFehler("Die Prüfung ist abgeschlossen. Bitte zuerst wieder öffnen.")
+    groesse = int(_zahl(groesse, "die Teamgröße", 2, 6))
+    ids = [s["id"] for s in schueler(con, lid, p["klasse_id"], nur_aktive=True)]
+    (zufall or random).shuffle(ids)
+    gruppen_ = [ids[i:i + groesse] for i in range(0, len(ids), groesse)]
+    if len(gruppen_) > 1 and len(gruppen_[-1]) == 1:
+        gruppen_[-2].extend(gruppen_.pop())
+    con.execute("DELETE FROM pruefung_team WHERE pruefung_id = ?", (pid,))
+    for n, g in enumerate(gruppen_):
+        tid = con.execute("INSERT INTO pruefung_team (pruefung_id, name, reihenfolge, geaendert) VALUES (?, ?, ?, ?)",
+                          (pid, "Team %d" % (n + 1), n + 1, db.jetzt())).lastrowid
+        for i in g:
+            con.execute("INSERT INTO pruefung_team_mitglied (pruefung_id, team_id, schueler_id) VALUES (?, ?, ?)", (pid, tid, i))
+    return len(gruppen_)
 
 
 def termine(con, p):
@@ -618,7 +737,7 @@ def _werte_pruefen(p, werte):
         elif k["typ"] == "stufen":
             i = int(_zahl(wert, k["name"], 0, len(k["stufen"]) - 1))
             sauber[key] = i
-        elif k["typ"] == "haken":
+        elif k["typ"] in ("haken", "check"):
             sauber[key] = bool(wert)
         else:
             sauber[key] = _text(wert, k["name"], 2000, pflicht=False)
@@ -635,18 +754,26 @@ def bewertung_setzen(con, lid, pid, sid, daten):
         raise PruefungFehler("Der Schüler gehört nicht zur Klasse der Prüfung.")
     alt = con.execute("SELECT * FROM bewertung WHERE pruefung_id = ? AND schueler_id = ?", (pid, sid)).fetchone()
     werte = json.loads(alt["werte"]) if alt else {}
+    team = con.execute("SELECT t.* FROM pruefung_team_mitglied m JOIN pruefung_team t ON t.id = m.team_id "
+                       "WHERE m.pruefung_id = ? AND m.schueler_id = ?", (pid, sid)).fetchone()
+    team_keys = _team_keys(p["struktur"]) if team else set()
+    team_werte = json.loads(team["werte"]) if team else {}
     for key, wert in _werte_pruefen(p, daten.get("werte") or {}).items():
+        ziel = team_werte if key in team_keys else werte      # Team-Kriterium: gilt fuer alle Mitglieder
         if wert is None:
-            werte.pop(key, None)
+            ziel.pop(key, None)
         else:
-            werte[key] = wert
+            ziel[key] = wert
+    if team:
+        con.execute("UPDATE pruefung_team SET werte = ?, geaendert = ? WHERE id = ?",
+                    (json.dumps(team_werte, ensure_ascii=False), db.jetzt(), team["id"]))
     fehlt = (1 if daten["fehlt"] else 0) if "fehlt" in daten else (alt["fehlt"] if alt else 0)
     notiz = _text(daten["notiz"], "die Notiz", 4000, pflicht=False) if "notiz" in daten else (alt["notiz"] if alt else "")
     con.execute("INSERT INTO bewertung (pruefung_id, schueler_id, werte, fehlt, notiz, geaendert) VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT (pruefung_id, schueler_id) DO UPDATE SET werte = excluded.werte, fehlt = excluded.fehlt, "
                 "notiz = excluded.notiz, geaendert = excluded.geaendert",
                 (pid, sid, json.dumps(werte, ensure_ascii=False), fehlt, notiz, db.jetzt()))
-    if p["stand"] in ("geplant", "angekuendigt") and werte:
+    if p["stand"] in ("geplant", "angekuendigt") and (werte or team_werte):
         con.execute("UPDATE pruefung SET stand = 'durchgefuehrt' WHERE id = ?", (pid,))
 
 
@@ -662,12 +789,22 @@ def ergebnis(con, lid, pid):
     p = _aus_zeile(_pruefung(con, lid, pid), con, lid)
     schluessel, herkunft = schluessel_fuer(con, lid, p)
     bew = {z["schueler_id"]: z for z in con.execute("SELECT * FROM bewertung WHERE pruefung_id = ?", (pid,))}
+    p["teams"] = teams(con, pid)
+    team_von = {sid: t for t in p["teams"] for sid in t["mitglieder"]}
+    team_keys = _team_keys(p["struktur"]) if p["erfassung"] in ("bogen", "checkliste") else set()
+    testat = bool(p["struktur"].get("testat"))
+    if testat:
+        schluessel, herkunft = None, "Nur Testat: ohne Note"
     zeilen = []
     for s in schueler(con, lid, p["klasse_id"]):
         b = bew.get(s["id"])
-        if not s["aktiv"] and not b:
+        team = team_von.get(s["id"])
+        if not s["aktiv"] and not b and not team:
             continue
         werte = json.loads(b["werte"]) if b else {}
+        if team:
+            werte = {k: v for k, v in werte.items() if k not in team_keys}
+            werte.update({k: v for k, v in team["werte"].items() if k in team_keys})
         fehlt = bool(b["fehlt"]) if b else False
         r = berechnen(p["erfassung"], p["struktur"], p["max_punkte"], werte) if not fehlt else \
             {"prozent": None, "rechenweg": [], "fehlend": [], "bereiche": []}
@@ -676,7 +813,13 @@ def ergebnis(con, lid, pid):
             note = notenschluessel.note(schluessel["system"], schluessel["grenzen"], r["prozent"])
             r["rechenweg"].append("%s (%s): %s %% → %s" % (schluessel["name"], notenschluessel.SYSTEMNAME[schluessel["system"]],
                                                        _fmt(round(r["prozent"]), 0), note["text"]))
+        versuche = []
+        if p["erfassung"] == "checkliste":
+            for bereich in p["struktur"]["bereiche"]:
+                ks = [k for k in bereich["kriterien"] if k["typ"] == "check"]
+                versuche.append({"erledigt": sum(1 for k in ks if werte.get(k["key"])), "gesamt": len(ks)})
         zeilen.append({"id": s["id"], "name": s["name"], "gruppe": s["gruppe"], "aktiv": s["aktiv"], "werte": werte, "fehlt": fehlt,
+                       "team_id": team["id"] if team else None, "team": team["name"] if team else "", "versuche": versuche,
                        "notiz": b["notiz"] if b else "", "prozent": r["prozent"], "note": note, "rechenweg": r["rechenweg"],
                        "fehlend": r["fehlend"], "bereiche": r["bereiche"]})
     # Statistik
@@ -695,7 +838,12 @@ def ergebnis(con, lid, pid):
         anteile = [a for a in (_kriterium_prozent(k, z["werte"].get(k["key"]))[0] for z in zeilen if not z["fehlt"]) if a is not None]
         aufgaben.append({"key": k["key"], "name": k["name"], "max": k.get("max"), "anzahl": len(anteile),
                          "prozent": 100.0 * sum(anteile) / len(anteile) if anteile else None})
-    statistik = {"schueler": len([z for z in zeilen if z["aktiv"]]), "bewertet": len(noten),
+    if p["erfassung"] == "checkliste":
+        aktiv = [z for z in zeilen if z["aktiv"] and not z["fehlt"]]
+        fortschritt = [sum(1 for z in aktiv if z["versuche"][i]["erledigt"] == z["versuche"][i]["gesamt"]) for i in range(len(p["struktur"]["bereiche"]))]
+    else:
+        fortschritt = []
+    statistik = {"schueler": len([z for z in zeilen if z["aktiv"]]), "bewertet": len(noten), "fortschritt": fortschritt,
                  "fehlt": len([z for z in zeilen if z["fehlt"]]),
                  "offen": len([z for z in zeilen if z["aktiv"] and not z["fehlt"] and z["prozent"] is None]),
                  "unvollstaendig": len([z for z in zeilen if z["prozent"] is not None and z["fehlend"]]),
@@ -708,7 +856,7 @@ def ergebnis(con, lid, pid):
 def abschliessen(con, lid, pid):
     """Pruefung abschliessen: Schluessel einfrieren, Stand 'ausgewertet'. Rueckgabe: Warnungen (offene/unvollstaendige)."""
     e = ergebnis(con, lid, pid)
-    if e["schluessel"] is None:
+    if e["schluessel"] is None and not e["pruefung"]["struktur"].get("testat"):
         raise PruefungFehler("Ohne Notenschlüssel lässt sich nicht abschließen. Der Admin trägt den Konferenzschlüssel ein.")
     con.execute("UPDATE pruefung SET stand = 'ausgewertet', schluessel_fest = ?, geaendert = ? WHERE id = ?",
                 (json.dumps(e["schluessel"], ensure_ascii=False), db.jetzt(), pid))

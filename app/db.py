@@ -410,6 +410,55 @@ MIGRATIONEN = [
         beginn TEXT NOT NULL,
         UNIQUE (pruefung_id, gruppe_id))
     """,
+    # 13: Stufe D2a: Erfassung "checkliste" (Laborreihen: Versuche mit Haken und Punkten). Die Pruefungstabelle wird ohne
+    #     festen CHECK fuer die Erfassung neu aufgebaut (geprueft wird im Code). Teams je Pruefung: Bereiche mit
+    #     "team": true gelten fuer alle Mitglieder (Werte in pruefung_team.werte).
+    (True, """
+    CREATE TABLE pruefung_neu (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        klasse_id INTEGER NOT NULL REFERENCES klasse(id),
+        gruppe_id INTEGER REFERENCES gruppe(id),
+        schuljahr_id INTEGER NOT NULL REFERENCES schuljahr(id),
+        titel TEXT NOT NULL,
+        art TEXT NOT NULL,
+        form TEXT NOT NULL CHECK (form IN ('termin', 'fenster')),
+        datum TEXT,
+        beginn TEXT,
+        bloecke INTEGER NOT NULL DEFAULT 1,
+        fenster_von TEXT,
+        fenster_bis TEXT,
+        erfassung TEXT NOT NULL,
+        struktur TEXT NOT NULL DEFAULT '{"bereiche": []}',
+        max_punkte REAL,
+        notenschluessel_id INTEGER REFERENCES notenschluessel(id) ON DELETE SET NULL,
+        lernfeld_id INTEGER REFERENCES lernfeld(id) ON DELETE SET NULL,
+        stand TEXT NOT NULL DEFAULT 'geplant',
+        schluessel_fest TEXT,
+        erstellt TEXT NOT NULL,
+        geaendert TEXT NOT NULL,
+        teilung TEXT NOT NULL DEFAULT 'zusammen');
+    INSERT INTO pruefung_neu (id, lehrkraft_id, klasse_id, gruppe_id, schuljahr_id, titel, art, form, datum, beginn, bloecke, fenster_von,
+        fenster_bis, erfassung, struktur, max_punkte, notenschluessel_id, lernfeld_id, stand, schluessel_fest, erstellt, geaendert, teilung)
+        SELECT id, lehrkraft_id, klasse_id, gruppe_id, schuljahr_id, titel, art, form, datum, beginn, bloecke, fenster_von,
+        fenster_bis, erfassung, struktur, max_punkte, notenschluessel_id, lernfeld_id, stand, schluessel_fest, erstellt, geaendert, teilung
+        FROM pruefung;
+    DROP TABLE pruefung;
+    ALTER TABLE pruefung_neu RENAME TO pruefung;
+    CREATE INDEX pruefung_strang ON pruefung (lehrkraft_id, klasse_id, schuljahr_id);
+    CREATE TABLE pruefung_team (
+        id INTEGER PRIMARY KEY,
+        pruefung_id INTEGER NOT NULL REFERENCES pruefung(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        reihenfolge INTEGER NOT NULL DEFAULT 0,
+        werte TEXT NOT NULL DEFAULT '{}',
+        geaendert TEXT NOT NULL);
+    CREATE TABLE pruefung_team_mitglied (
+        pruefung_id INTEGER NOT NULL REFERENCES pruefung(id) ON DELETE CASCADE,
+        team_id INTEGER NOT NULL REFERENCES pruefung_team(id) ON DELETE CASCADE,
+        schueler_id INTEGER NOT NULL REFERENCES schueler(id) ON DELETE CASCADE,
+        PRIMARY KEY (pruefung_id, schueler_id))
+    """),
 ]
 
 

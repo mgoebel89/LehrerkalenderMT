@@ -713,6 +713,23 @@ def api_abschliessen(h, con, daten, pid):
     h.antwort(200, e)
 
 
+def api_team(h, con, daten, pid, tid=None, loeschen=False):
+    k = h.konto(con)
+    with db.transaktion(con):
+        if loeschen:
+            pruefungen.team_loeschen(con, k["id"], _ganzzahl(pid), _ganzzahl(tid))
+        else:
+            pruefungen.team_speichern(con, k["id"], _ganzzahl(pid), daten, None if tid is None else _ganzzahl(tid))
+    h.antwort(200, pruefungen.ergebnis(con, k["id"], int(pid)))
+
+
+def api_teams_bilden(h, con, daten, pid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        pruefungen.teams_bilden(con, k["id"], _ganzzahl(pid), daten.get("groesse"))
+    h.antwort(200, pruefungen.ergebnis(con, k["id"], int(pid)))
+
+
 def api_wieder_oeffnen(h, con, daten, pid):
     k = h.konto(con)
     with db.transaktion(con):
@@ -874,6 +891,10 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/pruefung/" + ID + "/bewertung/" + ID, api_bewertung),
     ("POST", r"/api/pruefung/" + ID + "/abschliessen", api_abschliessen),
     ("POST", r"/api/pruefung/" + ID + "/oeffnen", api_wieder_oeffnen),
+    ("POST", r"/api/pruefung/" + ID + "/team", lambda h, con, d, pid: api_team(h, con, d, pid)),
+    ("POST", r"/api/pruefung/" + ID + "/team/" + ID, lambda h, con, d, pid, tid: api_team(h, con, d, pid, tid)),
+    ("POST", r"/api/pruefung/" + ID + "/team/" + ID + "/loeschen", lambda h, con, d, pid, tid: api_team(h, con, d, pid, tid, True)),
+    ("POST", r"/api/pruefung/" + ID + "/teams/bilden", api_teams_bilden),
     ("POST", r"/api/notenschluessel/standard", api_standard_schluessel),
     ("POST", r"/api/abo", _abo_schritt(lambda con, k, d, _: abos.speichern(con, k, d), "abo_angelegt")),
     ("POST", r"/api/abo/" + ID, _abo_schritt(lambda con, k, d, i: abos.speichern(con, k, d, i), "abo_geaendert")),

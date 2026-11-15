@@ -265,5 +265,72 @@ class GetrenntSchreiben(MitPruefung):
         self.assertEqual({o["thema"] for o in offen}, {"SPS"})        # die Arbeit am 04.12. rutscht nicht nach vorn
 
 
+class LaborUndTeams(MitPruefung):
+    def reihe(self, **mehr):
+        return pruefungen.pruefung_speichern(self.con, self.lid, self.strang(**dict(
+            titel="Laborreihe Pneumatik", art="praktisch", form="fenster", fenster_von="2026-11-16", fenster_bis="2026-12-11",
+            erfassung="checkliste", versuche=[
+                {"name": "V1 Zylinder", "team": True, "haken": [{"name": "Aufbau", "punkte": 2}, {"name": "Messung", "punkte": 2}]},
+                {"name": "V2 Ventile", "team": False, "haken": [{"name": "Protokoll", "punkte": 4}]}]), **mehr))
+
+    def test_checkliste_mit_team_und_einzel(self):
+        pid = self.reihe()
+        s = self.ids()
+        e = pruefungen.ergebnis(self.con, self.lid, pid)
+        v1, v2 = e["pruefung"]["struktur"]["bereiche"]
+        self.assertEqual((v1["team"], v2["team"], v1["kriterien"][0]["typ"]), (True, False, "check"))
+        t = pruefungen.team_speichern(self.con, self.lid, pid, {"schueler_ids": [s["Weiß"], s["Schmitt"]]})
+        # Haken im Team-Versuch bei Weiß gilt auch fuer Schmitt; V2 ist einzeln
+        pruefungen.bewertung_setzen(self.con, self.lid, pid, s["Weiß"], {"werte": {v1["kriterien"][0]["key"]: True, v2["kriterien"][0]["key"]: True}})
+        e = pruefungen.ergebnis(self.con, self.lid, pid)
+        z = {x["name"].split(",")[0]: x for x in e["schueler"]}
+        self.assertEqual([v["erledigt"] for v in z["Weiß"]["versuche"]], [1, 1])
+        self.assertEqual([v["erledigt"] for v in z["Schmitt"]["versuche"]], [1, 0])
+        self.assertEqual((z["Weiß"]["team"], z["Yılmaz"]["team"]), ("Team 1", ""))
+        self.assertAlmostEqual(z["Weiß"]["prozent"], 75.0)       # 2 + 4 von 8 Punkten
+        self.assertAlmostEqual(z["Schmitt"]["prozent"], 25.0)    # 2 von 8
+        self.assertIsNone(z["Yılmaz"]["prozent"])               # noch nichts abgehakt: (noch) keine Note
+        self.assertEqual(z["Weiß"]["rechenweg"][-2:], ["Gesamt: 6 von 8 Punkten = 75 %", "Konferenz BS (Tendenznoten): 75 % → 3+"])
+        self.assertEqual(e["statistik"]["fortschritt"], [0, 1])  # V1 bei niemandem ganz fertig, V2 bei einem
+        # Team aufloesen: Schmitt verliert den Teamhaken
+        pruefungen.team_loeschen(self.con, self.lid, pid, t)
+        z = {x["name"].split(",")[0]: x for x in pruefungen.ergebnis(self.con, self.lid, pid)["schueler"]}
+        self.assertEqual([v["erledigt"] for v in z["Schmitt"]["versuche"]], [0, 0])
+
+    def test_testat_ohne_note_und_teams_bilden(self):
+        pid = self.reihe(testat=True)
+        e = pruefungen.ergebnis(self.con, self.lid, pid)
+        self.assertTrue(e["pruefung"]["struktur"]["testat"])
+        self.assertIsNone(e["schluessel"])
+        self.assertTrue(all(z["note"] is None for z in e["schueler"]))
+        self.assertEqual(pruefungen.abschliessen(self.con, self.lid, pid), ["3 ohne Bewertung"])   # ohne Schluessel moeglich
+        pruefungen.wieder_oeffnen(self.con, self.lid, pid)
+        n = pruefungen.teams_bilden(self.con, self.lid, pid, 2)
+        teams = pruefungen.teams(self.con, pid)
+        self.assertEqual((n, sorted(len(t["mitglieder"]) for t in teams)), (1, [3]))   # 3 Schueler, Rest von 1 kommt dazu
+        # Aenderung ohne neue Versuche behaelt die Struktur
+        pruefungen.pruefung_speichern(self.con, self.lid, {"titel": "Laborreihe", "form": "fenster", "fenster_von": "2026-11-16",
+                                                           "fenster_bis": "2026-12-11", "erfassung": "checkliste", "testat": False}, pid)
+        st = pruefungen.ergebnis(self.con, self.lid, pid)["pruefung"]["struktur"]
+        self.assertEqual((len(st["bereiche"]), st.get("testat")), (2, None))
+
+    def test_bogen_mit_teambereich(self):
+        vid = pruefungen.vorlage_speichern(self.con, self.lid, {"name": "Präsentation", "art": "bogen", "struktur": {"bereiche": [
+            {"name": "Präsentation", "gewicht": 1, "kriterien": [{"name": "Gestaltung", "typ": "punkte", "max": 10}]},
+            {"name": "Fachgespräch", "gewicht": 1, "kriterien": [{"name": "Fachwissen", "typ": "punkte", "max": 10}]}]}})
+        pid = pruefungen.pruefung_speichern(self.con, self.lid, self.strang(titel="Projekt", art="muendlich", form="termin", datum="2026-11-20",
+                                                                            beginn="07:45", erfassung="bogen", vorlage_id=vid, team_bereiche=[0]))
+        s = self.ids()
+        pruefungen.team_speichern(self.con, self.lid, pid, {"name": "Roboter", "schueler_ids": [s["Weiß"], s["Yılmaz"]]})
+        st = pruefungen.ergebnis(self.con, self.lid, pid)["pruefung"]["struktur"]
+        g, f = st["bereiche"][0]["kriterien"][0]["key"], st["bereiche"][1]["kriterien"][0]["key"]
+        pruefungen.bewertung_setzen(self.con, self.lid, pid, s["Yılmaz"], {"werte": {g: 8, f: 4}})
+        pruefungen.bewertung_setzen(self.con, self.lid, pid, s["Weiß"], {"werte": {f: 10}})
+        z = {x["name"].split(",")[0]: x for x in pruefungen.ergebnis(self.con, self.lid, pid)["schueler"]}
+        self.assertEqual((z["Weiß"]["werte"], z["Yılmaz"]["werte"]), ({g: 8, f: 10}, {g: 8, f: 4}))
+        self.assertAlmostEqual(z["Weiß"]["prozent"], 90.0)
+        self.assertEqual(z["Weiß"]["team"], "Roboter")
+
+
 if __name__ == "__main__":
     unittest.main()
