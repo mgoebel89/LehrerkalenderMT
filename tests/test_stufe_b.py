@@ -134,9 +134,12 @@ class Stundenplan(MitStundenplan):
 class Aenderungen(MitStundenplan):
     def test_ausfall_vertreten_und_zuruecknehmen(self):
         aid = stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "ausfall", "datum": "2026-11-16", "beginn": "07:45", "grund": "Exkursion"})
-        stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "vertreten", "datum": "2026-11-16", "beginn": "09:30", "wer": "Kollege R."})
+        stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "vertreten", "datum": "2026-11-16", "beginn": "09:30", "wer": "Kollege R.",
+                                                           "thema_weiter": False})
         w = self.woche("2026-11-16")
         self.assertEqual([b["zustand"] for b in w["bloecke"] if b["datum"] == "2026-11-16"], ["ausfall", "vertreten"])
+        with self.assertRaises(stundenplan.StundenplanFehler):   # Vertretung ohne Wahl "Thema weiter / eigener Stoff"
+            stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "vertreten", "datum": "2026-11-18", "beginn": "11:30"})
         with self.assertRaises(stundenplan.StundenplanFehler):   # doppelt
             stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "ausfall", "datum": "2026-11-16", "beginn": "07:45"})
         with self.assertRaises(stundenplan.StundenplanFehler):   # dort ist kein Unterricht

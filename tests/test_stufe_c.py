@@ -220,6 +220,30 @@ class IstStand(MitPlanung):
         self.assertEqual(planung.ist_alle_bestaetigen(self.con, self.lid, jetzt="2026-11-24T08:00:00"), 2)
         self.assertEqual(planung.offene_ist(self.con, self.lid, jetzt="2026-11-24T08:00:00"), [])
 
+    def test_vertretung_mit_und_ohne_thema(self):
+        stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "vertreten", "datum": "2026-11-20", "beginn": "07:45", "wer": "Kollege R.",
+                                                           "thema_weiter": True})
+        p = self.plan()
+        self.assertEqual(p["themen"][0]["bis"], "2026-11-20")              # zaehlt als gehalten, nichts rutscht
+        self.assertEqual(p["bloecke"][1]["art"], "vertreten")
+        jetzt = "2026-11-24T08:00:00"
+        self.assertEqual([o["datum"] for o in planung.offene_ist(self.con, self.lid, jetzt=jetzt)], ["2026-11-23", "2026-11-16"])
+        s = planung.stunde(self.con, self.lid, "2026-11-20", "07:45", jetzt=jetzt)   # Ist darf, muss aber nicht
+        self.assertEqual((s["vertreten"]["wer"], s["thema"]["titel"], s["aendern"]), ("Kollege R.", "SPS", False))
+        planung.ist_setzen(self.con, self.lid, "2026-11-20", "07:45", "mehr")
+        self.assertEqual(self.plan()["themen"][0]["bis"], "2026-11-23")
+        w = planung.themen_der_woche(self.con, self.lid, stundenplan.woche(self.con, self.lid, D("2026-11-16"), jetzt))
+        fr = next(b for b in w["bloecke"] if b["datum"] == "2026-11-20")
+        self.assertEqual((fr["zustand"], fr["thema"]["titel"], fr["ist"]), ("vertreten", "SPS", "mehr"))
+        # eigener Stoff: zaehlt nicht, das Thema wartet
+        a = next(b for b in w["bloecke"] if b["datum"] == "2026-11-20")["aenderung_id"]
+        stundenplan.aenderung_loeschen(self.con, self.lid, a)
+        planung.ist_setzen(self.con, self.lid, "2026-11-16", "07:45", "ok")
+        stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "vertreten", "datum": "2026-11-20", "beginn": "07:45", "thema_weiter": False})
+        self.assertEqual(self.plan()["themen"][0]["bis"], "2026-11-23")
+        with self.assertRaises(planung.PlanungFehler):
+            planung.stunde(self.con, self.lid, "2026-11-20", "07:45", jetzt=jetzt)
+
     def test_bilanz_und_wochenplan(self):
         p = planung.plan(self.con, self.lid, self.k24, None, self.sj, jetzt="2026-11-21T12:00:00")
         lf7 = next(b for b in p["bilanz"] if b["lernfeld_id"] == self.lf7)

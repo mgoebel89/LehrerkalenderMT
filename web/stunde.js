@@ -73,6 +73,10 @@ const Stunde = (() => {
         () => L.meldung('Kopieren ging nicht. Bitte den Text markieren und kopieren.', true));
     }
 
+    const info = () => ({ datum: S.datum, beginn: S.beginn, ende: S.ende, name: S.klasse.name + (S.gruppe ? ' · ' + S.gruppe.name : '') });
+    // nach einer Aenderung aus dem Overlay heraus: Overlay ist schon zu, der Aufrufer laedt neu
+    const fertig = () => { if (danach) danach(); };
+
     function abschnitt(sym, titel, zahl, inhalt, rechts) {
       return el('section', { class: 'ov-ab' },
         el('div', { class: 'ab-kopf' }, L.symbol(sym), el('span', { text: titel }),
@@ -125,6 +129,20 @@ const Stunde = (() => {
             el('button', { type: 'button', class: 'klein', onclick: () => merkerNeu(neuerMerker) }, L.symbol('plus'), 'Merken')))
           : el('p', { class: 'leise klein', text: 'Keine weitere Stunde dieser Klasse im Schuljahr.' }),
       ]));
+      // Vertretung bzw. Aenderungen der Stunde
+      if (S.vertreten) {
+        teile.push(abschnitt('vertretung', 'Vertretung', null, [
+          el('p', { text: 'Vertreten' + (S.vertreten.wer ? ' durch ' + S.vertreten.wer : '') + ' · übernimmt dein Thema' + (S.vertreten.grund ? ' · ' + S.vertreten.grund : '') }),
+          el('p', { class: 'leise klein', text: 'Die Stunde zählt in der Planung als gehalten. Wurde die Vertretung nicht fertig, setze oben „braucht 1 Block mehr“.' }),
+          el('div', {}, L.nebenknopf('Vertretung zurücknehmen …', async () => {
+            if (await Aenderung.zuruecknehmen(info(), S.vertreten.aenderung_id, 'Vertretung' + (S.vertreten.wer ? ' durch ' + S.vertreten.wer : ''))) fertig();
+          }, 'klein'))]));
+      } else if (S.aendern) {
+        teile.push(abschnitt('verschieben', 'Stunde ändern', null, el('div', { class: 'zeile' },
+          L.nebenknopf('Ausfall …', async () => { if (await Aenderung.ausfall(info())) fertig(); }, 'klein'),
+          L.nebenknopf('Ich werde vertreten …', async () => { if (await Aenderung.vertreten(info())) fertig(); }, 'klein'),
+          L.nebenknopf('Verschieben …', async () => { if (await Aenderung.verschieben(info(), S.raster)) fertig(); }, 'klein'))));
+      }
       // Termine des Tages
       teile.push(abschnitt('kalender', 'Termine an diesem Tag', S.termine.length, S.termine.length
         ? S.termine.map(t => el('div', { class: 'zeile' }, el('span', { class: 'mono leise klein', text: t.beginn || 'ganztags' }), el('span', { text: t.titel })))

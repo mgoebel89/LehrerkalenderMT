@@ -449,6 +449,11 @@ def aenderung_anlegen(con, lid, daten):
                        "('ausfall', 'vertreten', 'verschoben')", (lid, datum.isoformat(), beginn)).fetchone():
             raise StundenplanFehler("Für diese Stunde ist schon eine Änderung eingetragen. Bitte zuerst zurücknehmen.")
         werte.update(ende=stunde["ende"], klasse_id=stunde["klasse_id"], gruppe_id=stunde["gruppe_id"])
+        if art == "vertreten":   # keine Vorauswahl: die Lehrkraft entscheidet jedes Mal
+            weiter = daten.get("thema_weiter")
+            if weiter not in (True, False):
+                raise StundenplanFehler("Bitte wählen: Übernimmt die Vertretung dein Thema oder macht sie eigenen Stoff?")
+            werte["thema_weiter"] = 1 if weiter else 0
         if art == "verschoben":
             ziel = _datum(daten.get("ziel_datum"), "den neuen Tag")
             ziel_beginn = _uhrzeit(daten.get("ziel_beginn"), "den neuen Block")
@@ -585,7 +590,7 @@ def woche(con, lid, montag, jetzt=None):
             b = block(iso, e["beginn"], e["ende"], e["klasse_id"], "regulaer", e["gruppe_id"], woche=e["woche"])
             a = weg.get((iso, e["beginn"]))
             if a:
-                b.update(zustand=a["art"], aenderung_id=a["id"], grund=a["grund"], wer=a["wer"],
+                b.update(zustand=a["art"], aenderung_id=a["id"], grund=a["grund"], wer=a["wer"], thema_weiter=bool(a["thema_weiter"]),
                          ziel={"datum": a["ziel_datum"], "beginn": a["ziel_beginn"]} if a["art"] == "verschoben" else None)
             bloecke.append(b)
     for a in aend:

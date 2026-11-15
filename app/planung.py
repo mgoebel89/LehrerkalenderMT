@@ -347,7 +347,10 @@ class Kalender:
                 if e["klasse_id"] != kid or e["gruppe_id"] != gid:
                     continue
                 a = self.weg.get((iso, e["beginn"]))
-                if a:
+                if a and a["art"] == "vertreten" and a["thema_weiter"]:   # Vertretung fuehrt das Thema weiter: zaehlt
+                    nutzbar.append({"datum": iso, "beginn": e["beginn"], "ende": e["ende"], "lernfeld_id": e["lernfeld_id"],
+                                    "art": "vertreten", "wer": a["wer"]})
+                elif a:
                     weg.append({"datum": iso, "beginn": e["beginn"], "ende": e["ende"], "zustand": a["art"], "grund": a["grund"]})
                 else:
                     nutzbar.append({"datum": iso, "beginn": e["beginn"], "ende": e["ende"], "lernfeld_id": e["lernfeld_id"], "art": "regulaer"})
@@ -519,7 +522,7 @@ def plan(con, lid, kid, gid, sid, jetzt=None):
                        "ansatz": round(l["stunden"] / 2) if l and l["stunden"] else None,
                        "verplant": sum(t["bedarf"] for t in ts), "gehalten": sum(t["gehalten"] for t in ts),
                        "ueberlauf": sum(t["ueberlauf"] for t in ts)})
-    offen = [b for b in bloecke if b["vergangen"] and b["thema_id"] and not b["ist"]]
+    offen = [b for b in bloecke if b["vergangen"] and b["thema_id"] and not b["ist"] and b["art"] != "vertreten"]
     spuren = sorted({b["lernfeld_id"] for b in bloecke if b["lernfeld_id"]})
     return {"schuljahr": sj, "themen": themen, "bloecke": bloecke, "weg": weg, "wochen": wochen,
             "ferien": ferienabschnitte(kal.frei, von, bis),
@@ -535,6 +538,12 @@ def plan(con, lid, kid, gid, sid, jetzt=None):
 
 def _schuljahr_der_woche(con, woche):
     return grunddaten.schuljahr_zum(con, woche["montag"]) or grunddaten.schuljahr_zum(con, woche["tage"][-1]["datum"])
+
+
+def _gehalten_oder_weiter(b):
+    """Stunde, die in der Planung zaehlt: von mir gehalten oder vertreten mit meinem Thema."""
+    return bool(b["klasse"]) and b["art"] in ("regulaer", "zusatz", "verschoben") and \
+        (not b["zustand"] or (b["zustand"] == "vertreten" and b.get("thema_weiter")))
 
 
 def themen_der_woche(con, lid, woche):
@@ -561,7 +570,7 @@ def themen_der_woche(con, lid, woche):
                 zuordnung[(b["datum"], b["beginn"], kid)] = {"id": t["id"], "titel": t["titel"], "teil": b["teil"], "von": b["von"],
                                                            "lernfeld": nummern.get(t["lernfeld_id"], ""), "ls": t["ls_titel"]}
     for b in woche["bloecke"]:
-        if b["klasse"] and not b["zustand"] and b["art"] in ("regulaer", "zusatz", "verschoben"):
+        if _gehalten_oder_weiter(b):
             b["thema"] = zuordnung.get((b["datum"], b["beginn"], b["klasse"]["id"]))
             b["ist"] = ist.get((b["datum"], b["beginn"]))
     return woche
@@ -579,8 +588,7 @@ def stunde(con, lid, datum, beginn, jetzt=None):
     jetzt = jetzt or db.jetzt()
     tag = datetime.date.fromisoformat(datum)
     woche = stundenplan.woche(con, lid, tag, jetzt)
-    b = next((x for x in woche["bloecke"] if x["datum"] == datum and x["beginn"] == beginn and x["klasse"]
-              and not x["zustand"] and x["art"] in ("regulaer", "zusatz", "verschoben")), None)
+    b = next((x for x in woche["bloecke"] if x["datum"] == datum and x["beginn"] == beginn and _gehalten_oder_weiter(x)), None)
     if b is None:
         raise PlanungFehler("Zu dieser Zeit hältst du keine Stunde.")
     kid, gid = b["klasse"]["id"], b["gruppe"]["id"] if b["gruppe"] else None
@@ -588,7 +596,10 @@ def stunde(con, lid, datum, beginn, jetzt=None):
                 "zeile": next((z for z in woche["zeilen"] if z["beginn"] == b["beginn"]), None),
                 "thema": None, "ist": None, "merker": b["merker"], "naechste": None, "vorige": None, "naechste_merker": [],
                 "termine": [t for t in woche["termine"] if t["datum"] <= datum <= (t["bis"] or t["datum"])],
-                "vergangen": (datum, b["ende"]) <= (jetzt[:10], jetzt[11:16]), "jetzt": b["jetzt"], "schuljahr": None}
+                "vergangen": (datum, b["ende"]) <= (jetzt[:10], jetzt[11:16]), "jetzt": b["jetzt"], "schuljahr": None,
+                "aendern": b["art"] == "regulaer" and not b["zustand"],
+                "vertreten": {"wer": b["wer"], "grund": b["grund"], "aenderung_id": b["aenderung_id"]} if b["zustand"] == "vertreten" else None,
+                "raster": [dict(r) for r in stundenplan.raster_der_klasse(con, kid)]}
     sj = grunddaten.schuljahr_zum(con, datum)
     zeile = con.execute("SELECT stand FROM ist WHERE lehrkraft_id = ? AND datum = ? AND beginn = ?", (lid, datum, beginn)).fetchone()
     ergebnis["ist"] = zeile["stand"] if zeile else None
@@ -652,7 +663,7 @@ def offene_ist(con, lid, jetzt=None, grenze=30):
     for s in straenge(con, lid, sj["id"]):
         bloecke, themen = _stunden_des_strangs(con, lid, s["klasse_id"], s["gruppe_id"], sj, kal, ist)
         for b in bloecke:
-            if b["thema_id"] and not b["ist"] and (b["datum"], b["ende"]) <= (jetzt[:10], jetzt[11:16]):
+            if b["thema_id"] and not b["ist"] and b["art"] != "vertreten" and (b["datum"], b["ende"]) <= (jetzt[:10], jetzt[11:16]):
                 offen.append({"datum": b["datum"], "beginn": b["beginn"], "strang": s["name"], "thema": themen[b["thema_id"]]["titel"],
                               "klasse_id": s["klasse_id"], "gruppe_id": s["gruppe_id"], "thema_id": b["thema_id"]})
     offen.sort(key=lambda x: (x["datum"], x["beginn"]), reverse=True)

@@ -146,7 +146,7 @@ const Woche = (() => {
 
   function zustandText(b) {
     if (b.zustand === 'ausfall') return 'fällt aus' + (b.grund ? ': ' + b.grund : '');
-    if (b.zustand === 'vertreten') return 'vertreten' + (b.wer ? ' durch ' + b.wer : '') + (b.grund ? ' · ' + b.grund : '');
+    if (b.zustand === 'vertreten') return 'vertreten' + (b.wer ? ' durch ' + b.wer : '') + (b.thema_weiter ? ' · mit deinem Thema' : ' · eigener Stoff') + (b.grund ? ' · ' + b.grund : '');
     if (b.zustand === 'verschoben') return 'verschoben auf ' + tagKurz(b.ziel.datum) + ' ' + b.ziel.beginn;
     if (b.art === 'verschoben') return 'verschoben von ' + tagKurz(b.herkunft.datum) + ' ' + b.herkunft.beginn;
     if (b.art === 'zusatz') return 'Zusatzstunde' + (b.grund ? ': ' + b.grund : '');
@@ -170,12 +170,12 @@ const Woche = (() => {
     else if (b.art === 'zusatz') st.push(el('span', { class: 'zus' }, L.symbol('zusatz'), zustandText(b)));
     else if (b.art === 'vertretung') st.push(el('span', {}, L.symbol('vertretung'), zustandText(b)));
     else if (b.jetzt) st.push(el('span', { class: 'jetzt' }, L.symbol('jetzt'), 'jetzt'));
-    if (!b.zustand && b.thema && !b.jetzt) {
+    if ((!b.zustand || b.thema_weiter) && b.thema && !b.jetzt) {
       const vergangen = b.datum < W.heute || (b.datum === W.heute && b.ende <= new Date().toTimeString().slice(0, 5));
       if (b.ist === 'ok') st.push(el('span', { class: 'ok' }, L.symbol('ok'), 'gehalten'));
       else if (b.ist === 'mehr') st.push(el('span', { class: 'offen' }, L.symbol('plus'), '1 Block mehr'));
       else if (b.ist === 'fertig') st.push(el('span', { class: 'ok' }, L.symbol('haken'), 'Thema fertig'));
-      else if (vergangen) st.push(el('span', { class: 'offen' }, L.symbol('offen'), 'Ist fehlt'));
+      else if (vergangen && !b.zustand) st.push(el('span', { class: 'offen' }, L.symbol('offen'), 'Ist fehlt'));
     }
     const k = el('div', { class: klassen.join(' '), style: '--kl:' + farbe(b.klasse), tabindex: '0', role: 'button',
       'aria-label': name + ', ' + tagKurz(b.datum) + ' ' + b.beginn + (st.length ? ', ' + zustandText(b) : '') + ' – Aktionen' },
@@ -200,7 +200,7 @@ const Woche = (() => {
   }
 
   // Stunden, die ich halte (mit Klasse aus der Liste): Klick oeffnet das Stunden-Overlay, sonst das Aktionsmenue
-  const gehalten = b => b.klasse && !b.zustand && ['regulaer', 'zusatz', 'verschoben'].includes(b.art);
+  const gehalten = b => b.klasse && ['regulaer', 'zusatz', 'verschoben'].includes(b.art) && (!b.zustand || (b.zustand === 'vertreten' && b.thema_weiter));
 
   function leer(t, z) {
     const d = el('button', { type: 'button', class: 'wp-leer', 'aria-label': 'Freier Block ' + tagKurz(t.datum) + ' ' + z.beginn + ' – Zusatzstunde oder Vertretung',
@@ -302,63 +302,30 @@ const Woche = (() => {
     return true;
   }
 
-  const GRUENDE = ['Krankheit', 'Fortbildung', 'Exkursion', 'Prüfung', 'Praktikum', 'Klassenfahrt', 'Betriebsbesichtigung', 'Konferenz'];
-  function grundFeld(wert) {
-    const id = 'gruende-' + Math.random().toString(36).slice(2);
-    const eingabe = el('input', { list: id, value: wert || '', maxlength: 200, placeholder: 'z. B. Exkursion' });
-    return [eingabe, el('datalist', { id }, GRUENDE.map(g => el('option', { value: g })))];
-  }
+  const grundFeld = wert => Aenderung.grundFeld(wert);
 
   function stundeText(b) {
     return el('p', { class: 'klein' }, el('b', { text: blockName(b) }), ' · ' + L.tag(b.datum, true) + ' · ' + zeitText(b.beginn, b.ende));
   }
 
+  const info = b => ({ datum: b.datum, beginn: b.beginn, ende: b.ende, name: blockName(b) });
+
   async function ausfall(b) {
-    const [grund, liste] = grundFeld();
-    const ok = await L.dialog({
-      titel: 'Stunde fällt aus', knopf: 'Ausfall eintragen',
-      inhalt: el('div', { class: 'stapel', style: 'gap:10px' }, stundeText(b), L.feld('Grund', grund, 'erscheint im Wochenplan'), liste,
-        el('p', { class: 'leise klein', text: 'In der Planung (ab Stufe C) fällt die Stunde heraus, die Themen rücken nach.' })),
-      speichern: () => aendern({ art: 'ausfall', datum: b.datum, beginn: b.beginn, grund: grund.value }),
-    });
-    if (ok) await laden();
+    if (await Aenderung.ausfall(info(b))) await laden();
   }
 
   async function vertreten(b) {
-    const wer = el('input', { maxlength: 80, placeholder: 'z. B. Kollege R.' });
-    const [grund, liste] = grundFeld();
-    const ok = await L.dialog({
-      titel: 'Ich werde vertreten', knopf: 'Eintragen',
-      inhalt: el('div', { class: 'stapel', style: 'gap:10px' }, stundeText(b),
-        el('p', { class: 'leise klein', text: 'Die Stunde findet für die Klasse statt, aber nicht mit dir – anders als ein Ausfall.' }),
-        L.feld('Wer vertritt?', wer, 'freiwillig'), L.feld('Grund', grund), liste),
-      speichern: () => aendern({ art: 'vertreten', datum: b.datum, beginn: b.beginn, wer: wer.value, grund: grund.value }),
-    });
-    if (ok) await laden();
-  }
-
-  function blockAuswahl(klasseId, gewaehlt) {
-    const k = W.klassen.find(x => x.id === klasseId);
-    const bloecke = k ? k.bloecke : W.zeilen.map(z => z.beginn + '-' + z.ende);
-    return el('select', {}, bloecke.map(s => {
-      const [b, e] = s.split('-');
-      const z = W.zeilen.find(x => x.beginn === b);
-      return el('option', { value: b, text: (z && z.bezeichnung ? z.bezeichnung + ' · ' : '') + b + '–' + e, selected: b === gewaehlt ? true : null });
-    }));
+    if (await Aenderung.vertreten(info(b))) await laden();
   }
 
   async function verschieben(b) {
-    const datum = el('input', { type: 'date', value: b.datum });
-    const block = blockAuswahl(b.klasse.id, b.beginn);
-    const [grund, liste] = grundFeld();
-    const ok = await L.dialog({
-      titel: 'Stunde verschieben', knopf: 'Verschieben',
-      inhalt: el('div', { class: 'stapel', style: 'gap:10px' }, stundeText(b),
-        el('div', { class: 'felder zwei' }, L.feld('Neuer Tag', datum), L.feld('Neuer Block', block)),
-        L.feld('Grund', grund, 'freiwillig'), liste),
-      speichern: () => aendern({ art: 'verschoben', datum: b.datum, beginn: b.beginn, ziel_datum: datum.value, ziel_beginn: block.value, grund: grund.value }),
+    const k = W.klassen.find(x => x.id === b.klasse.id);
+    const bloecke = (k ? k.bloecke : W.zeilen.map(z => z.beginn + '-' + z.ende)).map(x => {
+      const [beginn, ende] = x.split('-');
+      const z = W.zeilen.find(y => y.beginn === beginn);
+      return { beginn, ende, bezeichnung: z ? z.bezeichnung : '' };
     });
-    if (ok) await laden();
+    if (await Aenderung.verschieben(info(b), bloecke)) await laden();
   }
 
   async function zuruecknehmen(b) {

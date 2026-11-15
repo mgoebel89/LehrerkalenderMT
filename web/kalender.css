@@ -225,3 +225,11 @@ details.bilanz summary::-webkit-details-marker { display: none; }
 .merker-zeile > span:first-child { flex: 1; min-width: 0; }
 .hinweis.gelb { border-color: var(--gelb); background: #fffaf0; }
 .hinweis.gelb .zahl, .hinweis.gelb .k .symbol { color: #9a6400; }
+
+/* Pflichtwahl als Karten (z. B. Vertretung: Thema weiter / eigener Stoff) */
+fieldset.wahl-gruppe { border: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+fieldset.wahl-gruppe legend { font-size: .85em; font-weight: 600; color: var(--leise); margin-bottom: 4px; padding: 0; }
+.wahl-karte { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--linie-stark); border-radius: 10px 4px 4px 4px; padding: 9px 12px; cursor: pointer; }
+.wahl-karte > span { display: grid; gap: 2px; }
+.wahl-karte:has(input:checked) { border-color: var(--blau); background: var(--blau-hell); box-shadow: inset 0 0 0 1px var(--blau); }
+.wahl-karte input { margin-top: 3px; }

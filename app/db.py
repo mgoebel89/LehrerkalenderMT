@@ -263,6 +263,10 @@ MIGRATIONEN = [
         geaendert TEXT NOT NULL,
         UNIQUE (lehrkraft_id, datum, beginn))
     """,
+    # 6: Vertretung, die das geplante Thema weiterfuehrt: die Stunde zaehlt dann in der Planung als gehalten
+    """
+    ALTER TABLE aenderung ADD COLUMN thema_weiter INTEGER NOT NULL DEFAULT 0
+    """,
 ]
 
 
