@@ -301,7 +301,12 @@ def klassen(con):
                          "ORDER BY k.aktiv DESC, k.name")
     return [{"id": z["id"], "name": z["name"], "bildungsgang_id": z["bildungsgang_id"], "bildungsgang": z["bildungsgang"],
              "stufe_id": z["stufe_id"], "stufe": z["stufe"], "notenschluessel_id": z["notenschluessel_id"],
-             "aktiv": bool(z["aktiv"])} for z in zeilen]
+             "aktiv": bool(z["aktiv"]), "beginn": z["beginn"], "ende": z["ende"]} for z in zeilen]
+
+
+def klassen_zeitraum(con):
+    """{klasse_id: (erster, letzter Unterrichtstag)} als ISO-Text; ohne Angabe offen ('' bzw. '9999-12-31')."""
+    return {z["id"]: (z["beginn"] or "", z["ende"] or "9999-12-31") for z in con.execute("SELECT id, beginn, ende FROM klasse")}
 
 
 def klasse_speichern(con, daten, kid=None):
@@ -315,15 +320,19 @@ def klasse_speichern(con, daten, kid=None):
     if ns_id is not None and not con.execute("SELECT 1 FROM notenschluessel WHERE id = ? AND art = 'konferenz'", (ns_id,)).fetchone():
         raise GrunddatenFehler("Als Schlüssel einer Klasse geht nur ein Konferenzschlüssel.")
     aktiv = 0 if daten.get("aktiv") is False else 1
+    beginn = _datum(daten["beginn"], "den ersten Unterrichtstag") if daten.get("beginn") else None
+    ende = _datum(daten["ende"], "den letzten Unterrichtstag") if daten.get("ende") else None
+    if beginn and ende and ende < beginn:
+        raise GrunddatenFehler("Der letzte Unterrichtstag liegt vor dem ersten.")
     if con.execute("SELECT 1 FROM klasse WHERE name = ? AND id != ?", (name, kid or -1)).fetchone():
         raise GrunddatenFehler("Die Klasse %s gibt es schon." % name)
     if kid is None:
-        return con.execute("INSERT INTO klasse (name, bildungsgang_id, stufe_id, notenschluessel_id, aktiv, erstellt) "
-                           "VALUES (?, ?, ?, ?, ?, ?)", (name, bid, stufe_id, ns_id, aktiv, db.jetzt())).lastrowid
+        return con.execute("INSERT INTO klasse (name, bildungsgang_id, stufe_id, notenschluessel_id, aktiv, erstellt, beginn, ende) "
+                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (name, bid, stufe_id, ns_id, aktiv, db.jetzt(), beginn, ende)).lastrowid
     if con.execute("SELECT 1 FROM klasse WHERE id = ?", (kid,)).fetchone() is None:
         raise GrunddatenFehler("Diese Klasse gibt es nicht.")
-    con.execute("UPDATE klasse SET name = ?, bildungsgang_id = ?, stufe_id = ?, notenschluessel_id = ?, aktiv = ? WHERE id = ?",
-                (name, bid, stufe_id, ns_id, aktiv, kid))
+    con.execute("UPDATE klasse SET name = ?, bildungsgang_id = ?, stufe_id = ?, notenschluessel_id = ?, aktiv = ?, beginn = ?, ende = ? "
+                "WHERE id = ?", (name, bid, stufe_id, ns_id, aktiv, beginn, ende, kid))
     return kid
 
 

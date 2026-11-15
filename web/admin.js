@@ -360,10 +360,13 @@ const Admin = (() => {
       G.bildungsgaenge.length ? null : el('div', { class: 'banner warnung', text: 'Zuerst unter Grunddaten einen Bildungsgang anlegen.' }),
       el('p', { class: 'leise', style: 'max-width:75ch', text: 'Klassen gibt es einmal für alle Lehrkräfte. Daran hängen später geteilte Termine und der Themenstand. Die Schülerlisten führt jede Lehrkraft selbst (Stufe D).' }),
       el('div', { class: 'karte rollbar' }, G.klassen.length ? el('table', { class: 'liste' },
-        el('thead', {}, el('tr', {}, ['Klasse', 'Bildungsgang', 'Stufe', 'Notenschlüssel', ''].map(t => el('th', { text: t })))),
+        el('thead', {}, el('tr', {}, ['Klasse', 'Bildungsgang', 'Stufe', 'Unterricht', 'Notenschlüssel', ''].map(t => el('th', { text: t })))),
         el('tbody', {}, G.klassen.map(k => el('tr', { class: 'klickbar' + (k.aktiv ? '' : ' aus'), tabindex: 0, onclick: () => klasseBearbeiten(k),
           onkeydown: ev => { if (ev.key === 'Enter') klasseBearbeiten(k); } },
           el('td', {}, el('b', { text: k.name })), el('td', { text: k.bildungsgang }), el('td', { text: k.stufe || '–' }),
+          el('td', { class: 'klein' }, k.beginn || k.ende
+            ? el('span', { class: 'chip' + (k.ende && k.ende < L.heute() ? '' : ' gelb'), text: (k.beginn ? 'ab ' + L.tag(k.beginn).trim() + ' ' : '') + (k.ende ? 'bis ' + L.tag(k.ende).trim() : '') })
+            : el('span', { class: 'leise', text: 'ganzes Schuljahr' })),
           el('td', {}, k.notenschluessel_id && schl(k.notenschluessel_id) ? el('span', { class: 'chip', text: schl(k.notenschluessel_id).name })
             : el('span', { class: 'leise klein', text: 'wie Bildungsgang' })),
           el('td', {}, k.aktiv ? null : el('span', { class: 'chip', text: 'nicht aktiv' }))))))
@@ -378,6 +381,8 @@ const Admin = (() => {
     const stufe = el('select');
     const schl = el('select');
     const aktiv = el('input', { type: 'checkbox', checked: !k || k.aktiv ? true : null });
+    const beginn = el('input', { type: 'date', value: k && k.beginn ? k.beginn : '' });
+    const ende = el('input', { type: 'date', value: k && k.ende ? k.ende : '' });
     const fuellen = () => {
       const b = G.bildungsgaenge.find(x => String(x.id) === bgSel.value);
       L.setzen(stufe, optionen(b ? b.stufen : [], k ? k.stufe_id : '', '–'));
@@ -389,10 +394,13 @@ const Admin = (() => {
       titel: k ? k.name : 'Neue Klasse',
       inhalt: el('div', { class: 'felder' }, L.feld('Name', name), L.feld('Bildungsgang', bgSel), L.feld('Stufe', stufe, 'Zum Schuljahreswechsel von Hand umstellen.'),
         L.feld('Notenschlüssel', schl, 'Nur ändern, wenn die Klasse einen anderen Konferenzschlüssel braucht.'),
+        el('div', { class: 'felder zwei' }, L.feld('Erster Unterrichtstag', beginn, 'leer = ab Schuljahresbeginn'),
+          L.feld('Letzter Unterrichtstag', ende, 'z. B. Ausschulung vor den Prüfungen; leer = bis Schuljahresende')),
+        el('p', { class: 'leise klein', text: 'Außerhalb dieses Zeitraums verschwinden die Stunden der Klasse aus allen Wochenplänen, und die Planung rechnet nur bis zum letzten Unterrichtstag. Stundenpläne müssen dafür nicht geändert werden.' }),
         el('label', { class: 'haken' }, aktiv, 'aktiv'),
         k ? L.nebenknopf('Klasse löschen …', () => loeschenFragen(k.name + ' löschen?', 'Nur sinnvoll für versehentlich angelegte Klassen; sonst „nicht aktiv“.', '/api/admin/klasse/' + k.id + '/loeschen', klassen)) : null),
       speichern: () => gd(k ? '/api/admin/klasse/' + k.id : '/api/admin/klasse', { name: name.value, bildungsgang_id: bgSel.value,
-        stufe_id: stufe.value || null, notenschluessel_id: schl.value || null, aktiv: aktiv.checked }),
+        stufe_id: stufe.value || null, notenschluessel_id: schl.value || null, aktiv: aktiv.checked, beginn: beginn.value || null, ende: ende.value || null }),
     });
     if (r) klassen();
   }

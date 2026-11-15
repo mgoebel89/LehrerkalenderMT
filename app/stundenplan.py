@@ -380,8 +380,9 @@ def gruppe_loeschen(con, lid, gid):
 
 # --- Was an einem Tag stattfindet ---
 
-def _regulaere_stunden(con, lid, datum, liste=None, regel=None, frei=None):
-    """Regulaere Stunden laut Grundstundenplan an einem Datum (ohne Aenderungen): [eintrag, ...]."""
+def _regulaere_stunden(con, lid, datum, liste=None, regel=None, frei=None, zeitraum=None):
+    """Regulaere Stunden laut Grundstundenplan an einem Datum (ohne Aenderungen): [eintrag, ...]. Klassen ausserhalb
+    ihres Unterrichtszeitraums (vor dem ersten bzw. nach dem letzten Unterrichtstag) fallen weg."""
     liste = versionen(con, lid) if liste is None else liste
     if datum.isoweekday() > SCHULTAGE:
         return []
@@ -392,7 +393,19 @@ def _regulaere_stunden(con, lid, datum, liste=None, regel=None, frei=None):
     if v is None:
         return []
     ab = ab_woche(datum, regel or a_woche_regel(con))
-    return [e for e in v["eintraege"] if e["wochentag"] == datum.isoweekday() and e["woche"] in ("alle", ab)]
+    zeitraum = grunddaten.klassen_zeitraum(con) if zeitraum is None else zeitraum
+    iso = datum.isoformat()
+    return [e for e in v["eintraege"] if e["wochentag"] == datum.isoweekday() and e["woche"] in ("alle", ab)
+            and zeitraum.get(e["klasse_id"], ("", "9999"))[0] <= iso <= zeitraum.get(e["klasse_id"], ("", "9999"))[1]]
+
+
+def _im_zeitraum_pruefen(con, kid, datum):
+    """Zusatzstunden und Verschiebungen nur, solange die Klasse Unterricht hat."""
+    z = con.execute("SELECT name, beginn, ende FROM klasse WHERE id = ?", (kid,)).fetchone()
+    if z and z["ende"] and datum.isoformat() > z["ende"]:
+        raise StundenplanFehler("%s hat nur bis %s Unterricht (Ausschulung)." % (z["name"], _tag_text(datetime.date.fromisoformat(z["ende"]))))
+    if z and z["beginn"] and datum.isoformat() < z["beginn"]:
+        raise StundenplanFehler("%s hat erst ab %s Unterricht." % (z["name"], _tag_text(datetime.date.fromisoformat(z["beginn"]))))
 
 
 def _aenderungen(con, lid, von, bis):
@@ -462,6 +475,7 @@ def aenderung_anlegen(con, lid, daten):
                 raise StundenplanFehler("Der neue Termin ist derselbe wie der alte.")
             if ziel.isoweekday() > SCHULTAGE:
                 raise StundenplanFehler("Bitte einen Tag von Montag bis Freitag wählen.")
+            _im_zeitraum_pruefen(con, stunde["klasse_id"], ziel)
             frei = freie_tage(con, ziel, ziel).get(ziel.isoformat())
             if frei:
                 raise StundenplanFehler("Am %s ist unterrichtsfrei (%s)." % (_tag_text(ziel), frei))
@@ -471,6 +485,7 @@ def aenderung_anlegen(con, lid, daten):
         kid = _id(daten.get("klasse_id"))
         if kid is not None:
             block = _block_der_klasse(con, kid, beginn)
+            _im_zeitraum_pruefen(con, kid, datum)
             werte["klasse_id"] = kid
             werte["gruppe_id"] = _gruppe_pruefen(con, lid, kid, daten.get("gruppe_id"))
         elif art == "vertretung":
@@ -567,6 +582,7 @@ def woche(con, lid, montag, jetzt=None):
     merker = [t for t in termine if t["art"] == "merker"]
     weg = {(a["datum"], a["beginn"]): a for a in aend if a["art"] in ("ausfall", "vertreten", "verschoben")}
     eigene_gruppen = gruppen(con, lid)
+    zeitraum = grunddaten.klassen_zeitraum(con)
     gruppennamen = {g["id"]: g["name"] for g in eigene_gruppen}
 
     def klasse(kid):
@@ -586,7 +602,7 @@ def woche(con, lid, montag, jetzt=None):
         d = montag + datetime.timedelta(days=i)
         iso = d.isoformat()
         tage.append({"datum": iso, "tag": WOCHENTAGE[i], "frei": frei.get(iso), "heute": iso == heute})
-        for e in _regulaere_stunden(con, lid, d, liste, regel, frei):
+        for e in _regulaere_stunden(con, lid, d, liste, regel, frei, zeitraum):
             b = block(iso, e["beginn"], e["ende"], e["klasse_id"], "regulaer", e["gruppe_id"], woche=e["woche"])
             a = weg.get((iso, e["beginn"]))
             if a:
@@ -642,7 +658,7 @@ def editor(con, lid, heute=None):
     # am Wochenende zaehlt schon die kommende Woche (wie im Wochenplan)
     woche_von = heute + datetime.timedelta(days=8 - heute.isoweekday()) if heute.isoweekday() > SCHULTAGE else heute
     klassen_liste = [{"id": k["id"], "name": k["name"], "bildungsgang": k["bildungsgang"], "bildungsgang_id": k["bildungsgang_id"],
-                      "stufe": k["stufe"], "aktiv": k["aktiv"],
+                      "stufe": k["stufe"], "aktiv": k["aktiv"], "beginn": k["beginn"], "ende": k["ende"],
                       "bloecke": [r["beginn"] + "-" + r["ende"] for r in raster_der_klasse(con, k["id"], cache)]}
                      for k in klassen.values()]
     zeiten = {(e["beginn"], e["ende"]) for v in liste for e in v["eintraege"]}

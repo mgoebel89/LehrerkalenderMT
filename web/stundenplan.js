@@ -26,6 +26,7 @@ const Stundenplan = (() => {
   const version = () => E.versionen.find(v => v.id === gewaehlt);
   const klasse = id => E.klassen.find(k => k.id === id);
   const gruppenVon = kid => E.gruppen.filter(g => g.klasse_id === Number(kid));
+  const zeitraumText = k => !k ? '' : (k.beginn ? 'ab ' + L.tag(k.beginn).trim().slice(3) + ' ' : '') + (k.ende ? 'bis ' + L.tag(k.ende).trim().slice(3) : '');
   const gruppenName = gid => (E.gruppen.find(g => g.id === gid) || { name: '?' }).name;
   const farbe = id => E.farben[String(id)] || 'var(--leise)';
   const versionText = v => 'ab ' + L.tag(v.ab, true).slice(3) + (v.name ? ' · ' + v.name : '') + (v.id === E.gilt_jetzt ? ' (gilt jetzt)' : '');
@@ -69,6 +70,7 @@ const Stundenplan = (() => {
         hier.length ? hier.map(e => el('span', { class: 'gk', style: '--kl:' + farbe(e.klasse_id) },
           (klasse(e.klasse_id) || { name: '?' }).name, e.gruppe_id ? el('span', { class: 'gr', text: gruppenName(e.gruppe_id) }) : null,
           e.lernfeld_id ? el('span', { class: 'lf', text: (E.lernfelder.find(l => l.id === e.lernfeld_id) || { nummer: '?' }).nummer }) : null,
+          zeitraumText(klasse(e.klasse_id)) ? el('span', { class: 'bis', title: 'Unterrichtszeitraum der Klasse (legt der Admin fest)', text: zeitraumText(klasse(e.klasse_id)) }) : null,
           e.woche !== 'alle' ? el('span', { class: 'ab', text: e.woche }) : null)) : '+'));
         return td;
       })));

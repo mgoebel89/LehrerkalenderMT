@@ -14,7 +14,7 @@ Das Konzept (Fassung 2, freigegeben am 14.11.2026) liegt in `docs/KONZEPT.html`.
 | A | Grundgerüst, Konten mit Einladungscode, Anmeldung mit optionalem zweitem Faktor, Admin-Grunddaten (Bildungsgänge, Stufen, Lernfelder/Module, Zeitraster, Ferien, Klassen, Konferenz-Notenschlüssel), Update, Sicherung | gebaut (0.1.0) |
 | B | Stundenplan von Hand mit Versionen und A/B-Wochen, Feiertage RLP, Wochenplan nach Uhrzeit mit Ausfall, Vertretung (beide Richtungen), Verschieben, Zusatzstunde, eigene Termine und Merker, Startseite; eigene Gruppen je Klasse (0.2.1) | gebaut (0.2.1) |
 | C1 | Schuljahr (Admin), Bibliothek je Lernfeld, Themenfolge je Klasse/Gruppe, Fließen auf die Blöcke (Stecknadel, Lernfeld-Spuren), Raster Doppelstunden und Schuljahr, Thema im Wochenplan | gebaut (0.3.0) |
-| C2 | Stunden-Overlay mit Ist-Stand und Rückgängig, Lehrstoff kopieren, Merker für die nächste Stunde, Tagesansicht, Bilanz, „Ist offen“ auf der Startseite, Tage und Ferien im Raster deutlich abgehoben; Vertretung mit oder ohne eigenes Thema, Ausfall/Vertretung/Verschieben im Overlay (0.4.1) | gebaut (0.4.1) |
+| C2 | Stunden-Overlay mit Ist-Stand und Rückgängig, Lehrstoff kopieren, Merker für die nächste Stunde, Tagesansicht, Bilanz, „Ist offen“ auf der Startseite, Tage und Ferien im Raster deutlich abgehoben; Vertretung mit oder ohne eigenes Thema, Ausfall/Vertretung/Verschieben im Overlay (0.4.1); erster/letzter Unterrichtstag je Klasse, z. B. Ausschulung (0.4.2) | gebaut (0.4.2) |
 | D | Prüfungen und Bewertung | offen |
 | E | Teilen im Kollegium | offen |
 | F | Formularcenter, Unterrichtsbesuche, Paperless | offen |

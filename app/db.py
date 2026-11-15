@@ -267,6 +267,11 @@ MIGRATIONEN = [
     """
     ALTER TABLE aenderung ADD COLUMN thema_weiter INTEGER NOT NULL DEFAULT 0
     """,
+    # 7: Unterrichtszeitraum einer Klasse (z. B. Ausschulung der Fachstufe 3 vor dem Halbjahr). Leer = ganzes Schuljahr.
+    """
+    ALTER TABLE klasse ADD COLUMN beginn TEXT;
+    ALTER TABLE klasse ADD COLUMN ende TEXT
+    """,
 ]
 
 

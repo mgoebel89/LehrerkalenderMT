@@ -132,6 +132,26 @@ class Planung(MitPlanung):
                          [("LF7 Thema", "2026-11-16", "2026-11-23"), ("LF9 Thema", "2026-11-20", "2026-12-04")])
         self.assertEqual([s["nummer"] for s in p["spuren"]], ["LF 9"])
 
+    def test_ausschulung_und_spaeter_beginn(self):
+        planung.thema_speichern(self.con, self.lid, self.strang(titel="Lang", bloecke=6))
+        with db.transaktion(self.con):
+            grunddaten.klasse_speichern(self.con, {"name": "BSMT 24a", "bildungsgang_id": self.bs, "beginn": "2026-11-18",
+                                                   "ende": "2026-11-30"}, self.k24)
+        p = self.plan()
+        self.assertEqual([b["datum"] for b in p["bloecke"]], ["2026-11-20", "2026-11-23", "2026-11-30"])
+        self.assertEqual(p["themen"][0]["ueberlauf"], 3)
+        self.assertEqual(p["klasse_zeitraum"], {"beginn": "2026-11-18", "ende": "2026-11-30"})
+        w = stundenplan.woche(self.con, self.lid, D("2026-12-07"))           # nach der Ausschulung: keine Stunden
+        self.assertEqual(w["bloecke"], [])
+        with self.assertRaises(stundenplan.StundenplanFehler):               # Zusatzstunde nach der Ausschulung
+            stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "zusatz", "datum": "2026-12-02", "beginn": "07:45", "klasse_id": self.k24})
+        with self.assertRaises(stundenplan.StundenplanFehler):               # dorthin verschieben auch nicht
+            stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "verschoben", "datum": "2026-11-30", "beginn": "07:45",
+                                                               "ziel_datum": "2026-12-02", "ziel_beginn": "07:45"})
+        with self.assertRaises(grunddaten.GrunddatenFehler):
+            grunddaten.klasse_speichern(self.con, {"name": "BSMT 24a", "bildungsgang_id": self.bs, "beginn": "2026-12-01",
+                                                   "ende": "2026-11-30"}, self.k24)
+
     def test_bibliothek_und_uebernehmen(self):
         ls = planung.baustein_speichern(self.con, self.k, {"art": "ls", "lernfeld_id": self.lf7, "titel": "Förderanlage automatisieren"})
         planung.baustein_speichern(self.con, self.k, {"art": "thema", "ls_id": ls, "titel": "Sensoren", "bloecke": 3})
@@ -191,6 +211,11 @@ class FliessenMitIst(Fliessen):
         self.assertEqual([(x["name"], x["von"], x["bis"]) for x in a],
                          [("Herbstferien", "2026-10-12", "2026-10-13"), ("Herbstferien", "2026-10-16", "2026-10-19")])
         # Allerheiligen 2026 ist ein Sonntag: kein Werktag, kein Abschnitt
+        frei = {"2026-12-23": "Weihnachtsferien", "2026-12-24": "Weihnachtsferien", "2026-12-25": "1. Weihnachtstag",
+                "2026-12-28": "Weihnachtsferien", "2026-12-31": "Weihnachtsferien", "2027-01-01": "Neujahr"}
+        frei.update({"2026-12-29": "Weihnachtsferien", "2026-12-30": "Weihnachtsferien"})
+        a = planung.ferienabschnitte(frei, D("2026-12-01"), D("2027-01-31"))
+        self.assertEqual([(x["name"], x["von"], x["bis"]) for x in a], [("Weihnachtsferien", "2026-12-23", "2027-01-01")])
 
 
 class IstStand(MitPlanung):

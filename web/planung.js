@@ -143,7 +143,11 @@ const Planung = (() => {
       if (g && g.datum === c.datum) g.spalten.push(c);
       else gruppen.push({ typ: 'tag', datum: c.datum, spalten: [c] });
     });
-    p.ferien.forEach(f => gruppen.push({ typ: 'ferien', datum: f.von, f }));
+    const z = p.klasse_zeitraum || {};
+    p.ferien.filter(f => (!z.ende || f.von <= z.ende) && (!z.beginn || f.bis >= z.beginn))   // ausserhalb des Unterrichts ohne Belang
+      .forEach(f => gruppen.push({ typ: 'ferien', datum: f.von, f }));
+    if (z.beginn) gruppen.push({ typ: 'ferien', datum: z.beginn, f: { name: 'Unterrichtsbeginn', von: z.beginn, bis: z.beginn, marke: true } });
+    if (z.ende) gruppen.push({ typ: 'ferien', datum: plusTage(z.ende, 1), f: { name: 'Ausschulung', von: z.ende, bis: z.ende, marke: true } });
     gruppen.sort((a, b) => a.datum.localeCompare(b.datum) || (a.typ === 'ferien' ? -1 : 1));
     let kwVorher = null;
     gruppen.forEach(g => {
@@ -169,6 +173,11 @@ const Planung = (() => {
   const tagText = iso => L.TAGE[new Date(iso + 'T12:00:00').getDay()] + ' ' + iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.';
 
   function ferienKopf(f, rowspan) {
+    if (f.marke) {
+      return el('th', { class: 'ferien-sp marke', rowspan: rowspan || null,
+        title: f.name === 'Ausschulung' ? 'Letzter Unterrichtstag der Klasse: ' + L.tag(f.von, true) : 'Erster Unterrichtstag der Klasse: ' + L.tag(f.von, true) },
+      el('span', { class: 'senkrecht', text: f.name + ' ' + L.tag(f.von).trim().slice(3) }));
+    }
     return el('th', { class: 'ferien-sp', rowspan: rowspan || null, title: f.name + ': ' + L.tag(f.von, true) + (f.bis !== f.von ? ' – ' + L.tag(f.bis, true) : '') },
       el('span', { class: 'senkrecht', text: f.name }));
   }
@@ -197,7 +206,7 @@ const Planung = (() => {
       title: L.tag(c.datum, true) + ' ' + c.beginn + (c.nutzbar ? (c.art !== 'regulaer' ? ' · ' + (c.art === 'zusatz' ? 'Zusatzstunde' : 'verschoben') : '')
         : ' · ' + (c.zustand === 'ausfall' ? 'fällt aus' : c.zustand === 'vertreten' ? 'vertreten' : 'verschoben') + (c.grund ? ': ' + c.grund : '')) },
     c.beginn))));
-    const zellen = t => gruppen.map(g => g.typ === 'ferien' ? el('td', { class: 'ferien-sp' }) : g.spalten.map((c, n) => {
+    const zellen = t => gruppen.map(g => g.typ === 'ferien' ? el('td', { class: 'ferien-sp' + (g.f.marke ? ' marke' : '') }) : g.spalten.map((c, n) => {
       const td = el('td', { class: 't' + (n === 0 ? ' tag-start' : '') + wochenKlasse(g) + (c.datum === p.heute ? ' heute' : '') + (c.nutzbar ? ' kann' : ' aus') });
       if (!c.nutzbar) return td;
       if (c.thema_id === t.id) {
@@ -221,7 +230,7 @@ const Planung = (() => {
       L.TAGE[new Date(g.datum + 'T12:00:00').getDay()], el('br'), g.datum.slice(8, 10) + '.' + g.datum.slice(5, 7) + '.',
       g.neueWoche ? el('span', { class: 'kw-unten', text: 'KW ' + g.kw }) : null)));
     const zellen = t => gruppen.map(g => {
-      if (g.typ === 'ferien') return el('td', { class: 'ferien-sp' });
+      if (g.typ === 'ferien') return el('td', { class: 'ferien-sp' + (g.f.marke ? ' marke' : '') });
       const meine = g.spalten.filter(c => c.nutzbar && c.thema_id === t.id);
       const td = el('td', { class: 't tagzelle tag-start' + wochenKlasse(g) + (g.datum === p.heute ? ' heute' : '') + (meine.length ? ' kann' : '') });
       if (meine.length) {
@@ -247,9 +256,11 @@ const Planung = (() => {
       class: (w.heute ? 'heute' : '') + (w.frei ? ' ferien' : w.freie_tage ? ' teilfrei' : ''),
       title: (w.ferien ? w.ferien + (w.frei ? '' : ' (' + w.freie_tage + (w.freie_tage === 1 ? ' Tag' : ' Tage') + ' frei)') + ' · ' : '') + 'ab ' + L.tag(w.montag, true) },
     'KW', el('br'), String(w.kw))));
+    const z = p.klasse_zeitraum || {};
+    const ausserhalb = w => (z.ende && w.montag > z.ende) || (z.beginn && plusTage(w.montag, 4) < z.beginn);
     const zellen = t => p.wochen.map(w => {
       const n = jeWoche[w.montag + ':' + t.id] || 0;
-      const td = el('td', { class: 't kw' + (w.heute ? ' heute' : '') + (w.frei ? ' ferien' : '') + (n ? ' kann' : '') });
+      const td = el('td', { class: 't kw' + (w.heute ? ' heute' : '') + (w.frei ? ' ferien' : '') + (ausserhalb(w) ? ' aus' : '') + (n ? ' kann' : '') });
       if (n) {
         const davor = jeWoche[plusTage(w.montag, -7) + ':' + t.id];
         const danach = jeWoche[plusTage(w.montag, 7) + ':' + t.id];
@@ -279,7 +290,8 @@ const Planung = (() => {
 
   // Bilanz: je Lernfeld Stundenansatz gegen Verplantes und Gehaltenes, fuer den Strang Verplantes gegen Verfuegbares
   function bilanz(p) {
-    const ende = L.tag(p.schuljahr.ende, true);
+    const z = p.klasse_zeitraum || {};
+    const ende = z.ende ? L.tag(z.ende, true) + ' (Ausschulung)' : L.tag(p.schuljahr.ende, true);
     const passt = p.summe.bedarf - p.summe.ueberlauf;
     return el('details', { class: 'karte bilanz', open: p.summe.ueberlauf ? true : null },
       el('summary', { class: 'zeile' }, L.symbol('diagramm' in L.SYMBOLE ? 'diagramm' : 'liste'), el('b', { text: 'Bilanz' }),

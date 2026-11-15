@@ -329,11 +329,13 @@ class Kalender:
         self.frei = stundenplan.freie_tage(con, von, bis)
         self.aend = stundenplan._aenderungen(con, lid, von, bis)
         self.weg = {(a["datum"], a["beginn"]): a for a in self.aend if a["art"] in ("ausfall", "vertreten", "verschoben")}
+        self.zeitraum = grunddaten.klassen_zeitraum(con)
         self._tage = {}
 
     def regulaer(self, datum):
         if datum not in self._tage:
-            self._tage[datum] = stundenplan._regulaere_stunden(self.con, self.lid, datum, self.versionen, self.regel, self.frei)
+            self._tage[datum] = stundenplan._regulaere_stunden(self.con, self.lid, datum, self.versionen, self.regel, self.frei,
+                                                               self.zeitraum)
         return self._tage[datum]
 
     def bloecke(self, kid, gid):
@@ -448,7 +450,8 @@ def _ist(con, lid, von, bis):
 
 def ferienabschnitte(frei, von, bis):
     """Zusammenhaengende unterrichtsfreie Werktage (Ferien, Feiertage) im Zeitraum: [{von, bis, name, tage}].
-    Ein Wochenende dazwischen trennt einen Abschnitt nicht."""
+    Ein Wochenende dazwischen trennt einen Abschnitt nicht; Feiertage in den Ferien (Neujahr) gehoeren dazu.
+    Name ist der haeufigste Name im Abschnitt (also der der Ferien)."""
     abschnitte = []
     tag = von
     while tag <= bis:
@@ -461,12 +464,16 @@ def ferienabschnitte(frei, von, bis):
                 while d < tag:
                     zwischen.append(d)
                     d += datetime.timedelta(days=1)
-            if letzter and letzter["name"] == name and all(d.isoweekday() > 5 for d in zwischen):
+            if letzter and all(d.isoweekday() > 5 for d in zwischen):
                 letzter["bis"] = tag.isoformat()
                 letzter["tage"] += 1
+                letzter["namen"].append(name)
             else:
-                abschnitte.append({"von": tag.isoformat(), "bis": tag.isoformat(), "name": name, "tage": 1})
+                abschnitte.append({"von": tag.isoformat(), "bis": tag.isoformat(), "tage": 1, "namen": [name]})
         tag += datetime.timedelta(days=1)
+    for a in abschnitte:
+        namen = a.pop("namen")
+        a["name"] = max(namen, key=namen.count)
     return abschnitte
 
 
@@ -524,7 +531,10 @@ def plan(con, lid, kid, gid, sid, jetzt=None):
                        "ueberlauf": sum(t["ueberlauf"] for t in ts)})
     offen = [b for b in bloecke if b["vergangen"] and b["thema_id"] and not b["ist"] and b["art"] != "vertreten"]
     spuren = sorted({b["lernfeld_id"] for b in bloecke if b["lernfeld_id"]})
-    return {"schuljahr": sj, "themen": themen, "bloecke": bloecke, "weg": weg, "wochen": wochen,
+    kl = con.execute("SELECT beginn, ende FROM klasse WHERE id = ?", (kid,)).fetchone()
+    klasse_zeitraum = {"beginn": kl["beginn"] if kl["beginn"] and kl["beginn"] > sj["beginn"] else None,
+                       "ende": kl["ende"] if kl["ende"] and kl["ende"] < sj["ende"] else None}
+    return {"schuljahr": sj, "klasse_zeitraum": klasse_zeitraum, "themen": themen, "bloecke": bloecke, "weg": weg, "wochen": wochen,
             "ferien": ferienabschnitte(kal.frei, von, bis),
             "lernfelder": list(lf.values()), "spuren": [lf.get(s, {"id": s, "nummer": "?"}) for s in spuren], "bilanz": bilanz,
             "summe": {"bloecke": len(bloecke), "verplant": sum(t["zugeteilt"] for t in themen),
