@@ -18,13 +18,15 @@ const Stundenplan = (() => {
 
   async function schritt(url, daten) {
     E = await L.api('POST', url, daten || {});
-    if (E.neu) gewaehlt = E.neu;
+    if (E.neu && url === '/api/stundenplan/version') gewaehlt = E.neu;   // nur neue Versionen auswaehlen, nicht neue Gruppen
     if (!E.versionen.some(v => v.id === gewaehlt)) gewaehlt = E.gilt_jetzt || (E.versionen.length ? E.versionen[0].id : null);
     return E;
   }
 
   const version = () => E.versionen.find(v => v.id === gewaehlt);
   const klasse = id => E.klassen.find(k => k.id === id);
+  const gruppenVon = kid => E.gruppen.filter(g => g.klasse_id === Number(kid));
+  const gruppenName = gid => (E.gruppen.find(g => g.id === gid) || { name: '?' }).name;
   const farbe = id => E.farben[String(id)] || 'var(--leise)';
   const versionText = v => 'ab ' + L.tag(v.ab, true).slice(3) + (v.name ? ' · ' + v.name : '') + (v.id === E.gilt_jetzt ? ' (gilt jetzt)' : '');
 
@@ -43,6 +45,7 @@ const Stundenplan = (() => {
     teile.push(el('div', { class: 'zeile' },
       L.feld('Version', auswahl),
       el('span', { class: 'rechts' },
+        el('button', { type: 'button', onclick: () => gruppenVerwalten() }, L.symbol('klassen'), 'Gruppen'),
         el('button', { type: 'button', onclick: tagKopieren }, L.symbol('kopie'), 'Tag kopieren'),
         el('button', { type: 'button', onclick: () => versionNeu(v) }, L.symbol('plus'), 'Neue Version aus dieser'),
         el('button', { type: 'button', class: 'leicht', 'aria-label': 'Version bearbeiten', title: 'Version bearbeiten', onclick: () => versionBearbeiten(v) }, L.symbol('stift')),
@@ -64,7 +67,8 @@ const Stundenplan = (() => {
           'aria-label': TAGNAMEN[i] + ' ' + z.beginn + (hier.length ? ': ' + hier.map(e => (klasse(e.klasse_id) || {}).name).join(', ') : ': frei'),
           onclick: () => feldBearbeiten(v, i + 1, z, hier) },
         hier.length ? hier.map(e => el('span', { class: 'gk', style: '--kl:' + farbe(e.klasse_id) },
-          (klasse(e.klasse_id) || { name: '?' }).name, e.woche !== 'alle' ? el('span', { class: 'ab', text: e.woche }) : null)) : '+'));
+          (klasse(e.klasse_id) || { name: '?' }).name, e.gruppe_id ? el('span', { class: 'gr', text: gruppenName(e.gruppe_id) }) : null,
+          e.woche !== 'alle' ? el('span', { class: 'ab', text: e.woche }) : null)) : '+'));
         return td;
       })));
     return el('table', { class: 'gp' }, el('thead', {}, kopf), el('tbody', {}, zeilen));
@@ -77,16 +81,33 @@ const Stundenplan = (() => {
         selected: k.id === gewaehlt ? true : null })));
   }
 
+  // Klasse und Gruppe fuer einen Eintrag: die Gruppenauswahl erscheint nur, wenn die Klasse Gruppen hat
+  function klasseUndGruppe(z, eintrag, beschriftung) {
+    const kSel = klassenAuswahl(z, eintrag ? eintrag.klasse_id : null, '– frei –');
+    const gSel = el('select', { 'aria-label': 'Gruppe' });
+    const gFeld = L.feld('Gruppe', gSel);
+    const fuellen = gewaehlt => {
+      const liste = kSel.value ? gruppenVon(kSel.value) : [];
+      L.setzen(gSel, el('option', { value: '', text: 'ganze Klasse' }),
+        liste.map(g => el('option', { value: g.id, text: g.name, selected: g.id === gewaehlt ? true : null })));
+      gFeld.hidden = !liste.length;
+    };
+    kSel.addEventListener('change', () => fuellen(null));
+    fuellen(eintrag ? eintrag.gruppe_id : null);
+    return { teil: el('div', { class: 'felder zwei' }, L.feld(beschriftung, kSel), gFeld),
+      wert: woche => ({ klasse_id: kSel.value || null, gruppe_id: gSel.value || null, woche }) };
+  }
+
   async function feldBearbeiten(v, tag, z, hier) {
     const alle = hier.find(e => e.woche === 'alle');
     const a = hier.find(e => e.woche === 'A');
     const b = hier.find(e => e.woche === 'B');
-    const jede = klassenAuswahl(z, alle ? alle.klasse_id : null, '– frei –');
-    const selA = klassenAuswahl(z, a ? a.klasse_id : null, '– frei –');
-    const selB = klassenAuswahl(z, b ? b.klasse_id : null, '– frei –');
+    const jede = klasseUndGruppe(z, alle, 'Klasse');
+    const selA = klasseUndGruppe(z, a, 'A-Woche');
+    const selB = klasseUndGruppe(z, b, 'B-Woche');
     let modus = a || b ? 'ab' : 'alle';
-    const teilAlle = L.feld('Klasse', jede);
-    const teilAB = el('div', { class: 'felder zwei' }, L.feld('A-Woche', selA), L.feld('B-Woche', selB));
+    const teilAlle = jede.teil;
+    const teilAB = el('div', { class: 'stapel', style: 'gap:10px' }, selA.teil, selB.teil);
     const seg = el('div', { class: 'segment', role: 'group', 'aria-label': 'Wochen' });
     const umschalten = m => {
       modus = m;
@@ -102,13 +123,51 @@ const Stundenplan = (() => {
       inhalt: el('div', { class: 'stapel', style: 'gap:12px' },
         z.fremd ? el('div', { class: 'banner warnung', text: 'Diese Zeit steht in keinem Zeitraster mehr. Du kannst den Eintrag hier nur noch leeren.' }) : null,
         seg, teilAlle, teilAB,
-        el('p', { class: 'leise klein', text: 'Zur Auswahl stehen die Klassen, deren Zeitraster diesen Block hat.' })),
+        el('p', { class: 'leise klein', text: 'Zur Auswahl stehen die Klassen, deren Zeitraster diesen Block hat. Gruppen legst du oben über „Gruppen“ an; ohne Gruppe gilt der Block für die ganze Klasse.' })),
       speichern: () => schritt('/api/stundenplan/version/' + v.id + '/feld', {
         wochentag: tag, beginn: z.beginn, ende: z.ende,
-        eintraege: modus === 'alle' ? [{ klasse_id: jede.value || null, woche: 'alle' }]
-          : [{ klasse_id: selA.value || null, woche: 'A' }, { klasse_id: selB.value || null, woche: 'B' }] }),
+        eintraege: modus === 'alle' ? [jede.wert('alle')] : [selA.wert('A'), selB.wert('B')] }),
     });
     if (r) zeichnen();
+  }
+
+  // Eigene Gruppen je Klasse (z. B. Gr. 1 / Gr. 2): nur fuer dich sichtbar, in der Planung je Gruppe ein eigener Strang
+  async function gruppenVerwalten() {
+    const aktive = E.klassen.filter(k => k.aktiv).sort((x, y) => x.name.localeCompare(y.name));
+    if (!aktive.length) { L.meldung('Es gibt noch keine Klassen.', true); return; }
+    const kSel = el('select', { 'aria-label': 'Klasse' }, aktive.map(k => el('option', { value: k.id, text: k.name })));
+    const liste = el('div', { class: 'stapel', style: 'gap:6px' });
+    const neuName = el('input', { maxlength: 20, placeholder: 'z. B. Gr. 1', 'aria-label': 'Name der neuen Gruppe' });
+    const fehler = t => L.meldung(t, true);
+    const aufrufen = async (url, daten) => { E = await L.api('POST', url, daten || {}); zeichnenListe(); };
+    const zeichnenListe = () => {
+      const gs = gruppenVon(kSel.value);
+      L.setzen(liste, gs.length ? gs.map(g => {
+        const name = el('input', { value: g.name, maxlength: 20, 'aria-label': 'Name der Gruppe', style: 'flex:1;min-width:0' });
+        return el('div', { class: 'zeile', style: 'flex-wrap:nowrap' }, name,
+          el('button', { type: 'button', class: 'klein', onclick: () => aufrufen('/api/gruppe/' + g.id, { name: name.value }).catch(e => fehler(e.message)) }, 'Umbenennen'),
+          el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Gruppe ' + g.name + ' löschen',
+            onclick: () => aufrufen('/api/gruppe/' + g.id + '/loeschen').catch(e => fehler(e.message)) }, L.symbol('muell')));
+      }) : el('div', { class: 'zeile' }, el('span', { class: 'leise klein', text: 'Keine Gruppen: alle Blöcke gelten für die ganze Klasse.' }),
+        el('button', { type: 'button', class: 'klein', onclick: async () => {
+          try {
+            await aufrufen('/api/gruppe', { klasse_id: Number(kSel.value), name: 'Gr. 1' });
+            await aufrufen('/api/gruppe', { klasse_id: Number(kSel.value), name: 'Gr. 2' });
+          } catch (e) { fehler(e.message); }
+        } }, L.symbol('plus'), 'Gr. 1 und Gr. 2 anlegen')));
+    };
+    kSel.addEventListener('change', zeichnenListe);
+    zeichnenListe();
+    await L.dialog({
+      titel: 'Gruppen', knopf: 'Fertig', abbrechen: null, speichern: () => true,
+      inhalt: el('div', { class: 'stapel', style: 'gap:12px' },
+        el('p', { class: 'leise klein', text: 'Teile eine Klasse in Gruppen, wenn du sie zu verschiedenen Zeiten getrennt unterrichtest. Die Gruppen siehst nur du. In der Planung (Stufe C) bekommt jede Gruppe einen eigenen Themenstand, die Blöcke mit der ganzen Klasse einen eigenen dazu.' }),
+        L.feld('Klasse', kSel), liste,
+        el('div', { class: 'zeile', style: 'flex-wrap:nowrap' }, neuName, el('button', { type: 'button', onclick: async () => {
+          try { await aufrufen('/api/gruppe', { klasse_id: Number(kSel.value), name: neuName.value }); neuName.value = ''; } catch (e) { fehler(e.message); }
+        } }, L.symbol('plus'), 'Anlegen'))),
+    });
+    zeichnen();
   }
 
   function montagHeute() {

@@ -12,7 +12,7 @@ Das Konzept (Fassung 2, freigegeben am 14.11.2026) liegt in `docs/KONZEPT.html`.
 | Stufe | Inhalt | Stand |
 |---|---|---|
 | A | Grundgerüst, Konten mit Einladungscode, Anmeldung mit optionalem zweitem Faktor, Admin-Grunddaten (Bildungsgänge, Stufen, Lernfelder/Module, Zeitraster, Ferien, Klassen, Konferenz-Notenschlüssel), Update, Sicherung | gebaut (0.1.0) |
-| B | Stundenplan von Hand mit Versionen und A/B-Wochen, Feiertage RLP, Wochenplan nach Uhrzeit mit Ausfall, Vertretung (beide Richtungen), Verschieben, Zusatzstunde, eigene Termine und Merker, Startseite | gebaut (0.2.0) |
+| B | Stundenplan von Hand mit Versionen und A/B-Wochen, Feiertage RLP, Wochenplan nach Uhrzeit mit Ausfall, Vertretung (beide Richtungen), Verschieben, Zusatzstunde, eigene Termine und Merker, Startseite; eigene Gruppen je Klasse (0.2.1) | gebaut (0.2.1) |
 | C | Unterrichtsplanung: Bibliothek, Fließplanung, Raster, Bilanz, Stunden-Overlay | offen |
 | D | Prüfungen und Bewertung | offen |
 | E | Teilen im Kollegium | offen |

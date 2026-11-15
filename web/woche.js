@@ -14,6 +14,7 @@ const Woche = (() => {
   const plusTage = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
   const farbe = k => (k && W.farben[String(k.id)]) || 'var(--leise)';
   const zeitText = (b, e) => b + (e ? '–' + e : '');
+  const blockName = b => (b.klasse ? b.klasse.name : (b.klasse_text || 'Vertretung')) + (b.gruppe ? ' · ' + b.gruppe.name : '');
 
   async function zeigen(ortEl, optionen = {}) {
     ort = ortEl;
@@ -73,7 +74,7 @@ const Woche = (() => {
           el('span', {}, L.symbol('merker'), ' ', (b.klasse ? b.klasse.name + ': ' : ''), m.text)))));
       const anders = W.bloecke.filter(b => b.datum === heute.datum && (b.zustand || b.art !== 'regulaer'));
       anders.forEach(b => z.push(el('div', { class: 'z' }, el('span', { class: 'mono', text: b.beginn }),
-        el('span', { text: (b.klasse ? b.klasse.name : b.klasse_text || 'Vertretung') + ': ' + zustandText(b) }))));
+        el('span', { text: blockName(b) + ': ' + zustandText(b) }))));
       if (z.length) {
         karten.push(el('div', { class: 'hinweis' },
           el('div', { class: 'k' }, L.symbol('heute'), el('b', { text: 'Heute' }), el('span', { class: 'zahl', text: String(z.length) })), z));
@@ -129,7 +130,7 @@ const Woche = (() => {
   }
 
   function karte(b) {
-    const name = b.klasse ? b.klasse.name : (b.klasse_text || 'Vertretung');
+    const name = blockName(b);
     const klassen = ['wp-b'];
     if (b.jetzt) klassen.push('jetzt');
     if (b.zustand === 'ausfall' || b.zustand === 'verschoben') klassen.push('aus');
@@ -146,7 +147,8 @@ const Woche = (() => {
     else if (b.jetzt) st.push(el('span', { class: 'jetzt' }, L.symbol('jetzt'), 'jetzt'));
     const k = el('div', { class: klassen.join(' '), style: '--kl:' + farbe(b.klasse), tabindex: '0', role: 'button',
       'aria-label': name + ', ' + tagKurz(b.datum) + ' ' + b.beginn + (st.length ? ', ' + zustandText(b) : '') + ' – Aktionen' },
-    el('div', { class: 'kl' }, el('span', { text: name }),
+    el('div', { class: 'kl' }, el('span', { text: b.klasse ? b.klasse.name : (b.klasse_text || 'Vertretung') }),
+      b.gruppe ? el('span', { class: 'chip gr', text: b.gruppe.name }) : null,
       b.klasse && b.klasse.stufe ? el('span', { class: 'chip', text: b.klasse.stufe }) : null,
       b.woche && b.woche !== 'alle' ? el('span', { class: 'chip', title: 'nur in ' + b.woche + '-Wochen', text: b.woche }) : null),
     st.length ? el('div', { class: 'st' }, st) : null,
@@ -225,7 +227,7 @@ const Woche = (() => {
   window.addEventListener('hashchange', menueZu);
 
   function menue(x, y, b) {
-    const name = b.klasse ? b.klasse.name : (b.klasse_text || 'Vertretung');
+    const name = blockName(b);
     const punkte = [];
     if (b.art === 'regulaer' && !b.zustand) {
       punkte.push(['ausfall', 'Ausfall eintragen …', () => ausfall(b)]);
@@ -268,7 +270,7 @@ const Woche = (() => {
   }
 
   function stundeText(b) {
-    return el('p', { class: 'klein' }, el('b', { text: b.klasse ? b.klasse.name : b.klasse_text }), ' · ' + L.tag(b.datum, true) + ' · ' + zeitText(b.beginn, b.ende));
+    return el('p', { class: 'klein' }, el('b', { text: blockName(b) }), ' · ' + L.tag(b.datum, true) + ' · ' + zeitText(b.beginn, b.ende));
   }
 
   async function ausfall(b) {
@@ -333,11 +335,18 @@ const Woche = (() => {
     const passend = W.klassen.filter(k => k.bloecke.includes(z.beginn + '-' + z.ende));
     const klasse = el('select', {}, el('option', { value: '', text: art === 'vertretung' ? 'andere Klasse (eintippen)' : '– Klasse wählen –' }),
       passend.map(k => el('option', { value: k.id, text: k.name })));
+    const gruppe = el('select', { 'aria-label': 'Gruppe' });
+    const gruppeFeld = L.feld('Gruppe', gruppe);
     const andere = el('input', { maxlength: 40, placeholder: 'z. B. IT 23' });
     const andereFeld = L.feld('Klasse', andere);
     const wer = el('input', { maxlength: 80, placeholder: 'z. B. Kollegin M.' });
     const [grund, liste] = grundFeld();
-    const umschalten = () => { andereFeld.hidden = art !== 'vertretung' || !!klasse.value; };
+    const umschalten = () => {
+      andereFeld.hidden = art !== 'vertretung' || !!klasse.value;
+      const gs = klasse.value ? W.gruppen.filter(g => g.klasse_id === Number(klasse.value)) : [];
+      L.setzen(gruppe, el('option', { value: '', text: 'ganze Klasse' }), gs.map(g => el('option', { value: g.id, text: g.name })));
+      gruppeFeld.hidden = !gs.length;
+    };
     klasse.addEventListener('change', umschalten);
     umschalten();
     const ok = await L.dialog({
@@ -345,10 +354,11 @@ const Woche = (() => {
       inhalt: el('div', { class: 'stapel', style: 'gap:10px' },
         el('p', { class: 'klein', text: L.tag(datum, true) + ' · ' + (z.bezeichnung ? z.bezeichnung + ' · ' : '') + zeitText(z.beginn, z.ende) }),
         L.feld(art === 'vertretung' ? 'Klasse aus der Liste' : 'Klasse', klasse, passend.length ? null : 'Keine Klasse hat laut Zeitraster diesen Block.'),
-        andereFeld,
+        gruppeFeld, andereFeld,
         art === 'vertretung' ? L.feld('Für wen?', wer, 'freiwillig') : null,
         L.feld(art === 'zusatz' ? 'Anlass' : 'Notiz', grund, 'freiwillig'), liste),
-      speichern: () => aendern({ art, datum, beginn: z.beginn, ende: z.ende, klasse_id: klasse.value || null, klasse_text: andere.value,
+      speichern: () => aendern({ art, datum, beginn: z.beginn, ende: z.ende, klasse_id: klasse.value || null, gruppe_id: gruppe.value || null,
+        klasse_text: andere.value,
         wer: wer.value, grund: grund.value }),
     });
     if (ok) await laden();

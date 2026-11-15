@@ -172,6 +172,47 @@ class Aenderungen(MitStundenplan):
             stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "zusatz", "datum": "2026-11-18", "beginn": "07:45", "klasse_id": self.ft})
 
 
+class Gruppen(MitStundenplan):
+    def test_gruppen_im_tag_und_ganze_klasse(self):
+        g1 = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.k24, "name": "Gr. 1"})
+        g2 = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.k24, "name": "Gr. 2"})
+        with self.assertRaises(stundenplan.StundenplanFehler):   # doppelter Name
+            stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.k24, "name": "Gr. 1"})
+        self.feld(self.v1, 1, "07:45", "09:15", [{"klasse_id": self.k24, "gruppe_id": g1}])
+        self.feld(self.v1, 1, "09:30", "11:00", [{"klasse_id": self.k24, "gruppe_id": g2}])
+        w = self.woche("2026-11-16")
+        mo = [b for b in w["bloecke"] if b["datum"] == "2026-11-16"]
+        self.assertEqual([b["gruppe"]["name"] for b in mo], ["Gr. 1", "Gr. 2"])
+        mi = next(b for b in w["bloecke"] if b["datum"] == "2026-11-18")
+        self.assertIsNone(mi["gruppe"])                           # ganze Klasse
+        self.assertEqual(len(w["gruppen"]), 2)
+        # Ausfall und Verschieben behalten die Gruppe, Zusatzstunde kann eine bekommen
+        stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "verschoben", "datum": "2026-11-16", "beginn": "09:30",
+                                                           "ziel_datum": "2026-11-19", "ziel_beginn": "07:45"})
+        stundenplan.aenderung_anlegen(self.con, self.lid, {"art": "zusatz", "datum": "2026-11-17", "beginn": "07:45",
+                                                           "klasse_id": self.k24, "gruppe_id": g1})
+        w = self.woche("2026-11-16")
+        self.assertEqual(next(b for b in w["bloecke"] if b["datum"] == "2026-11-19")["gruppe"]["name"], "Gr. 2")
+        self.assertEqual(next(b for b in w["bloecke"] if b["datum"] == "2026-11-17" and b["art"] == "zusatz")["gruppe"]["name"], "Gr. 1")
+        with self.assertRaises(stundenplan.StundenplanFehler):   # Gruppe in Gebrauch
+            stundenplan.gruppe_loeschen(self.con, self.lid, g1)
+        # neue Version und Tag kopieren nehmen die Gruppe mit
+        v2 = stundenplan.version_anlegen(self.con, self.lid, {"ab": "2027-02-01", "kopie_von": self.v1})
+        stundenplan.tag_kopieren(self.con, self.lid, v2, 1, 5)
+        fr = [b["gruppe"]["name"] for b in self.woche("2027-02-01")["bloecke"] if b["datum"] == "2027-02-05"]
+        self.assertEqual(fr, ["Gr. 1", "Gr. 2"])
+
+    def test_gruppen_sind_privat_und_passen_zur_klasse(self):
+        g = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.k24, "name": "Gr. 1"})
+        with self.assertRaises(stundenplan.StundenplanFehler):   # Gruppe gehoert zu 24a, nicht 22b
+            self.feld(self.v1, 4, "07:45", "09:15", [{"klasse_id": self.k22, "gruppe_id": g}])
+        with db.transaktion(self.con):
+            ander = konten.anlegen(self.con, "rei", "Kollege Reiter", "lehrkraft", "geheim123", vorlaeufig=False)
+        self.assertEqual(stundenplan.gruppen(self.con, ander["id"]), [])
+        with self.assertRaises(stundenplan.StundenplanFehler):
+            stundenplan.gruppe_loeschen(self.con, ander["id"], g)
+
+
 class Termine(MitStundenplan):
     def test_termine_und_merker(self):
         stundenplan.termin_speichern(self.con, self.lid, {"art": "dienst", "titel": "Fachkonferenz", "datum": "2026-11-17", "beginn": "15:00"})

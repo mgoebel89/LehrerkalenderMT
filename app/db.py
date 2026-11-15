@@ -195,6 +195,19 @@ MIGRATIONEN = [
         erstellt TEXT NOT NULL);
     CREATE INDEX termin_datum ON termin (lehrkraft_id, datum)
     """,
+    # 3: Gruppen einer Klasse, die jede Lehrkraft fuer sich anlegt (z. B. Gr. 1 / Gr. 2). Ein Stundenplan-Eintrag oder
+    #    eine Zusatzstunde ohne Gruppe gilt fuer die ganze Klasse (in der Planung ein eigener Strang).
+    """
+    CREATE TABLE gruppe (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        klasse_id INTEGER NOT NULL REFERENCES klasse(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        reihenfolge INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (lehrkraft_id, klasse_id, name));
+    ALTER TABLE stundenplan_eintrag ADD COLUMN gruppe_id INTEGER REFERENCES gruppe(id);
+    ALTER TABLE aenderung ADD COLUMN gruppe_id INTEGER REFERENCES gruppe(id)
+    """,
 ]
 
 

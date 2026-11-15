@@ -206,7 +206,7 @@ def versionen(con, lid):
     liste = []
     for v in con.execute("SELECT * FROM stundenplan_version WHERE lehrkraft_id = ? ORDER BY ab", (lid,)).fetchall():
         eintraege = [{"id": e["id"], "wochentag": e["wochentag"], "beginn": e["beginn"], "ende": e["ende"],
-                      "klasse_id": e["klasse_id"], "woche": e["woche"]}
+                      "klasse_id": e["klasse_id"], "gruppe_id": e["gruppe_id"], "woche": e["woche"]}
                      for e in con.execute("SELECT * FROM stundenplan_eintrag WHERE version_id = ? ORDER BY wochentag, beginn, woche",
                                           (v["id"],))]
         liste.append({"id": v["id"], "ab": v["ab"], "name": v["name"], "eintraege": eintraege})
@@ -237,8 +237,9 @@ def version_anlegen(con, lid, daten):
     vid = con.execute("INSERT INTO stundenplan_version (lehrkraft_id, ab, name, erstellt) VALUES (?, ?, ?, ?)",
                       (lid, ab, name, db.jetzt())).lastrowid
     if quelle is not None:
-        con.execute("INSERT INTO stundenplan_eintrag (version_id, wochentag, beginn, ende, klasse_id, woche) "
-                    "SELECT ?, wochentag, beginn, ende, klasse_id, woche FROM stundenplan_eintrag WHERE version_id = ?", (vid, quelle))
+        con.execute("INSERT INTO stundenplan_eintrag (version_id, wochentag, beginn, ende, klasse_id, gruppe_id, woche) "
+                    "SELECT ?, wochentag, beginn, ende, klasse_id, gruppe_id, woche FROM stundenplan_eintrag WHERE version_id = ?",
+                    (vid, quelle))
     return vid
 
 
@@ -260,8 +261,8 @@ def _ueberschneidet(b1, e1, b2, e2):
 
 
 def feld_setzen(con, lid, vid, daten):
-    """Setzt einen Block eines Wochentags: eintraege = [] (frei), [{klasse_id, woche: 'alle'}] oder je eine Klasse fuer A
-    und/oder B. Die Uhrzeiten muessen im Zeitraster jeder gewaehlten Klasse stehen."""
+    """Setzt einen Block eines Wochentags: eintraege = [] (frei), [{klasse_id, gruppe_id, woche: 'alle'}] oder je eine Klasse
+    fuer A und/oder B. gruppe_id leer = ganze Klasse. Die Uhrzeiten muessen im Zeitraster jeder gewaehlten Klasse stehen."""
     _version(con, lid, vid)
     tag = _wochentag(daten.get("wochentag"))
     beginn, ende = _uhrzeit(daten.get("beginn"), "den Beginn"), _uhrzeit(daten.get("ende"), "das Ende")
@@ -284,20 +285,20 @@ def feld_setzen(con, lid, vid, daten):
             _block_der_klasse(con, kid, beginn, ende)
         except StundenplanFehler:
             raise StundenplanFehler("%s hat laut Zeitraster keinen Block %s–%s." % (k["name"], beginn, ende))
-        saubere.append((kid, woche))
-    wochen = [w for _, w in saubere]
+        saubere.append((kid, woche, _gruppe_pruefen(con, lid, kid, e.get("gruppe_id"))))
+    wochen = [w for _, w, _ in saubere]
     if len(saubere) == 2 and sorted(wochen) != ["A", "B"]:
         raise StundenplanFehler("Zwei Klassen in einem Block gehen nur als A- und B-Woche.")
     # andere Bloecke desselben Tages, die sich zeitlich ueberschneiden (z. B. anderes Raster), sind nicht erlaubt
     for alt in con.execute("SELECT e.beginn, e.ende, e.woche, k.name FROM stundenplan_eintrag e JOIN klasse k ON k.id = e.klasse_id "
                            "WHERE e.version_id = ? AND e.wochentag = ? AND e.beginn != ?", (vid, tag, beginn)):
-        for _, w in saubere:
+        for _, w, _ in saubere:
             if _ueberschneidet(beginn, ende, alt["beginn"], alt["ende"]) and ("alle" in (w, alt["woche"]) or w == alt["woche"]):
                 raise StundenplanFehler("Der Block überschneidet sich mit %s (%s–%s)." % (alt["name"], alt["beginn"], alt["ende"]))
     con.execute("DELETE FROM stundenplan_eintrag WHERE version_id = ? AND wochentag = ? AND beginn = ?", (vid, tag, beginn))
-    for kid, woche in saubere:
-        con.execute("INSERT INTO stundenplan_eintrag (version_id, wochentag, beginn, ende, klasse_id, woche) VALUES (?, ?, ?, ?, ?, ?)",
-                    (vid, tag, beginn, ende, kid, woche))
+    for kid, woche, gid in saubere:
+        con.execute("INSERT INTO stundenplan_eintrag (version_id, wochentag, beginn, ende, klasse_id, gruppe_id, woche) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)", (vid, tag, beginn, ende, kid, gid, woche))
 
 
 def tag_kopieren(con, lid, vid, von, nach):
@@ -307,9 +308,62 @@ def tag_kopieren(con, lid, vid, von, nach):
     if von == nach:
         raise StundenplanFehler("Bitte zwei verschiedene Tage wählen.")
     con.execute("DELETE FROM stundenplan_eintrag WHERE version_id = ? AND wochentag = ?", (vid, nach))
-    con.execute("INSERT INTO stundenplan_eintrag (version_id, wochentag, beginn, ende, klasse_id, woche) "
-                "SELECT version_id, ?, beginn, ende, klasse_id, woche FROM stundenplan_eintrag WHERE version_id = ? AND wochentag = ?",
+    con.execute("INSERT INTO stundenplan_eintrag (version_id, wochentag, beginn, ende, klasse_id, gruppe_id, woche) "
+                "SELECT version_id, ?, beginn, ende, klasse_id, gruppe_id, woche FROM stundenplan_eintrag "
+                "WHERE version_id = ? AND wochentag = ?",
                 (nach, vid, von))
+
+
+# --- Gruppen einer Klasse (je Lehrkraft) ---
+
+def gruppen(con, lid):
+    """Eigene Gruppen: [{id, klasse_id, name}], je Klasse in Reihenfolge."""
+    return [dict(g) for g in con.execute("SELECT id, klasse_id, name FROM gruppe WHERE lehrkraft_id = ? "
+                                         "ORDER BY klasse_id, reihenfolge, name", (lid,))]
+
+
+def _gruppe_pruefen(con, lid, kid, gid):
+    """gid leer = ganze Klasse; sonst muss die Gruppe der Lehrkraft gehoeren und zur Klasse passen."""
+    gid = _id(gid)
+    if gid is None:
+        return None
+    if con.execute("SELECT 1 FROM gruppe WHERE id = ? AND lehrkraft_id = ? AND klasse_id = ?", (gid, lid, kid)).fetchone() is None:
+        raise StundenplanFehler("Diese Gruppe gehört nicht zur Klasse.")
+    return gid
+
+
+def gruppe_speichern(con, lid, daten, gid=None):
+    name = _text(daten.get("name"), 20)
+    if not name:
+        raise StundenplanFehler("Bitte einen Namen angeben (z. B. Gr. 1).")
+    if gid is None:
+        kid = _id(daten.get("klasse_id"))
+        if kid is None or con.execute("SELECT 1 FROM klasse WHERE id = ?", (kid,)).fetchone() is None:
+            raise StundenplanFehler("Bitte eine Klasse wählen.")
+    else:
+        zeile = con.execute("SELECT klasse_id FROM gruppe WHERE id = ? AND lehrkraft_id = ?", (gid, lid)).fetchone()
+        if zeile is None:
+            raise StundenplanFehler("Diese Gruppe gibt es nicht.")
+        kid = zeile["klasse_id"]
+    if con.execute("SELECT 1 FROM gruppe WHERE lehrkraft_id = ? AND klasse_id = ? AND name = ? AND id != ?",
+                   (lid, kid, name, gid or -1)).fetchone():
+        raise StundenplanFehler("Die Gruppe %s gibt es in dieser Klasse schon." % name)
+    if gid is None:
+        reihe = con.execute("SELECT COALESCE(MAX(reihenfolge), 0) + 1 FROM gruppe WHERE lehrkraft_id = ? AND klasse_id = ?",
+                            (lid, kid)).fetchone()[0]
+        return con.execute("INSERT INTO gruppe (lehrkraft_id, klasse_id, name, reihenfolge) VALUES (?, ?, ?, ?)",
+                           (lid, kid, name, reihe)).lastrowid
+    con.execute("UPDATE gruppe SET name = ? WHERE id = ?", (name, gid))
+    return gid
+
+
+def gruppe_loeschen(con, lid, gid):
+    if con.execute("SELECT 1 FROM gruppe WHERE id = ? AND lehrkraft_id = ?", (gid, lid)).fetchone() is None:
+        raise StundenplanFehler("Diese Gruppe gibt es nicht.")
+    if con.execute("SELECT 1 FROM stundenplan_eintrag WHERE gruppe_id = ? UNION SELECT 1 FROM aenderung WHERE gruppe_id = ?",
+                   (gid, gid)).fetchone():
+        raise StundenplanFehler("Die Gruppe steht noch im Stundenplan oder in einer Änderung. Bitte dort zuerst entfernen.")
+    con.execute("DELETE FROM gruppe WHERE id = ?", (gid,))
 
 
 # --- Was an einem Tag stattfindet ---
@@ -371,7 +425,8 @@ def aenderung_anlegen(con, lid, daten):
     datum = _datum(daten.get("datum"))
     beginn = _uhrzeit(daten.get("beginn"), "den Block")
     grund, wer = _text(daten.get("grund")), _text(daten.get("wer"), 80)
-    werte = {"art": art, "datum": datum.isoformat(), "beginn": beginn, "klasse_id": None, "klasse_text": "", "ziel_datum": None,
+    werte = {"art": art, "datum": datum.isoformat(), "beginn": beginn, "klasse_id": None, "gruppe_id": None, "klasse_text": "",
+             "ziel_datum": None,
              "ziel_beginn": None, "ziel_ende": None, "wer": wer, "grund": grund}
 
     if art in ("ausfall", "vertreten", "verschoben"):
@@ -381,7 +436,7 @@ def aenderung_anlegen(con, lid, daten):
         if con.execute("SELECT 1 FROM aenderung WHERE lehrkraft_id = ? AND datum = ? AND beginn = ? AND art IN "
                        "('ausfall', 'vertreten', 'verschoben')", (lid, datum.isoformat(), beginn)).fetchone():
             raise StundenplanFehler("Für diese Stunde ist schon eine Änderung eingetragen. Bitte zuerst zurücknehmen.")
-        werte.update(ende=stunde["ende"], klasse_id=stunde["klasse_id"])
+        werte.update(ende=stunde["ende"], klasse_id=stunde["klasse_id"], gruppe_id=stunde["gruppe_id"])
         if art == "verschoben":
             ziel = _datum(daten.get("ziel_datum"), "den neuen Tag")
             ziel_beginn = _uhrzeit(daten.get("ziel_beginn"), "den neuen Block")
@@ -400,6 +455,7 @@ def aenderung_anlegen(con, lid, daten):
         if kid is not None:
             block = _block_der_klasse(con, kid, beginn)
             werte["klasse_id"] = kid
+            werte["gruppe_id"] = _gruppe_pruefen(con, lid, kid, daten.get("gruppe_id"))
         elif art == "vertretung":
             werte["klasse_text"] = _text(daten.get("klasse_text"), 40)
             if not werte["klasse_text"]:
@@ -493,13 +549,16 @@ def woche(con, lid, montag, jetzt=None):
     termine = _termine(con, lid, montag, freitag)
     merker = [t for t in termine if t["art"] == "merker"]
     weg = {(a["datum"], a["beginn"]): a for a in aend if a["art"] in ("ausfall", "vertreten", "verschoben")}
+    eigene_gruppen = gruppen(con, lid)
+    gruppennamen = {g["id"]: g["name"] for g in eigene_gruppen}
 
     def klasse(kid):
         k = klassen.get(kid)
         return {"id": k["id"], "name": k["name"], "bildungsgang": k["bildungsgang"], "stufe": k["stufe"]} if k else None
 
-    def block(datum, beginn, ende, kid, art, **mehr):
+    def block(datum, beginn, ende, kid, art, gid=None, **mehr):
         b = {"datum": datum, "beginn": beginn, "ende": ende, "klasse": klasse(kid), "art": art, "zustand": None,
+             "gruppe": {"id": gid, "name": gruppennamen.get(gid, "?")} if gid else None,
              "merker": [{"id": m["id"], "text": m["titel"]} for m in merker
                         if m["datum"] == datum and m["beginn"] == beginn and (kid is None or m["klasse_id"] == kid)]}
         b.update(mehr)
@@ -511,7 +570,7 @@ def woche(con, lid, montag, jetzt=None):
         iso = d.isoformat()
         tage.append({"datum": iso, "tag": WOCHENTAGE[i], "frei": frei.get(iso), "heute": iso == heute})
         for e in _regulaere_stunden(con, lid, d, liste, regel, frei):
-            b = block(iso, e["beginn"], e["ende"], e["klasse_id"], "regulaer", woche=e["woche"])
+            b = block(iso, e["beginn"], e["ende"], e["klasse_id"], "regulaer", e["gruppe_id"], woche=e["woche"])
             a = weg.get((iso, e["beginn"]))
             if a:
                 b.update(zustand=a["art"], aenderung_id=a["id"], grund=a["grund"], wer=a["wer"],
@@ -519,10 +578,11 @@ def woche(con, lid, montag, jetzt=None):
             bloecke.append(b)
     for a in aend:
         if a["art"] in ("vertretung", "zusatz") and montag.isoformat() <= a["datum"] <= freitag.isoformat():
-            bloecke.append(block(a["datum"], a["beginn"], a["ende"], a["klasse_id"], a["art"], aenderung_id=a["id"],
+            bloecke.append(block(a["datum"], a["beginn"], a["ende"], a["klasse_id"], a["art"], a["gruppe_id"], aenderung_id=a["id"],
                                  grund=a["grund"], wer=a["wer"], klasse_text=a["klasse_text"]))
         elif a["art"] == "verschoben" and a["ziel_datum"] and montag.isoformat() <= a["ziel_datum"] <= freitag.isoformat():
-            bloecke.append(block(a["ziel_datum"], a["ziel_beginn"], a["ziel_ende"], a["klasse_id"], "verschoben", aenderung_id=a["id"],
+            bloecke.append(block(a["ziel_datum"], a["ziel_beginn"], a["ziel_ende"], a["klasse_id"], "verschoben", a["gruppe_id"],
+                                 aenderung_id=a["id"],
                                  grund=a["grund"], herkunft={"datum": a["datum"], "beginn": a["beginn"]}))
     for b in bloecke:
         b["jetzt"] = b["datum"] == heute and b["beginn"] <= uhr < b["ende"] and b["zustand"] is None
@@ -550,6 +610,7 @@ def woche(con, lid, montag, jetzt=None):
         "klassen": [{"id": k["id"], "name": k["name"],
                      "bloecke": [r["beginn"] + "-" + r["ende"] for r in raster_der_klasse(con, k["id"], cache)]}
                     for k in klassen.values() if k["aktiv"]],
+        "gruppen": eigene_gruppen,
     }
 
 
@@ -568,7 +629,7 @@ def editor(con, lid, heute=None):
                      for k in klassen.values()]
     zeiten = {(e["beginn"], e["ende"]) for v in liste for e in v["eintraege"]}
     jetzt_gueltig = gueltige_version(liste, heute)
-    return {"versionen": liste, "klassen": klassen_liste, "zeilen": zeitraster_zeilen(con, zeiten),
+    return {"versionen": liste, "klassen": klassen_liste, "gruppen": gruppen(con, lid), "zeilen": zeitraster_zeilen(con, zeiten),
             "farben": {str(k): f for k, f in farben({e["klasse_id"] for v in liste for e in v["eintraege"]}, klassen).items()},
             "ab": ab_woche(woche_von, a_woche_regel(con)), "ab_naechste": woche_von != heute, "a_woche": a_woche_regel(con),
             "heute": heute.isoformat(),

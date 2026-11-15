@@ -152,3 +152,5 @@ table.gp { border-collapse: separate; border-spacing: 0; width: 100%; min-width:
 
 /* Icon (Entwurf A, Kalenderblatt) in der Kopfzeile */
 .marke-symbol { width: 26px; height: 26px; flex: none; display: block; }
+.gk .gr { font-size: .66rem; font-weight: 700; padding: 0 5px; border-radius: 999px; background: var(--blau-hell); color: var(--blau); }
+.wp-b .kl .chip.gr { background: var(--blau-hell); border-color: var(--blau-mittel); color: var(--blau); }
