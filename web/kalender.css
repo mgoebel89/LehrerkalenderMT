@@ -238,3 +238,9 @@ fieldset.wahl-gruppe legend { font-size: .85em; font-weight: 600; color: var(--l
 .lp th.ferien-sp.marke, .lp td.ferien-sp.marke { background: #e9edf2; border-left: 2px solid var(--rot); border-right: 1px solid var(--linie-stark); }
 .lp th.ferien-sp.marke .senkrecht { color: var(--rot); }
 .gk .bis { font-family: var(--mono); font-size: .6rem; font-weight: 700; color: var(--rot); }
+
+/* Termine aus Kalender-Abos */
+.wp-ev.schule { background: #f1ebf7; border-color: #cdb8e2; color: #5d3d80; }
+.wp-ev.abo { background: #eef3f8; border-color: var(--blau-mittel); color: var(--blau-dunkel); border-style: dashed; }
+.ka.aus { opacity: .6; }
+.wp-ev.privat { background: var(--knopf); border-color: var(--linie-stark); color: var(--text); }

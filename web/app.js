@@ -49,7 +49,7 @@ async function zeigen() {
   L.setzen(inhalt, el('p', { class: 'leise', text: 'Lädt …' }));
   try {
     if (bereich.a === 'start') await startZeigen();
-    else if (bereich.a === 'einstellungen') await einstellungenZeigen(ziel === 'einstellungen-konto' ? 'konto' : 'stundenplan');
+    else if (bereich.a === 'einstellungen') await einstellungenZeigen(ziel === 'einstellungen-konto' ? 'konto' : ziel === 'einstellungen-kalender' ? 'kalender' : 'stundenplan');
     else if (bereich.a === 'planung') await planungZeigen(ziel === 'planung-bibliothek' ? 'bibliothek' : 'planung');
     else await Admin.zeigen(bereich.a, inhalt, titelSetzen);
   } catch (e) {
@@ -116,11 +116,13 @@ async function einstellungenZeigen(reiter) {
   const ort = el('div', { class: 'stapel' });
   const tab = (id, ziel, text, sym) => el('a', { class: 'knopf' + (reiter === id ? ' an' : ''), href: '#' + ziel }, L.symbol(sym), text);
   L.setzen(inhalt,
-    el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: reiter === 'konto' ? 'Mein Konto' : 'Stundenplan' }),
+    el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: reiter === 'konto' ? 'Mein Konto' : reiter === 'kalender' ? 'Kalender' : 'Stundenplan' }),
       el('div', { class: 'segment', role: 'group', 'aria-label': 'Einstellungen' },
-        tab('stundenplan', 'einstellungen', 'Stundenplan', 'spalten'), tab('konto', 'einstellungen-konto', 'Konto und Sicherheit', 'schloss'))),
+        tab('stundenplan', 'einstellungen', 'Stundenplan', 'spalten'), tab('kalender', 'einstellungen-kalender', 'Kalender', 'kalender'),
+        tab('konto', 'einstellungen-konto', 'Konto und Sicherheit', 'schloss'))),
     ort);
   if (reiter === 'konto') kontoZeigen(ort);
+  else if (reiter === 'kalender') L.setzen(ort, el('div', { style: 'max-width:760px' }, Abos.karte(false)));
   else await Stundenplan.zeigen(ort);
 }
 

@@ -286,14 +286,16 @@ const Admin = (() => {
   }
 
   function ferienAnsicht() {
-    return el('div', { class: 'stapel', style: 'max-width:760px' }, schuljahrKarte(), abWochenKarte(), el('div', { class: 'karte stapel' },
+    return el('div', { class: 'stapel', style: 'max-width:760px' }, schuljahrKarte(), Abos.karte(true, async () => { await laden(); grunddatenZeichnen(); }),
+      abWochenKarte(), el('div', { class: 'karte stapel' },
       el('div', { class: 'zeile' }, el('h2', { text: 'Ferien und freie Tage' }),
         el('span', { class: 'rechts' }, el('button', { type: 'button', class: 'haupt klein', onclick: ferienNeu }, L.symbol('plus'), 'Ferien'))),
       el('p', { class: 'leise klein', text: 'Gelten für alle Klassen. Gesetzliche Feiertage in Rheinland-Pfalz (auch Fronleichnam und Allerheiligen) rechnet das Programm selbst aus; an diesen Tagen fällt der Stundenplan weg.' }),
       G.ferien.length ? el('table', { class: 'liste' }, el('tbody', {}, G.ferien.map(f => el('tr', {},
         el('td', {}, el('b', { text: f.name })), el('td', { class: 'mono', text: L.tag(f.von, true) + (f.bis !== f.von ? ' – ' + L.tag(f.bis, true) : '') }),
-        el('td', { class: 'knoepfe' }, el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Entfernen',
-          onclick: () => loeschenFragen(f.name + ' entfernen?', 'Die Ferien verschwinden aus allen Kalendern.', '/api/admin/ferien/' + f.id + '/loeschen') }, L.symbol('muell')))))))
+        el('td', { class: 'knoepfe' }, f.abo ? el('span', { class: 'chip', title: 'kommt aus dem Kalender-Abo', text: 'Abo: ' + f.abo })
+          : el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Entfernen',
+            onclick: () => loeschenFragen(f.name + ' entfernen?', 'Die Ferien verschwinden aus allen Kalendern.', '/api/admin/ferien/' + f.id + '/loeschen') }, L.symbol('muell')))))))
         : el('p', { class: 'leise', text: 'Noch keine Ferien eingetragen.' })));
   }
 

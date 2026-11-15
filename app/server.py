@@ -19,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, db, grunddaten, konten, notenschluessel, planung, qr, stundenplan, totp, updates
+from . import VERSION, abos, db, grunddaten, konten, notenschluessel, planung, qr, stundenplan, totp, updates
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -203,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
         except Fehler as f:
             self.antwort(f.status, {"fehler": f.meldung})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
-                stundenplan.StundenplanFehler, planung.PlanungFehler, updates.UpdateFehler) as f:
+                stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, updates.UpdateFehler) as f:
             self.antwort(400, {"fehler": str(f)})
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -608,6 +608,55 @@ def api_ist_alle(h, con, daten):
     h.antwort(200, {"bestaetigt": n})
 
 
+# --- Kalender-Abos (ICS) ---
+
+def api_abos(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, {"eigene": abos.liste(con, k), "schule": abos.liste(con, k, schule=True)})
+
+
+def _abo_schritt(funktion, art):
+    def schritt(h, con, daten, aid=None):
+        k = h.konto(con)
+        with db.transaktion(con):
+            neu = funktion(con, k, daten, None if aid is None else _ganzzahl(aid))
+            if daten.get("schule") or (aid and con.execute("SELECT 1 FROM kalender_abo WHERE id = ? AND lehrkraft_id IS NULL",
+                                                           (int(aid),)).fetchone()):
+                db.protokoll(con, k["kuerzel"], art, id=neu or (int(aid) if aid else None), name=daten.get("name"))
+        h.antwort(200, {"eigene": abos.liste(con, k), "schule": abos.liste(con, k, schule=True), "id": neu})
+    return schritt
+
+
+def api_abo_abrufen(h, con, daten, aid):
+    k = h.konto(con)
+    aid = _ganzzahl(aid)
+    abo = con.execute("SELECT * FROM kalender_abo WHERE id = ?", (aid,)).fetchone()
+    if abo is None:
+        raise Fehler(404, "Dieses Abo gibt es nicht.")
+    abos._darf(k, abo)
+    try:
+        n = abos.abrufen(con, aid)
+        meldung = None
+    except abos.AboFehler as f:
+        n, meldung = 0, str(f)
+    h.antwort(200, {"anzahl": n, "fehler": meldung, "eigene": abos.liste(con, k), "schule": abos.liste(con, k, schule=True)})
+
+
+ABO_TAKT = 3 * 3600   # alle drei Stunden
+
+
+def abos_im_hintergrund(db_pfad):
+    """Kalender-Abos regelmaessig abrufen (erster Lauf eine Minute nach dem Start)."""
+    import time
+    time.sleep(60)
+    while True:
+        try:
+            abos.alle_abrufen(db_pfad)
+        except Exception as f:   # der Thread darf nie sterben
+            print("Abos: %r" % f, file=sys.stderr, flush=True)
+        time.sleep(ABO_TAKT)
+
+
 # --- System: Update und Sicherung ---
 
 def api_sicherung(h, con, daten):
@@ -707,6 +756,11 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/gruppe/" + ID + "/loeschen",
      _stundenplan_schritt(lambda con, lid, d, gid: stundenplan.gruppe_loeschen(con, lid, gid))),
     ("GET", r"/api/woche", api_woche),
+    ("GET", r"/api/abos", api_abos),
+    ("POST", r"/api/abo", _abo_schritt(lambda con, k, d, _: abos.speichern(con, k, d), "abo_angelegt")),
+    ("POST", r"/api/abo/" + ID, _abo_schritt(lambda con, k, d, i: abos.speichern(con, k, d, i), "abo_geaendert")),
+    ("POST", r"/api/abo/" + ID + "/loeschen", _abo_schritt(lambda con, k, d, i: abos.loeschen(con, k, i), "abo_geloescht")),
+    ("POST", r"/api/abo/" + ID + "/abrufen", api_abo_abrufen),
     ("GET", r"/api/bibliothek", api_bibliothek),
     ("POST", r"/api/baustein", _planung_schritt(lambda con, k, d, _: planung.baustein_speichern(con, k, d))),
     ("POST", r"/api/baustein/" + ID, _planung_schritt(lambda con, k, d, i: planung.baustein_speichern(con, k, d, i))),
@@ -815,6 +869,7 @@ def main():
         print("Lehrerkalender MT %s auf https://%s:%d (http :%d leitet um)" % (VERSION, BIND, HTTPS_PORT, HTTP_PORT), flush=True)
     if code:
         print("Noch kein Konto: Einrichtung unter /einrichtung, Code mit  lehrerkalender einrichtungscode", flush=True)
+    threading.Thread(target=abos_im_hintergrund, args=(db_pfad,), daemon=True).start()
     server.serve_forever()
 
 

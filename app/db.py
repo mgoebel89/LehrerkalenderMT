@@ -288,6 +288,32 @@ MIGRATIONEN = [
     ALTER TABLE stundenplan_version_neu RENAME TO stundenplan_version;
     CREATE INDEX stundenplan_version_lk ON stundenplan_version (lehrkraft_id, ab)
     """),
+    # 9: Kalender-Abos (ICS-Links): der Schule (lehrkraft_id NULL, vom Admin; art ferien oder termine) und eigene
+    #    (z. B. Outlook). Abgerufene Termine liegen in abo_termin, Ferien aus einem Abo in ferien mit abo_id.
+    """
+    CREATE TABLE kalender_abo (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        art TEXT NOT NULL CHECK (art IN ('ferien', 'termine')),
+        name TEXT NOT NULL,
+        url TEXT NOT NULL,
+        aktiv INTEGER NOT NULL DEFAULT 1,
+        abgerufen TEXT,
+        fehler TEXT NOT NULL DEFAULT '',
+        anzahl INTEGER NOT NULL DEFAULT 0,
+        erstellt TEXT NOT NULL);
+    CREATE TABLE abo_termin (
+        id INTEGER PRIMARY KEY,
+        abo_id INTEGER NOT NULL REFERENCES kalender_abo(id) ON DELETE CASCADE,
+        titel TEXT NOT NULL,
+        datum TEXT NOT NULL,
+        bis TEXT,
+        beginn TEXT,
+        ende TEXT,
+        ort TEXT NOT NULL DEFAULT '');
+    CREATE INDEX abo_termin_datum ON abo_termin (abo_id, datum);
+    ALTER TABLE ferien ADD COLUMN abo_id INTEGER REFERENCES kalender_abo(id) ON DELETE CASCADE
+    """,
 ]
 
 

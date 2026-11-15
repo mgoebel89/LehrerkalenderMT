@@ -241,7 +241,8 @@ def zeitraster_speichern(con, bildungsgang_id, bloecke):
 # --- Ferien ---
 
 def ferien(con):
-    return [dict(z) for z in con.execute("SELECT id, name, von, bis, quelle FROM ferien ORDER BY von")]
+    return [dict(z) for z in con.execute("SELECT f.id, f.name, f.von, f.bis, f.quelle, a.name AS abo FROM ferien f "
+                                         "LEFT JOIN kalender_abo a ON a.id = f.abo_id ORDER BY f.von")]
 
 
 def ferien_anlegen(con, daten):
@@ -253,6 +254,8 @@ def ferien_anlegen(con, daten):
 
 
 def ferien_loeschen(con, fid):
+    if con.execute("SELECT 1 FROM ferien WHERE id = ? AND abo_id IS NOT NULL", (fid,)).fetchone():
+        raise GrunddatenFehler("Diese Ferien kommen aus einem Kalender-Abo. Bitte im Abo ändern oder das Abo entfernen.")
     con.execute("DELETE FROM ferien WHERE id = ?", (fid,))
 
 

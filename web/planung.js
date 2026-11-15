@@ -129,7 +129,9 @@ const Planung = (() => {
     const scroll = el('div', { class: 'r-scroll' }, tabelle);
     teile.push(scroll, legende(p), bilanz(p));
     L.setzen(ort, teile);
-    const heute = scroll.querySelector('th.ab-heute') || scroll.querySelector('th.heute');   // zur aktuellen Woche springen
+    const ziel = wahl.springe ? [...scroll.querySelectorAll('th[data-datum]')].find(th => th.dataset.datum >= wahl.springe) : null;
+    wahl.springe = null;
+    const heute = ziel || scroll.querySelector('th.ab-heute') || scroll.querySelector('th.heute');   // zur gewaehlten bzw. aktuellen Woche
     if (heute) scroll.scrollLeft = Math.max(0, heute.offsetLeft - 270 - 2 * heute.offsetWidth);
   }
 
@@ -199,7 +201,8 @@ const Planung = (() => {
   function rasterBloecke(p) {
     const gruppen = tagesGruppen(p);
     const kopf1 = el('tr', {}, el('th', { class: 'links', rowspan: 2, text: 'Thema' }), gruppen.map(g => g.typ === 'ferien' ? ferienKopf(g.f, 2)
-      : el('th', { class: 'tag-kopf tag-start' + wochenKlasse(g) + (g.datum === p.heute ? ' heute' : '') + (g.abHeute ? ' ab-heute' : ''), colspan: g.spalten.length },
+      : el('th', { class: 'tag-kopf tag-start' + wochenKlasse(g) + (g.datum === p.heute ? ' heute' : '') + (g.abHeute ? ' ab-heute' : ''), colspan: g.spalten.length,
+        'data-datum': g.datum },
         tagText(g.datum), g.neueWoche ? el('span', { class: 'kw', text: ' KW ' + g.kw }) : null)));
     const kopf2 = el('tr', {}, gruppen.map(g => g.typ === 'ferien' ? null : g.spalten.map((c, n) => el('th', {
       class: 'zeit' + (n === 0 ? ' tag-start' : '') + wochenKlasse(g) + (c.nutzbar ? '' : ' aus'),
@@ -216,6 +219,7 @@ const Planung = (() => {
         if (m) td.appendChild(m);
       }
       td.addEventListener('click', ev => blockMenue(ev, t, c));
+      td.addEventListener('contextmenu', ev => blockMenue(ev, t, c));
       return td;
     }));
     return el('table', { class: 'lp lp-tage' }, el('thead', {}, kopf1, kopf2), el('tbody', {}, zeilen(p, zellen)));
@@ -232,14 +236,18 @@ const Planung = (() => {
     const zellen = t => gruppen.map(g => {
       if (g.typ === 'ferien') return el('td', { class: 'ferien-sp' + (g.f.marke ? ' marke' : '') });
       const meine = g.spalten.filter(c => c.nutzbar && c.thema_id === t.id);
-      const td = el('td', { class: 't tagzelle tag-start' + wochenKlasse(g) + (g.datum === p.heute ? ' heute' : '') + (meine.length ? ' kann' : '') });
+      const nutzbar = g.spalten.filter(c => c.nutzbar);
+      const td = el('td', { class: 't tagzelle tag-start' + wochenKlasse(g) + (g.datum === p.heute ? ' heute' : '') + (nutzbar.length ? ' kann' : '') });
+      if (nutzbar.length) {
+        td.addEventListener('click', ev => blockMenue(ev, t, nutzbar));
+        td.addEventListener('contextmenu', ev => blockMenue(ev, t, nutzbar));
+      }
       if (meine.length) {
         td.appendChild(el('div', { class: 'segmente' }, g.spalten.map(c => el('span', {
           class: 'seg' + (c.nutzbar && c.thema_id === t.id ? ' an' : '') + (c.nutzbar ? '' : ' aus') }))));
         const m = istMarke(meine[meine.length - 1]);
         if (m) td.appendChild(m);
         td.title = t.titel + ': ' + meine.length + ' von ' + g.spalten.length + (g.spalten.length === 1 ? ' Block' : ' Blöcken') + ' am ' + L.tag(g.datum, true);
-        td.addEventListener('click', ev => blockMenue(ev, t, meine[0]));
       }
       return td;
     });
@@ -260,14 +268,15 @@ const Planung = (() => {
     const ausserhalb = w => (z.ende && w.montag > z.ende) || (z.beginn && plusTage(w.montag, 4) < z.beginn);
     const zellen = t => p.wochen.map(w => {
       const n = jeWoche[w.montag + ':' + t.id] || 0;
-      const td = el('td', { class: 't kw' + (w.heute ? ' heute' : '') + (w.frei ? ' ferien' : '') + (ausserhalb(w) ? ' aus' : '') + (n ? ' kann' : '') });
+      const td = el('td', { class: 't kw kann' + (w.heute ? ' heute' : '') + (w.frei ? ' ferien' : '') + (ausserhalb(w) ? ' aus' : ''),
+        title: 'KW ' + w.kw + ': in den Doppelstunden zeigen' });
+      td.addEventListener('click', () => { wahl.ansicht = 'bloecke'; wahl.springe = w.montag; zeichnen(); });
       if (n) {
         const davor = jeWoche[plusTage(w.montag, -7) + ':' + t.id];
         const danach = jeWoche[plusTage(w.montag, 7) + ':' + t.id];
         td.appendChild(el('span', { class: 'bal' + (davor ? '' : ' a') + (danach ? '' : ' e') }));
         td.appendChild(el('span', { class: 'anzahl', text: String(n) }));
-        td.title = t.titel + ': ' + n + (n === 1 ? ' Block' : ' Blöcke') + ' in KW ' + w.kw;
-        td.addEventListener('click', () => { wahl.ansicht = 'bloecke'; zeichnen(); });
+        td.title = t.titel + ': ' + n + (n === 1 ? ' Block' : ' Blöcke') + ' in KW ' + w.kw + ' · antippen: in den Doppelstunden zeigen';
       }
       return td;
     });
@@ -318,12 +327,16 @@ const Planung = (() => {
   function isoVon(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 
   // Tipp auf einen Block in der Zeile eines Themas: Stunde oeffnen, festsetzen bzw. Stecknadel loesen
+  // c: ein Block oder eine Liste von Bloecken (Tagesansicht); Klick und Rechtsklick oeffnen dasselbe Menue
   function blockMenue(ev, t, c) {
+    ev.preventDefault();
     const alt = document.getElementById('wp-menue');
     if (alt) alt.remove();
+    const bloecke = (Array.isArray(c) ? c : [c]).filter(x => x.nutzbar);
     const punkte = [];
-    if (c.nutzbar) punkte.push(['auge', 'Stunde öffnen: ' + tagKurz(c.datum) + ' ' + c.beginn, () => Stunde.oeffnen(c.datum, c.beginn, neuLaden)]);
-    punkte.push(['pin', 'Hier festsetzen: beginnt ' + tagKurz(c.datum) + ' ' + c.beginn, () => festsetzen(t, c.datum, c.beginn)]);
+    bloecke.forEach(b => punkte.push(['pin', (bloecke.length > 1 ? b.beginn + ': ' : '') + 'Hier festsetzen – beginnt ' + tagKurz(b.datum) + ' ' + b.beginn,
+      () => festsetzen(t, b.datum, b.beginn)]));
+    bloecke.forEach(b => punkte.push(['auge', 'Stunde öffnen: ' + tagKurz(b.datum) + ' ' + b.beginn, () => Stunde.oeffnen(b.datum, b.beginn, neuLaden)]));
     if (t.nadel) punkte.push(['undo', 'Stecknadel lösen (fließt wieder)', () => festsetzen(t, null, null)]);
     punkte.push(['stift', 'Thema bearbeiten …', () => themaBearbeiten(t)]);
     const m = el('div', { class: 'wp-menue', id: 'wp-menue', role: 'menu' }, el('div', { class: 'mk', text: t.titel }),

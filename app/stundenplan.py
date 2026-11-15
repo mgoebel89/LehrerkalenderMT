@@ -20,7 +20,7 @@ import datetime
 import re
 import sqlite3
 
-from . import db, grunddaten
+from . import abos, db, grunddaten
 
 UHRZEIT = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 WOCHENTAGE = ("Mo", "Di", "Mi", "Do", "Fr", "Sa")
@@ -662,7 +662,8 @@ def woche(con, lid, montag, jetzt=None):
     return {
         "montag": montag.isoformat(), "kw": montag.isocalendar()[1], "ab": ab_woche(montag, regel), "heute": heute,
         "tage": tage, "zeilen": zeilen, "bloecke": bloecke,
-        "termine": [t for t in termine if t["art"] != "merker"], "merker": merker,
+        "termine": sorted([t for t in termine if t["art"] != "merker"] + abos.termine(con, lid, montag, freitag),
+                          key=lambda t: (t["datum"], t["beginn"] or "")), "merker": merker,
         "farben": {str(k): f for k, f in farben(alle_klassen, klassen).items()},
         "hat_stundenplan": bool(liste),
         "sonderplan": next((v["name"] or "Sonderplan" for v in liste if v["sonder"] and v["ab"] <= freitag.isoformat()

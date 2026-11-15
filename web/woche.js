@@ -141,8 +141,22 @@ const Woche = (() => {
   }
 
   function terminKarte(t) {
-    return el('button', { type: 'button', class: 'wp-ev ' + t.art, onclick: () => terminBearbeiten(t) },
-      L.symbol(t.art === 'dienst' ? 'kalender' : 'konto'), el('span', { text: (t.beginn ? t.beginn + ' ' : '') + t.titel }));
+    const abo = t.art === 'schule' || t.art === 'abo';
+    return el('button', { type: 'button', class: 'wp-ev ' + t.art, title: abo ? t.quelle : null, onclick: () => (abo ? aboTermin(t) : terminBearbeiten(t)) },
+      L.symbol(t.art === 'dienst' ? 'kalender' : t.art === 'schule' ? 'klassen' : t.art === 'abo' ? 'extern' : 'konto'),
+      el('span', { text: (t.beginn ? t.beginn + ' ' : '') + t.titel }));
+  }
+
+  // Termin aus einem Kalender-Abo: nur anzeigen (geaendert wird er in seinem Kalender)
+  function aboTermin(t) {
+    L.dialog({
+      titel: t.titel, knopf: 'Schließen', abbrechen: null, speichern: () => true,
+      inhalt: el('div', { class: 'stapel', style: 'gap:8px' },
+        el('p', {}, el('b', { text: L.tag(t.datum, true) + (t.bis ? ' – ' + L.tag(t.bis, true) : '') }),
+          t.beginn ? ' · ' + t.beginn + (t.ende ? '–' + t.ende : '') + ' Uhr' : ' · ganztags'),
+        t.ort ? el('p', {}, L.symbol('start'), ' ', t.ort) : null,
+        el('p', { class: 'leise klein', text: 'Aus dem Kalender-Abo „' + t.quelle + '“' + (t.art === 'schule' ? ' der Schule' : '') + '. Ändern bitte dort.' })),
+    });
   }
 
   function zustandText(b) {
