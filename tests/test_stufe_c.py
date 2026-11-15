@@ -26,7 +26,7 @@ class Fliessen(unittest.TestCase):
         belegung, info = planung.fliessen([self.th(1, 2), self.th(2, 3)], self.bl(4))
         self.assertEqual([b[0] if b else None for b in belegung], [1, 1, 2, 2])
         self.assertEqual((info[2]["zugeteilt"], info[2]["ueberlauf"]), (2, 1))
-        self.assertEqual(belegung[3], (2, 2, 3))
+        self.assertEqual(belegung[3], (2, 2, 3, None))
 
     def test_stecknadel_bleibt_stehen_und_der_rest_fliesst_drumherum(self):
         belegung, info = planung.fliessen([self.th(1, 2), self.th(9, 2, fest="2026-11-03"), self.th(2, 3)], self.bl(8))
@@ -153,26 +153,54 @@ class Planung(MitPlanung):
                                                    "ende": "2026-11-30"}, self.k24)
 
     def test_bibliothek_und_uebernehmen(self):
-        ls = planung.baustein_speichern(self.con, self.k, {"art": "ls", "lernfeld_id": self.lf7, "titel": "Förderanlage automatisieren"})
-        planung.baustein_speichern(self.con, self.k, {"art": "thema", "ls_id": ls, "titel": "Sensoren", "bloecke": 3})
-        planung.baustein_speichern(self.con, self.k, {"art": "thema", "ls_id": ls, "titel": "SPS-Grundlagen", "bloecke": 4})
-        leer = planung.baustein_speichern(self.con, self.k, {"art": "ls", "lernfeld_id": self.lf7, "titel": "Presse", "bloecke": 8})
-        einzel = planung.baustein_speichern(self.con, self.k, {"art": "thema", "lernfeld_id": self.lf7, "titel": "Wiederholung", "bloecke": 1})
-        bib = planung.bibliothek(self.con, self.bs)
-        lf7 = next(lf for lf in bib if lf["id"] == self.lf7)
-        self.assertEqual([(x["titel"], x["umfang"]) for x in lf7["lernsituationen"]], [("Förderanlage automatisieren", 7), ("Presse", 8)])
-        self.assertEqual([t["titel"] for t in lf7["themen"]], ["Wiederholung"])
+        # Bibliothek: Lernfeld -> Thema (Budget) -> Lernsituationen
+        th = planung.baustein_speichern(self.con, self.k, {"art": "thema", "lernfeld_id": self.lf7, "titel": "SPS-Programmierung", "bloecke": 10})
+        planung.baustein_speichern(self.con, self.k, {"art": "ls", "eltern_id": th, "titel": "Förderanlage", "bloecke": 4})
+        planung.baustein_speichern(self.con, self.k, {"art": "ls", "eltern_id": th, "titel": "Presse", "bloecke": 3})
+        leer = planung.baustein_speichern(self.con, self.k, {"art": "thema", "lernfeld_id": self.lf7, "titel": "Wiederholung", "bloecke": 1})
+        with self.assertRaises(planung.PlanungFehler):                 # LS ohne Thema
+            planung.baustein_speichern(self.con, self.k, {"art": "ls", "lernfeld_id": self.lf7, "titel": "x", "bloecke": 1})
+        lf7 = next(lf for lf in planung.bibliothek(self.con, self.bs) if lf["id"] == self.lf7)
+        self.assertEqual([(t["titel"], t["bloecke"], t["verteilt"], [l["titel"] for l in t["lernsituationen"]]) for t in lf7["themen"]],
+                         [("SPS-Programmierung", 10, 7, ["Förderanlage", "Presse"]), ("Wiederholung", 1, 0, [])])
         with self.assertRaises(planung.PlanungFehler):                 # fremder Baustein
-            planung.baustein_speichern(self.con, self.r, {"titel": "x", "bloecke": 1}, einzel)
-        for b in (ls, leer, einzel):
-            planung.aus_bibliothek(self.con, self.lid, self.strang(baustein_id=b))
+            planung.baustein_speichern(self.con, self.r, {"titel": "x", "bloecke": 1}, leer)
+        self.assertEqual(planung.aus_bibliothek(self.con, self.lid, self.strang(baustein_id=th)), 2)
         p = self.plan()
-        self.assertEqual([(t["titel"], t["bloecke"], t["ls_titel"]) for t in p["themen"]],
-                         [("Sensoren", 3, "Förderanlage automatisieren"), ("SPS-Grundlagen", 4, "Förderanlage automatisieren"),
-                          ("Presse", 8, "Presse"), ("Wiederholung", 1, "")])
-        self.assertIn("BSMT 24a", next(lf for lf in planung.bibliothek(self.con, self.bs) if lf["id"] == self.lf7)["lernsituationen"][0]["genutzt"])
-        planung.baustein_loeschen(self.con, self.k, ls)                # Planung behaelt ihre Kopie
-        self.assertEqual(len(self.plan()["themen"]), 4)
+        t = p["themen"][0]
+        self.assertEqual((t["titel"], t["bloecke"], t["verteilt"], [l["titel"] for l in t["ls"]]), ("SPS-Programmierung", 10, 7, ["Förderanlage", "Presse"]))
+        # eine einzelne LS aus der Bibliothek in ein vorhandenes Thema der Planung
+        einzel = planung.baustein_speichern(self.con, self.k, {"art": "ls", "eltern_id": leer, "titel": "Logik-Quiz", "bloecke": 1})
+        planung.aus_bibliothek(self.con, self.lid, {"baustein_id": einzel, "thema_id": t["id"]})
+        self.assertEqual([l["titel"] for l in self.plan()["themen"][0]["ls"]], ["Förderanlage", "Presse", "Logik-Quiz"])
+        self.assertIn("BSMT 24a", next(x for x in planung.bibliothek(self.con, self.bs)[0]["themen"] if x["id"] == th)["genutzt"])
+        planung.baustein_loeschen(self.con, self.k, th)                 # Planung behaelt ihre Kopie
+        self.assertEqual(len(self.plan()["themen"][0]["ls"]), 3)
+
+    def test_thema_als_budget_mit_lernsituationen(self):
+        # Mo/Fr ab 16.11., 27.11. frei: Bloecke 16, 20, 23, 30, 4.12., 7.12., 11.12.
+        t1 = planung.thema_speichern(self.con, self.lid, self.strang(titel="SPS", bloecke=4))
+        planung.thema_speichern(self.con, self.lid, self.strang(titel="Danach", bloecke=1))
+        a = planung.ls_speichern(self.con, self.lid, {"thema_id": t1, "titel": "LS A", "bloecke": 2})
+        p = self.plan()
+        t = p["themen"][0]
+        self.assertEqual((t["bedarf"], t["offen"], t["ls"][0]["von"], t["ls"][0]["bis"]), (4, 2, "2026-11-16", "2026-11-20"))
+        self.assertEqual([b["ls_id"] for b in p["bloecke"][:4]], [a, a, None, None])     # danach "noch offen"
+        self.assertEqual(p["themen"][1]["von"], "2026-12-04")
+        # LS brauchen mehr als das Budget: das Thema waechst
+        planung.ls_speichern(self.con, self.lid, {"thema_id": t1, "titel": "LS B", "bloecke": 3})
+        p = self.plan()
+        self.assertEqual((p["themen"][0]["bedarf"], p["themen"][0]["offen"]), (5, 0))
+        self.assertEqual(p["themen"][1]["von"], "2026-12-07")
+        # Ist: LS A ist schon nach einem Block fertig -> LS B rueckt vor; Bedarf = max(Budget 4, 1 + 3) = 4
+        planung.ist_setzen(self.con, self.lid, "2026-11-16", "07:45", "fertig")
+        p = self.plan()
+        self.assertEqual(p["themen"][0]["bedarf"], 4)                                      # max(Budget 4, 1 + 3)
+        self.assertEqual([b["ls_id"] is not None for b in p["bloecke"][:4]], [True, True, True, True])
+        with self.assertRaises(planung.PlanungFehler):                                     # fremde LS
+            planung.ls_loeschen(self.con, self.r["id"], a)
+        planung.ls_schieben(self.con, self.lid, a, 1)
+        self.assertEqual([l["titel"] for l in self.plan()["themen"][0]["ls"]], ["LS B", "LS A"])
 
     def test_straenge_und_wochenplan_thema(self):
         g1 = stundenplan.gruppe_speichern(self.con, self.lid, {"klasse_id": self.k24, "name": "Gr. 1"})
@@ -202,7 +230,7 @@ class FliessenMitIst(Fliessen):
         # Block 1: schon fertig -> Thema 2 rueckt vor
         belegung, info = planung.fliessen(themen, bl, {("2026-11-01", "07:45"): "fertig"})
         self.assertEqual([b[0] if b else None for b in belegung], [1, 2, 2, None, None, None])
-        self.assertEqual(belegung[0], (1, 1, 1))
+        self.assertEqual(belegung[0], (1, 1, 1, None))
 
     def test_ferienabschnitte(self):
         frei = {"2026-10-12": "Herbstferien", "2026-10-13": "Herbstferien", "2026-10-16": "Herbstferien", "2026-10-19": "Herbstferien",

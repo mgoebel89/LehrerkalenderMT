@@ -218,6 +218,34 @@ const L = {
     return k;
   },
 
+  // Karteireiter je Klasse; hat die Klasse Gruppen (mehrere Straenge), liefert unter die Wahl
+  // "ganze Klasse · Gr. 1 · Gr. 2". straenge: [{klasse_id, gruppe_id, klasse, gruppe, themen?}],
+  // aktiv: {klasse, gruppe}, waehlen(klasse_id, gruppe_id), rechts: Element am rechten Rand (z. B. Schuljahr).
+  klassenReiter(straenge, aktiv, waehlen, rechts) {
+    const klassen = [];
+    straenge.forEach(s => {
+      let k = klassen.find(x => x.id === s.klasse_id);
+      if (!k) klassen.push(k = { id: s.klasse_id, name: s.klasse, straenge: [], themen: 0 });
+      k.straenge.push(s);
+      k.themen += s.themen || 0;
+    });
+    const reiter = L.el('div', { class: 'karteireiter' },
+      L.el('div', { class: 'reiterleiste', role: 'tablist', 'aria-label': 'Klasse' }, klassen.map(k => {
+        const an = k.id === aktiv.klasse;
+        return L.el('button', { type: 'button', role: 'tab', class: an ? 'an' : null, 'aria-selected': an ? 'true' : 'false',
+          title: k.straenge.length > 1 ? 'mit ' + (k.straenge.length - 1) + ' Gruppe(n)' : null,
+          onclick: () => { if (!an) { const s = k.straenge.find(x => (x.gruppe_id || null) === null) || k.straenge[0]; waehlen(k.id, s.gruppe_id || null); } } },
+        k.name, k.straenge.length > 1 ? L.el('span', { class: 'gr-zahl', text: '◫' }) : null, k.themen ? L.el('small', { text: String(k.themen) }) : null);
+      })),
+      rechts ? L.el('div', { class: 'reiter-rechts' }, rechts) : null);
+    const gruppen = straenge.filter(s => s.klasse_id === aktiv.klasse);
+    const unter = gruppen.length > 1 ? L.el('div', { class: 'segment gruppen-wahl', role: 'group', 'aria-label': 'Gruppe' }, gruppen.map(s =>
+      L.el('button', { type: 'button', class: (s.gruppe_id || null) === (aktiv.gruppe || null) ? 'an' : null, onclick: () => waehlen(s.klasse_id, s.gruppe_id || null) },
+        s.gruppe || 'ganze Klasse', s.themen ? L.el('small', { class: 'leise', text: ' ' + s.themen }) : null))) : null;
+    setTimeout(() => { const a = reiter.querySelector('.reiterleiste .an'); if (a) a.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, 0);
+    return { reiter, unter };
+  },
+
   feld(beschriftung, eingabe, hilfe) {
     return L.el('label', { class: 'feld' }, beschriftung, eingabe, hilfe ? L.el('span', { class: 'hilfe', text: hilfe }) : null);
   },

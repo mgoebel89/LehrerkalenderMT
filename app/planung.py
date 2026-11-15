@@ -1,11 +1,13 @@
 """Unterrichtsplanung (Stufe C1): Bibliothek, Themenfolge je Strang und das Fliessen der Themen auf die Bloecke.
 
 Begriffe
-  Bibliothek   Lernsituationen (LS) und Themen je Lernfeld bzw. Modul, Umfang in Bloecken (Doppelstunden). Fuer alle im
-               Bildungsgang sichtbar; aendern darf, wer den Baustein angelegt hat (und der Admin).
+  Bibliothek   Themen je Lernfeld bzw. Modul mit Umfang in Bloecken (Doppelstunden), darin Lernsituationen (LS). Fuer alle
+               im Bildungsgang sichtbar; aendern darf, wer den Baustein angelegt hat (und der Admin).
   Strang       Was eine Lehrkraft in einer Klasse plant: Klasse + Gruppe (oder ganze Klasse) in einem Schuljahr. Eine
                geteilte Klasse hat so bis zu drei Straenge (ganze Klasse, Gr. 1, Gr. 2).
-  Thema        Ein Eintrag der Themenfolge eines Strangs, meist aus der Bibliothek kopiert ("In Klasse uebernehmen").
+  Thema        Ein Eintrag der Themenfolge eines Strangs (meist aus der Bibliothek kopiert). Sein Umfang ist das Budget;
+               die Lernsituationen darin fuellen es nach und nach, der Rest fliesst als "noch offen" mit. Brauchen die LS
+               mehr, waechst das Thema.
   Spur         Bloecke im Stundenplan koennen optional einem Lernfeld zugeordnet sein (parallele Lernfelder, z. B.
                montags LF 7, donnerstags LF 9). Themen dieses Lernfelds fliessen nur in diese Bloecke; alle anderen
                Themen fliessen in Reihenfolge in die Bloecke ohne Lernfeld.
@@ -54,7 +56,7 @@ def _bloecke(wert, minimum=1):
     return zahl
 
 
-# --- Bibliothek ---
+# --- Bibliothek: Lernfeld -> Thema (Umfang als Budget) -> Lernsituationen ---
 
 def _baustein(con, bid):
     zeile = con.execute("SELECT * FROM baustein WHERE id = ?", (bid,)).fetchone()
@@ -69,82 +71,85 @@ def _darf_aendern(konto, baustein):
 
 
 def bibliothek(con, bildungsgang_id):
-    """Alle Bausteine eines Bildungsgangs: {lernfeld_id: [LS mit themen, einzelne Themen]} plus Nutzung in Klassen."""
+    """Alle Bausteine eines Bildungsgangs je Lernfeld: lf["themen"] = [Thema mit lernsituationen] plus Nutzung."""
     lernfelder = [dict(z) for z in con.execute("SELECT id, nummer, name, stufe_id, stunden FROM lernfeld WHERE bildungsgang_id = ? "
                                                "AND aktiv = 1", (bildungsgang_id,))]
     lernfelder.sort(key=lambda lf: natuerlich(lf["nummer"]))
     namen = {z["id"]: z["name"] for z in con.execute("SELECT id, name FROM lehrkraft")}
     genutzt = {}
     for z in con.execute("SELECT DISTINCT p.baustein_id, k.name FROM plan_thema p JOIN klasse k ON k.id = p.klasse_id "
-                         "WHERE p.baustein_id IS NOT NULL ORDER BY k.name"):
-        genutzt.setdefault(z["baustein_id"], []).append(z["name"])
+                         "WHERE p.baustein_id IS NOT NULL UNION SELECT DISTINCT l.baustein_id, k.name FROM plan_ls l "
+                         "JOIN plan_thema p ON p.id = l.thema_id JOIN klasse k ON k.id = p.klasse_id WHERE l.baustein_id IS NOT NULL"):
+        genutzt.setdefault(z[0], set()).add(z[1])
     for lf in lernfelder:
         alle = [dict(z) for z in con.execute("SELECT * FROM baustein WHERE lernfeld_id = ? ORDER BY reihenfolge, id", (lf["id"],))]
         for b in alle:
             b["besitzer"] = namen.get(b["besitzer_id"], "")
-            b["genutzt"] = genutzt.get(b["id"], [])
-        themen = {}
+            b["genutzt"] = sorted(genutzt.get(b["id"], set()))
+        kinder = {}
         for b in alle:
-            if b["art"] == "thema" and b["ls_id"]:
-                themen.setdefault(b["ls_id"], []).append(b)
-        lf["lernsituationen"] = []
+            if b["art"] == "ls" and b["eltern_id"]:
+                kinder.setdefault(b["eltern_id"], []).append(b)
+        lf["themen"] = []
         for b in alle:
-            if b["art"] == "ls":
-                b["themen"] = themen.get(b["id"], [])
-                b["umfang"] = sum(t["bloecke"] for t in b["themen"]) if b["themen"] else b["bloecke"]
-                for t in b["themen"]:   # Genutzt-Angabe der LS umfasst ihre Themen
-                    b["genutzt"] = sorted(set(b["genutzt"]) | set(t["genutzt"]))
-                lf["lernsituationen"].append(b)
-        lf["themen"] = [b for b in alle if b["art"] == "thema" and not b["ls_id"]]
+            if b["art"] == "thema":
+                b["lernsituationen"] = kinder.get(b["id"], [])
+                b["verteilt"] = sum(x["bloecke"] for x in b["lernsituationen"])
+                b["genutzt"] = sorted(set(b["genutzt"]).union(*[set(x["genutzt"]) for x in b["lernsituationen"]]))
+                lf["themen"].append(b)
     return lernfelder
 
 
 def baustein_speichern(con, konto, daten, bid=None):
-    """LS oder Thema anlegen/aendern. Thema in einer LS: ls_id. LS ohne Themen fliesst mit ihrem eigenen Umfang."""
+    """Thema (Ordner mit Umfang als Budget) oder Lernsituation in einem Thema (eltern_id) anlegen/aendern."""
     if bid is not None:
         alt = _baustein(con, bid)
         _darf_aendern(konto, alt)
-        art, lfid, ls_id = alt["art"], alt["lernfeld_id"], alt["ls_id"]
+        art, lfid, eltern = alt["art"], alt["lernfeld_id"], alt["eltern_id"]
     else:
         art = daten.get("art")
         if art not in ("ls", "thema"):
             raise PlanungFehler("Unbekannte Art.")
-        ls_id = _id(daten.get("ls_id")) if art == "thema" else None
-        if ls_id is not None:
-            ls = _baustein(con, ls_id)
-            if ls["art"] != "ls":
-                raise PlanungFehler("Themen gehören in eine Lernsituation.")
-            lfid = ls["lernfeld_id"]
+        eltern = None
+        if art == "ls":
+            eltern = _id(daten.get("eltern_id"))
+            if eltern is None:
+                raise PlanungFehler("Eine Lernsituation gehört in ein Thema.")
+            t = _baustein(con, eltern)
+            if t["art"] != "thema":
+                raise PlanungFehler("Eine Lernsituation gehört in ein Thema.")
+            lfid = t["lernfeld_id"]
         else:
             lfid = _id(daten.get("lernfeld_id"))
             if lfid is None or con.execute("SELECT 1 FROM lernfeld WHERE id = ?", (lfid,)).fetchone() is None:
                 raise PlanungFehler("Bitte ein Lernfeld wählen.")
     titel = _text(daten.get("titel"), "einen Titel")
-    bloecke = _bloecke(daten.get("bloecke") or 0, 0 if art == "ls" else 1)
+    bloecke = _bloecke(daten.get("bloecke") or 0)
     hinweis = _text(daten.get("hinweis"), "den Hinweis", 4000, pflicht=False)
     jetzt = db.jetzt()
     if bid is None:
-        reihe = con.execute("SELECT COALESCE(MAX(reihenfolge), 0) + 1 FROM baustein WHERE lernfeld_id = ? AND COALESCE(ls_id, 0) = ?",
-                            (lfid, ls_id or 0)).fetchone()[0]
-        return con.execute("INSERT INTO baustein (lernfeld_id, art, ls_id, titel, bloecke, hinweis, reihenfolge, besitzer_id, erstellt, "
+        reihe = con.execute("SELECT COALESCE(MAX(reihenfolge), 0) + 1 FROM baustein WHERE lernfeld_id = ? AND COALESCE(eltern_id, 0) = ?",
+                            (lfid, eltern or 0)).fetchone()[0]
+        return con.execute("INSERT INTO baustein (lernfeld_id, art, eltern_id, titel, bloecke, hinweis, reihenfolge, besitzer_id, erstellt, "
                            "geaendert) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                           (lfid, art, ls_id, titel, bloecke, hinweis, reihe, konto["id"], jetzt, jetzt)).lastrowid
+                           (lfid, art, eltern, titel, bloecke, hinweis, reihe, konto["id"], jetzt, jetzt)).lastrowid
     con.execute("UPDATE baustein SET titel = ?, bloecke = ?, hinweis = ?, geaendert = ? WHERE id = ?", (titel, bloecke, hinweis, jetzt, bid))
     return bid
 
 
 def baustein_loeschen(con, konto, bid):
     _darf_aendern(konto, _baustein(con, bid))
-    con.execute("DELETE FROM baustein WHERE id = ?", (bid,))   # Themen einer LS gehen mit; Planungen behalten ihre Kopie
+    con.execute("DELETE FROM baustein WHERE eltern_id = ?", (bid,))   # LS eines Themas gehen mit; Planungen behalten ihre Kopie
+    con.execute("DELETE FROM baustein WHERE id = ?", (bid,))
 
 
 def baustein_schieben(con, konto, bid, richtung):
-    """Reihenfolge innerhalb von LS bzw. Lernfeld: richtung -1 (nach oben) oder 1 (nach unten)."""
+    """Reihenfolge innerhalb von Thema bzw. Lernfeld: richtung -1 (nach oben) oder 1 (nach unten)."""
     b = _baustein(con, bid)
     _darf_aendern(konto, b)
     geschwister = [z["id"] for z in con.execute(
-        "SELECT id FROM baustein WHERE lernfeld_id = ? AND art = ? AND COALESCE(ls_id, 0) = ? ORDER BY reihenfolge, id",
-        (b["lernfeld_id"], b["art"], b["ls_id"] or 0))]
+        "SELECT id FROM baustein WHERE lernfeld_id = ? AND art = ? AND COALESCE(eltern_id, 0) = ? ORDER BY reihenfolge, id",
+        (b["lernfeld_id"], b["art"], b["eltern_id"] or 0))]
     _tauschen(con, "baustein", geschwister, bid, richtung)
 
 
@@ -210,9 +215,18 @@ def _strang_aus(con, lid, daten):
 
 
 def _themen(con, lid, kid, gid, sid):
-    return [dict(z) for z in con.execute(
+    """Themen eines Strangs in Reihenfolge, je mit ihren Lernsituationen (t["ls"])."""
+    themen = [dict(z) for z in con.execute(
         "SELECT * FROM plan_thema WHERE lehrkraft_id = ? AND klasse_id = ? AND COALESCE(gruppe_id, 0) = ? AND schuljahr_id = ? "
         "ORDER BY reihenfolge, id", (lid, kid, gid or 0, sid))]
+    if themen:
+        ls = {}
+        for z in con.execute("SELECT * FROM plan_ls WHERE thema_id IN (%s) ORDER BY reihenfolge, id" % ",".join("?" * len(themen)),
+                             [t["id"] for t in themen]):
+            ls.setdefault(z["thema_id"], []).append(dict(z))
+        for t in themen:
+            t["ls"] = ls.get(t["id"], [])
+    return themen
 
 
 def _thema(con, lid, tid):
@@ -233,7 +247,7 @@ def _lernfeld_der_klasse(con, kid, lfid):
 
 
 def thema_speichern(con, lid, daten, tid=None):
-    """Thema anlegen (am Ende der Folge des Strangs) oder aendern (Titel, Umfang, Lernfeld, Lernsituation, Hinweis)."""
+    """Thema anlegen (am Ende der Folge des Strangs) oder aendern (Titel, Umfang als Budget, Lernfeld, Hinweis)."""
     if tid is None:
         kid, gid, sid = _strang_aus(con, lid, daten)
     else:
@@ -241,15 +255,14 @@ def thema_speichern(con, lid, daten, tid=None):
         _keine_pruefung(alt)
         kid, gid, sid = alt["klasse_id"], alt["gruppe_id"], alt["schuljahr_id"]
     werte = (_text(daten.get("titel"), "einen Titel"), _bloecke(daten.get("bloecke") or 1),
-             _lernfeld_der_klasse(con, kid, daten.get("lernfeld_id")), _text(daten.get("ls_titel"), "die Lernsituation", 200, False),
-             _text(daten.get("hinweis"), "den Hinweis", 4000, False))
+             _lernfeld_der_klasse(con, kid, daten.get("lernfeld_id")), _text(daten.get("hinweis"), "den Hinweis", 4000, False))
     if tid is None:
         reihe = con.execute("SELECT COALESCE(MAX(reihenfolge), 0) + 1 FROM plan_thema WHERE lehrkraft_id = ? AND klasse_id = ? "
                             "AND COALESCE(gruppe_id, 0) = ? AND schuljahr_id = ?", (lid, kid, gid or 0, sid)).fetchone()[0]
         return con.execute("INSERT INTO plan_thema (lehrkraft_id, klasse_id, gruppe_id, schuljahr_id, reihenfolge, titel, bloecke, "
-                           "lernfeld_id, ls_titel, hinweis, erstellt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           "lernfeld_id, hinweis, erstellt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                            (lid, kid, gid, sid, reihe) + werte + (db.jetzt(),)).lastrowid
-    con.execute("UPDATE plan_thema SET titel = ?, bloecke = ?, lernfeld_id = ?, ls_titel = ?, hinweis = ? WHERE id = ?", werte + (tid,))
+    con.execute("UPDATE plan_thema SET titel = ?, bloecke = ?, lernfeld_id = ?, hinweis = ? WHERE id = ?", werte + (tid,))
     return tid
 
 
@@ -260,7 +273,7 @@ def _keine_pruefung(t):
 
 def thema_loeschen(con, lid, tid):
     _keine_pruefung(_thema(con, lid, tid))
-    con.execute("DELETE FROM plan_thema WHERE id = ?", (tid,))
+    con.execute("DELETE FROM plan_thema WHERE id = ?", (tid,))   # seine Lernsituationen gehen mit
 
 
 def thema_schieben(con, lid, tid, richtung):
@@ -298,28 +311,73 @@ def festsetzen(con, lid, tid, datum, beginn):
     con.execute("UPDATE plan_thema SET fest_datum = ?, fest_beginn = ? WHERE id = ?", (datum, beginn, tid))
 
 
+# --- Lernsitutationen eines Themas der Planung ---
+
+def _ls(con, lid, lsid):
+    z = con.execute("SELECT l.* FROM plan_ls l JOIN plan_thema t ON t.id = l.thema_id WHERE l.id = ? AND t.lehrkraft_id = ?",
+                    (lsid, lid)).fetchone()
+    if z is None:
+        raise PlanungFehler("Diese Lernsituation gibt es nicht.")
+    return z
+
+
+def ls_speichern(con, lid, daten, lsid=None):
+    """Lernsituation in einem Thema anlegen (am Ende) bzw. aendern; mit thema_id auch in ein anderes Thema verschieben."""
+    alt = _ls(con, lid, lsid) if lsid is not None else None
+    tid = _id(daten.get("thema_id")) or (alt["thema_id"] if alt else None)
+    if tid is None:
+        raise PlanungFehler("Bitte ein Thema wählen.")
+    t = _thema(con, lid, tid)
+    _keine_pruefung(t)
+    titel = _text(daten.get("titel"), "einen Titel")
+    bloecke = _bloecke(daten.get("bloecke") or 1)
+    hinweis = _text(daten.get("hinweis"), "den Hinweis", 4000, False)
+    if alt is None or alt["thema_id"] != tid:
+        reihe = con.execute("SELECT COALESCE(MAX(reihenfolge), 0) + 1 FROM plan_ls WHERE thema_id = ?", (tid,)).fetchone()[0]
+    else:
+        reihe = alt["reihenfolge"]
+    if alt is None:
+        return con.execute("INSERT INTO plan_ls (thema_id, reihenfolge, titel, bloecke, hinweis, erstellt) VALUES (?, ?, ?, ?, ?, ?)",
+                           (tid, reihe, titel, bloecke, hinweis, db.jetzt())).lastrowid
+    con.execute("UPDATE plan_ls SET thema_id = ?, reihenfolge = ?, titel = ?, bloecke = ?, hinweis = ? WHERE id = ?",
+                (tid, reihe, titel, bloecke, hinweis, lsid))
+    return lsid
+
+
+def ls_loeschen(con, lid, lsid):
+    _ls(con, lid, lsid)
+    con.execute("DELETE FROM plan_ls WHERE id = ?", (lsid,))
+
+
+def ls_schieben(con, lid, lsid, richtung):
+    z = _ls(con, lid, lsid)
+    ids = [x["id"] for x in con.execute("SELECT id FROM plan_ls WHERE thema_id = ? ORDER BY reihenfolge, id", (z["thema_id"],))]
+    _tauschen(con, "plan_ls", ids, lsid, richtung)
+
+
 def aus_bibliothek(con, lid, daten):
-    """Baustein in die Folge eines Strangs kopieren: LS mit Themen -> je Thema ein Eintrag (mit Name der LS),
-    LS ohne Themen -> ein Eintrag mit ihrem Umfang, einzelnes Thema -> ein Eintrag. Rueckgabe: Anzahl."""
-    kid, gid, sid = _strang_aus(con, lid, daten)
+    """Baustein in die Planung kopieren. Thema -> neues Thema am Ende der Folge samt seinen Lernsituationen;
+    Lernsituation -> in ein vorhandenes Thema der Planung (thema_id). Rueckgabe: Anzahl der Lernsituationen."""
     b = _baustein(con, _id(daten.get("baustein_id")))
+    if b["art"] == "ls":
+        tid = _id(daten.get("thema_id"))
+        if tid is None:
+            raise PlanungFehler("Bitte das Thema wählen, in das die Lernsituation kommt.")
+        neu = ls_speichern(con, lid, {"thema_id": tid, "titel": b["titel"], "bloecke": b["bloecke"], "hinweis": b["hinweis"]})
+        con.execute("UPDATE plan_ls SET baustein_id = ? WHERE id = ?", (b["id"], neu))
+        return 1
+    kid, gid, sid = _strang_aus(con, lid, daten)
     if con.execute("SELECT 1 FROM lernfeld l JOIN klasse k ON k.bildungsgang_id = l.bildungsgang_id WHERE l.id = ? AND k.id = ?",
                    (b["lernfeld_id"], kid)).fetchone() is None:
         raise PlanungFehler("Der Baustein gehört zu einem anderen Bildungsgang als die Klasse.")
-    if b["art"] == "ls":
-        themen = con.execute("SELECT * FROM baustein WHERE ls_id = ? ORDER BY reihenfolge, id", (b["id"],)).fetchall()
-        stuecke = [(t["titel"], t["bloecke"], b["titel"], t["id"], t["hinweis"]) for t in themen] or \
-                  [(b["titel"], max(b["bloecke"], 1), b["titel"], b["id"], b["hinweis"])]
-    else:
-        ls = con.execute("SELECT titel FROM baustein WHERE id = ?", (b["ls_id"],)).fetchone() if b["ls_id"] else None
-        stuecke = [(b["titel"], b["bloecke"], ls["titel"] if ls else "", b["id"], b["hinweis"])]
-    reihe = con.execute("SELECT COALESCE(MAX(reihenfolge), 0) FROM plan_thema WHERE lehrkraft_id = ? AND klasse_id = ? "
-                        "AND COALESCE(gruppe_id, 0) = ? AND schuljahr_id = ?", (lid, kid, gid or 0, sid)).fetchone()[0]
-    for n, (titel, bloecke, ls_titel, bid, hinweis) in enumerate(stuecke):
-        con.execute("INSERT INTO plan_thema (lehrkraft_id, klasse_id, gruppe_id, schuljahr_id, reihenfolge, titel, bloecke, lernfeld_id, "
-                    "ls_titel, baustein_id, hinweis, erstellt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (lid, kid, gid, sid, reihe + n + 1, titel, max(bloecke, 1), b["lernfeld_id"], ls_titel, bid, hinweis, db.jetzt()))
-    return len(stuecke)
+    tid = thema_speichern(con, lid, {"klasse_id": kid, "gruppe_id": gid, "schuljahr_id": sid, "titel": b["titel"],
+                                     "bloecke": max(b["bloecke"], 1), "lernfeld_id": b["lernfeld_id"], "hinweis": b["hinweis"]})
+    con.execute("UPDATE plan_thema SET baustein_id = ? WHERE id = ?", (b["id"], tid))
+    kinder = con.execute("SELECT * FROM baustein WHERE eltern_id = ? ORDER BY reihenfolge, id", (b["id"],)).fetchall()
+    for n, k in enumerate(kinder):
+        con.execute("INSERT INTO plan_ls (thema_id, reihenfolge, titel, bloecke, hinweis, baustein_id, erstellt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (tid, n + 1, k["titel"], k["bloecke"], k["hinweis"], k["id"], db.jetzt()))
+    return len(kinder)
 
 
 # --- Bloecke eines Strangs ---
@@ -382,18 +440,31 @@ IST_STAENDE = ("ok", "mehr", "fertig")
 
 
 def fliessen(themen, bloecke, ist=None):
-    """Verteilt die Themen (in Reihenfolge, mit bloecke, lernfeld_id, fest_datum/fest_beginn) auf die Bloecke.
-    ist: {(datum, beginn): 'ok'|'mehr'|'fertig'} veraendert den Bedarf des Themas, das gerade in diesem Block liegt:
-    'mehr' = es braucht einen Block mehr, 'fertig' = es endet mit diesem Block. Der Rest rueckt nach bzw. vor.
-    Rueckgabe: (belegung, info) mit belegung[i] = (thema_id, teil, bedarf) fuer Block i oder None und
-    info[thema_id] = {zugeteilt, bedarf, ueberlauf, bloecke, nadel: ok|fehlt|None}."""
+    """Verteilt die Themen (in Reihenfolge, mit bloecke = Budget, ls = Lernsituationen, lernfeld_id,
+    fest_datum/fest_beginn) auf die Bloecke.
+
+    Ein Thema laeuft zuerst durch seine Lernsituationen (je mit eigenem Umfang), danach durch den noch offenen Rest
+    seines Budgets. Bedarf des Themas = max(Budget, Summe der LS). ist: {(datum, beginn): 'ok'|'mehr'|'fertig'} wirkt
+    auf das, was gerade dran ist: 'mehr' = die LS (bzw. der offene Rest) braucht einen Block mehr, 'fertig' = die LS
+    endet mit diesem Block (ein offener Rest fuellt das Budget weiter auf); im offenen Rest beendet 'fertig' das Thema.
+    Rueckgabe: (belegung, info) mit belegung[i] = (thema_id, teil, bedarf, ls_id oder None) fuer Block i oder None und
+    info[thema_id] = {zugeteilt, bedarf, ueberlauf, bloecke, nadel, ls: {ls_id: [bloecke]}, offen: [bloecke]}."""
     ist = ist or {}
     spuren = {b["lernfeld_id"] for b in bloecke if b["lernfeld_id"]}
     spur_bloecke = {}
     for i, b in enumerate(bloecke):
         spur_bloecke.setdefault(b["lernfeld_id"] if b["lernfeld_id"] in spuren else None, []).append(i)
     belegung = [None] * len(bloecke)
-    info = {t["id"]: {"bedarf": t["bloecke"], "nadel": None, "bloecke": []} for t in themen}
+    info = {}
+    for t in themen:
+        info[t["id"]] = {"nadel": None, "bloecke": [], "zuordnung": [], "slots": [[ls["id"], ls["bloecke"]] for ls in t.get("ls", [])],
+                         "slot": 0, "im_slot": 0, "budget": t["bloecke"], "extra": 0, "ende": False}
+
+    def bedarf(x):
+        if x["ende"]:
+            return len(x["bloecke"])
+        return max(x["budget"] + x["extra"], sum(s[1] for s in x["slots"]))
+
     spur_themen = {}
     for t in themen:
         spur_themen.setdefault(t["lernfeld_id"] if t["lernfeld_id"] in spuren else None, []).append(t)
@@ -403,19 +474,31 @@ def fliessen(themen, bloecke, ist=None):
         frei = [True] * len(idx)
 
         def fuellen(t, n):
-            """Belegt ab Position n freie Bloecke fuer t, bis der (durch Ist veraenderliche) Bedarf gedeckt ist.
-            Rueckgabe: Position nach dem letzten geprueften Block."""
+            """Belegt ab Position n freie Bloecke fuer t, bis der (veraenderliche) Bedarf gedeckt ist."""
             x = info[t["id"]]
-            while n < len(idx) and len(x["bloecke"]) < x["bedarf"]:
+            while n < len(idx) and len(x["bloecke"]) < bedarf(x):
                 if frei[n]:
                     frei[n] = False
-                    x["bloecke"].append(idx[n])
                     b = bloecke[idx[n]]
                     stand = ist.get((b["datum"], b["beginn"]))
-                    if stand == "mehr":
-                        x["bedarf"] += 1
-                    elif stand == "fertig":
-                        x["bedarf"] = len(x["bloecke"])
+                    x["bloecke"].append(idx[n])
+                    if x["slot"] < len(x["slots"]):             # in einer Lernsituation
+                        slot = x["slots"][x["slot"]]
+                        x["zuordnung"].append(slot[0])
+                        x["im_slot"] += 1
+                        if stand == "mehr":
+                            slot[1] += 1
+                        elif stand == "fertig":
+                            slot[1] = x["im_slot"]
+                        if x["im_slot"] >= slot[1]:
+                            x["slot"] += 1
+                            x["im_slot"] = 0
+                    else:                                        # noch offener Rest des Budgets
+                        x["zuordnung"].append(None)
+                        if stand == "mehr":
+                            x["extra"] += 1
+                        elif stand == "fertig":
+                            x["ende"] = True
                 n += 1
             return n
 
@@ -436,11 +519,17 @@ def fliessen(themen, bloecke, ist=None):
                 zeiger = fuellen(t, zeiger)
     for t in themen:
         x = info[t["id"]]
-        x["bloecke"].sort()
+        x["bedarf"] = bedarf(x)
+        paare = sorted(zip(x["bloecke"], x["zuordnung"]))
+        x["bloecke"] = [i for i, _ in paare]
         x["zugeteilt"] = len(x["bloecke"])
         x["ueberlauf"] = max(0, x["bedarf"] - x["zugeteilt"])
-        for teil, i in enumerate(x["bloecke"]):
-            belegung[i] = (t["id"], teil + 1, x["bedarf"])
+        x["ls"] = {}
+        x["offen"] = []
+        for teil, (i, ls_id) in enumerate(paare):
+            belegung[i] = (t["id"], teil + 1, x["bedarf"], ls_id)
+            (x["ls"].setdefault(ls_id, []) if ls_id else x["offen"]).append(i)
+        x["ls_laenge"] = {s[0]: s[1] for s in x["slots"]}
     return belegung, info
 
 
@@ -491,7 +580,7 @@ def _strang_rechnen(con, lid, kid, gid, sj, kal=None, ist=None):
     themen = _themen(con, lid, kid, gid, sj["id"])
     belegung, info = fliessen(themen, bloecke, ist)
     for i, b in enumerate(bloecke):
-        b["thema_id"], b["teil"], b["von"] = belegung[i] if belegung[i] else (None, None, None)
+        b["thema_id"], b["teil"], b["von"], b["ls_id"] = belegung[i] if belegung[i] else (None, None, None, None)
         b["ist"] = ist.get((b["datum"], b["beginn"]))
     return kal, bloecke, weg, themen, info
 
@@ -514,7 +603,13 @@ def plan(con, lid, kid, gid, sid, jetzt=None):
                  von=bloecke[x["bloecke"][0]]["datum"] if x["bloecke"] else None,
                  bis=bloecke[x["bloecke"][-1]]["datum"] if x["bloecke"] else None,
                  gehalten=sum(1 for i in x["bloecke"] if bloecke[i]["vergangen"]),
-                 lernfeld=lf.get(t["lernfeld_id"], {}).get("nummer", ""))
+                 lernfeld=lf.get(t["lernfeld_id"], {}).get("nummer", ""),
+                 verteilt=sum(ls["bloecke"] for ls in t["ls"]), offen=len(x["offen"]),
+                 offen_rest=max(0, x["bedarf"] - sum(x["ls_laenge"].values())) if t["ls"] else x["bedarf"])
+        for ls in t["ls"]:
+            mein = x["ls"].get(ls["id"], [])
+            ls.update(zugeteilt=len(mein), bedarf=x["ls_laenge"].get(ls["id"], ls["bloecke"]),
+                      von=bloecke[mein[0]]["datum"] if mein else None, bis=bloecke[mein[-1]]["datum"] if mein else None)
     # Kalenderwochen des Schuljahres (fuer die Ansicht "Schuljahr")
     wochen = []
     montag = stundenplan.montag_von(von)
@@ -582,8 +677,9 @@ def themen_der_woche(con, lid, woche):
         for b in bloecke:
             if b["thema_id"]:
                 t = nach_id[b["thema_id"]]
+                ls = next((x for x in t["ls"] if x["id"] == b["ls_id"]), None)
                 zuordnung[(b["datum"], b["beginn"], kid)] = {"id": t["id"], "titel": t["titel"], "teil": b["teil"], "von": b["von"],
-                                                           "lernfeld": nummern.get(t["lernfeld_id"], ""), "ls": t["ls_titel"],
+                                                           "lernfeld": nummern.get(t["lernfeld_id"], ""), "ls": ls["titel"] if ls else "",
                                                            "pruefung_id": t["pruefung_id"]}
     for b in woche["bloecke"]:
         if _gehalten_oder_weiter(b):
@@ -632,8 +728,13 @@ def stunde(con, lid, datum, beginn, jetzt=None):
     if x["thema_id"]:
         t = themen[x["thema_id"]]
         lf = con.execute("SELECT nummer, name FROM lernfeld WHERE id = ?", (t["lernfeld_id"],)).fetchone() if t["lernfeld_id"] else None
-        ergebnis["thema"] = {"id": t["id"], "titel": t["titel"], "teil": x["teil"], "von": x["von"], "ls": t["ls_titel"],
-                             "hinweis": t["hinweis"], "lernfeld": lf["nummer"] if lf else "", "lernfeld_name": lf["name"] if lf else ""}
+        ls = next((y for y in t["ls"] if y["id"] == x["ls_id"]), None)
+        ls_teil = sum(1 for y in bloecke[:pos + 1] if y["thema_id"] == t["id"] and y["ls_id"] == x["ls_id"]) if ls else None
+        ls_von = sum(1 for y in bloecke if y["thema_id"] == t["id"] and y["ls_id"] == x["ls_id"]) if ls else None
+        ergebnis["thema"] = {"id": t["id"], "titel": t["titel"], "teil": x["teil"], "von": x["von"], "ls": ls["titel"] if ls else "",
+                             "ls_teil": ls_teil, "ls_von": ls_von,
+                             "hinweis": (ls["hinweis"] if ls and ls["hinweis"] else t["hinweis"]),
+                             "lernfeld": lf["nummer"] if lf else "", "lernfeld_name": lf["name"] if lf else ""}
     if pos > 0:
         ergebnis["vorige"] = {"datum": bloecke[pos - 1]["datum"], "beginn": bloecke[pos - 1]["beginn"]}
     if pos + 1 < len(bloecke):

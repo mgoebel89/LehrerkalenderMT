@@ -372,6 +372,26 @@ MIGRATIONEN = [
         UNIQUE (pruefung_id, schueler_id));
     ALTER TABLE plan_thema ADD COLUMN pruefung_id INTEGER REFERENCES pruefung(id) ON DELETE CASCADE
     """,
+    # 11: Thema ist der Ordner (mit Umfang als Budget), Lernsituationen liegen darin und werden zum Thema entwickelt.
+    #     Planung: neue Tabelle plan_ls; die alte Zuordnung "Thema gehoert zu LS" (ls_titel) entfaellt, Eintraege, die
+    #     als ganze LS uebernommen wurden (titel = ls_titel), sind jetzt Themen. Bibliothek: ls_id heisst eltern_id, die
+    #     Arten werden getauscht (bisherige LS ohne Eltern -> Thema, bisherige Themen in einer LS -> LS).
+    """
+    CREATE TABLE plan_ls (
+        id INTEGER PRIMARY KEY,
+        thema_id INTEGER NOT NULL REFERENCES plan_thema(id) ON DELETE CASCADE,
+        reihenfolge INTEGER NOT NULL DEFAULT 0,
+        titel TEXT NOT NULL,
+        bloecke INTEGER NOT NULL DEFAULT 1,
+        hinweis TEXT NOT NULL DEFAULT '',
+        baustein_id INTEGER REFERENCES baustein(id) ON DELETE SET NULL,
+        erstellt TEXT NOT NULL);
+    CREATE INDEX plan_ls_thema ON plan_ls (thema_id, reihenfolge);
+    UPDATE plan_thema SET ls_titel = '' WHERE ls_titel = titel;
+    ALTER TABLE baustein RENAME COLUMN ls_id TO eltern_id;
+    UPDATE baustein SET art = 'thema' WHERE art = 'ls' AND eltern_id IS NULL;
+    UPDATE baustein SET art = 'ls' WHERE art = 'thema' AND eltern_id IS NOT NULL
+    """,
 ]
 
 

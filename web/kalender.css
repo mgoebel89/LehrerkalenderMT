@@ -275,3 +275,46 @@ svg.spiegel .wert { font: 700 11px var(--mono); fill: var(--text); }
 .bereich-ed > .zeile > input:first-child { flex: 1; min-width: 0; font-weight: 700; }
 a.z-knopf { text-decoration: none; color: var(--text); }
 a.z-knopf:hover span:last-child { text-decoration: underline; }
+
+/* Karteireiter fuer Klassen (Planung, Pruefungen) */
+.karteireiter { display: flex; gap: 10px; align-items: flex-end; border-bottom: 2px solid var(--blau); margin-bottom: -16px; }
+.reiterleiste { display: flex; gap: 3px; align-items: flex-end; overflow-x: auto; min-width: 0; flex: 1; scrollbar-width: thin; padding-top: 4px; }
+.reiterleiste button { border: 1px solid var(--linie-stark); border-bottom: none; border-radius: 12px 12px 0 0; background: #e8edf3; color: var(--leise);
+  min-height: 38px; padding: 7px 16px 6px; white-space: nowrap; font-weight: 600; gap: 6px; flex: none; }
+.reiterleiste button:hover { background: var(--blau-hell); color: var(--blau); border-color: var(--blau-mittel); }
+.reiterleiste button.an { background: var(--karte); color: var(--blau); border: 2px solid var(--blau); border-bottom: none; margin-bottom: -2px;
+  padding-bottom: 8px; position: relative; z-index: 1; }
+.reiterleiste button small { font-family: var(--mono); font-size: .7rem; color: var(--leise); background: var(--knopf); border-radius: 999px; padding: 0 6px; }
+.reiterleiste button.an small { background: var(--blau-hell); color: var(--blau); }
+.reiterleiste .gr-zahl { font-size: .8rem; opacity: .6; }
+.reiter-rechts { flex: none; padding-bottom: 6px; }
+.karteiblatt { background: var(--karte); border: 2px solid var(--blau); border-top: none; border-radius: 0 0 10px 10px; padding: 14px 16px; }
+.gruppen-wahl button { min-height: 32px; font-size: .85em; }
+@media (max-width: 760px) { .karteireiter { flex-wrap: wrap-reverse; } .reiter-rechts { width: 100%; padding-bottom: 4px; } .karteiblatt { padding: 10px; } }
+.reiterleiste { overflow-y: hidden; margin-bottom: -2px; }
+.reiterleiste button { box-shadow: inset 0 -2px 0 var(--blau); }
+.reiterleiste button.an { margin-bottom: 0; box-shadow: none; }
+.karteiblatt, .karteireiter { min-width: 0; }
+.legende span.leise { white-space: normal; }
+
+/* Planung: Themen als Ordner mit Lernsituationen, aktuelle Woche */
+.lp td.auf .auf-knopf { min-height: 24px; min-width: 22px; padding: 0 2px; font-size: .8rem; color: var(--leise); display: inline-flex; justify-content: center; vertical-align: middle; }
+.lp td.auf .auf-knopf.leer { display: inline-block; width: 22px; }
+.lp td.auf .auf-knopf:hover { color: var(--blau); }
+.lp .ls-zahl { font-family: var(--mono); font-size: .62rem; font-weight: 700; color: var(--blau); background: var(--blau-hell); border-radius: 999px; padding: 0 6px; margin-left: 2px; }
+.lp tr.thema-zeile.offen td.auf { box-shadow: inset 3px 0 0 var(--b); }
+.lp tr.ls-zeile td.auf { padding-left: 34px; box-shadow: inset 3px 0 0 var(--b); }
+.lp tr.ls-zeile td.auf .ls-name { font-weight: 500; font-size: .8rem; max-width: 200px; }
+.lp tr.ls-zeile td.auf { background: #fafbfd; }
+.lp tr.ls-zeile .bal { opacity: .6; }
+.lp tr.offen-zeile .bal { opacity: .3; }
+.lp tr.offen-zeile .anzahl { color: var(--text); }
+.lp tr.offen-zeile td.auf .ls-name { font-style: italic; font-size: .78rem; padding: 0 4px; }
+.lp tr.neu-zeile td { height: 30px; }
+.lp tr.neu-zeile td.auf button { min-height: 26px; font-size: .75rem; color: var(--blau); }
+.lp th.links .alle-auf { min-height: 22px; padding: 0 6px; font-size: .68rem; margin-left: 8px; color: var(--blau); vertical-align: middle; }
+.lp th.diese-woche { background-color: #cfe4f5 !important; color: var(--blau); box-shadow: inset 0 -3px 0 var(--blau); }
+.lp td.t.diese-woche { background-color: #e6f1fa; }
+.lp td.t.diese-woche.heute { background-color: #d3e7f7; }
+.m-woche { width: 14px; height: 12px; display: inline-block; background: #cfe4f5; border-bottom: 3px solid var(--blau); }
+.wp-b .th .ls { color: var(--leise); }

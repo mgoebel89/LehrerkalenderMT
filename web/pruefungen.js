@@ -55,12 +55,11 @@ const Pruefungen = (() => {
     return P;
   }
 
-  function strangLeiste(P, neu) {
+  // Karteireiter je Klasse (Gruppen als Wahl darunter), Schuljahr rechts
+  function strangKopf(P, neu) {
     const sj = el('select', { 'aria-label': 'Schuljahr', style: 'width:auto', onchange: () => { wahl.schuljahr = Number(sj.value); wahl.klasse = null; neu(); } },
       P.schuljahre.map(j => el('option', { value: j.id, text: 'Schuljahr ' + j.name, selected: j.id === P.schuljahr_id ? true : null })));
-    return el('div', { class: 'zeile' }, sj, el('div', { class: 'zeile strang-wahl', role: 'group', 'aria-label': 'Klasse' }, P.straenge.map(s =>
-      el('button', { type: 'button', class: 'chip-knopf' + (s.klasse_id === wahl.klasse && (s.gruppe_id || null) === (wahl.gruppe || null) ? ' an' : ''),
-        onclick: () => { wahl.klasse = s.klasse_id; wahl.gruppe = s.gruppe_id; neu(); } }, s.name))));
+    return L.klassenReiter(P.straenge.map(s => Object.assign({}, s, { themen: 0 })), wahl, (k, g) => { wahl.klasse = k; wahl.gruppe = g; neu(); }, sj);
   }
 
   // --- Liste der Pruefungen ---
@@ -68,15 +67,15 @@ const Pruefungen = (() => {
   async function listeZeigen() {
     const P = await strangLaden();
     if (!P.schuljahre.length) return L.setzen(ort, el('div', { class: 'banner warnung', text: 'Es gibt noch kein Schuljahr. Der Admin legt es unter Grunddaten an.' }));
-    if (!P.straenge.length) return L.setzen(ort, strangLeiste(P, listeZeigen), el('div', { class: 'banner' }, 'In diesem Schuljahr steht noch keine Klasse in deinem Stundenplan. ', el('a', { href: '#einstellungen', text: 'Stundenplan einrichten' })));
+    const kopf = strangKopf(P, listeZeigen);
+    if (!P.straenge.length) return L.setzen(ort, kopf.reiter, el('div', { class: 'karteiblatt' }, el('div', { class: 'banner' }, 'In diesem Schuljahr steht noch keine Klasse in deinem Stundenplan. ', el('a', { href: '#einstellungen', text: 'Stundenplan einrichten' }))));
     const R = await L.api('GET', '/api/pruefungen?schuljahr=' + wahl.schuljahr + '&klasse=' + wahl.klasse + (wahl.gruppe ? '&gruppe=' + wahl.gruppe : ''));
     const s = P.straenge.find(x => x.klasse_id === wahl.klasse && (x.gruppe_id || null) === (wahl.gruppe || null));
-    L.setzen(ort,
-      strangLeiste(P, listeZeigen),
-      el('div', { class: 'zeile' }, el('h2', { text: s ? s.name : '' }),
+    L.setzen(ort, kopf.reiter, el('div', { class: 'karteiblatt stapel' },
+      el('div', { class: 'zeile' }, el('h2', { text: s ? s.klasse : '' }), kopf.unter,
         el('span', { class: 'rechts' }, el('button', { type: 'button', class: 'haupt', onclick: () => pruefungDialog(null, R, { klasse_id: wahl.klasse, gruppe_id: wahl.gruppe, schuljahr_id: wahl.schuljahr }) }, L.symbol('plus'), 'Prüfung'))),
       R.pruefungen.length ? el('div', { class: 'raster' }, R.pruefungen.map(p => pruefungKarte(p)))
-        : el('div', { class: 'leer', text: 'Noch keine Prüfung. Lege eine mit „+ Prüfung“ an oder im Wochenplan über das Menü einer Stunde.' }));
+        : el('div', { class: 'leer', text: 'Noch keine Prüfung. Lege eine mit „+ Prüfung“ an oder im Wochenplan über das Menü einer Stunde.' })));
   }
 
   function wannText(p) {
