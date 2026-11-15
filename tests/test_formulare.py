@@ -133,6 +133,16 @@ class Formularcenter(unittest.TestCase):
         werte = self.felder(formulare.pdf_von(self.con, self.lid, fid)[0])
         self.assertEqual((werte["am  von1"], werte["Group1"]), ("Di, 24.11.2026", "/0"))   # keine Stunden: „nicht erforderlich“
 
+    def test_nur_stunden_im_gewaehlten_zeitraum(self):
+        """Gewaehlt Mo-Mi: die Vertretung am Donnerstag gehoert nicht ins Formular (so im Test-CT gemeldet)."""
+        formulare.vorlage_setzen(self.con, "stundenplanaenderung", vorlage_bauen())
+        fid = formulare.erstellen(self.con, self.k, {"woche": "2026-11-16", "grund": "sonstige", "von": "2026-11-16", "bis": "2026-11-18"})
+        werte = self.felder(formulare.pdf_von(self.con, self.lid, fid)[0])
+        tabelle = {v for k, v in werte.items() if k.startswith("M") and v}
+        self.assertEqual(tabelle, {"BSMT 24a", "entfällt, Klasse informiert"})       # nur der Ausfall am Montag
+        f = formulare.liste(self.con, self.lid)[0]
+        self.assertEqual((f["von"], f["bis"], f["betrifft"].endswith("1 Block")), ("2026-11-16", "2026-11-18", True))
+
     @unittest.skipUnless(os.environ.get("LKMT_FORMULAR_VORLAGE"), "echte Vorlage nicht angegeben")
     def test_echte_vorlage(self):
         formulare.vorlage_setzen(self.con, "stundenplanaenderung", open(os.environ["LKMT_FORMULAR_VORLAGE"], "rb").read())

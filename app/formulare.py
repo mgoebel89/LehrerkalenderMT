@@ -305,6 +305,13 @@ def _unterschrift_overlay(bild, karte):
     return _pypdf().PdfReader(puffer).pages[0]
 
 
+def im_zeitraum(ae, von=None, bis=None):
+    """Nur die Stunden zwischen von und bis (je einschliesslich); ohne Angabe gilt die ganze Woche."""
+    eintraege = [e for e in ae["eintraege"] if (not von or e["datum"] >= von) and (not bis or e["datum"] <= bis)]
+    tage = sorted({e["datum"] for e in eintraege})
+    return dict(ae, eintraege=eintraege, von=tage[0] if tage else None, bis=tage[-1] if tage else None)
+
+
 def ausfuellen(con, konto, montag, grund, felder, von=None, bis=None, aenderungen=None, heute=None):
     """Befuellte Stundenplanaenderung als PDF-Bytes."""
     pdf_vorlage = vorlage(con)
@@ -313,7 +320,7 @@ def ausfuellen(con, konto, montag, grund, felder, von=None, bis=None, aenderunge
     if grund not in GRUENDE:
         raise FormularFehler("Bitte eine Begründung wählen.")
     pypdf = _pypdf()
-    ae = aenderungen or woche_aenderungen(con, konto["id"], montag)
+    ae = im_zeitraum(aenderungen or woche_aenderungen(con, konto["id"], montag), von, bis)
     karte = _karte(pdf_vorlage)
     werte = {"Antragsteller1": konto["name"], "Datum1": (heute or datetime.date.today()).strftime("%d.%m.%Y")}
     von_text = _tag_text(von) if von else _tag_text(ae["von"])
@@ -400,7 +407,7 @@ def erstellen(con, konto, daten):
         raise FormularFehler("„bis“ liegt vor „von“.")
     grund = daten.get("grund")
     felder = {k: str(v)[:200] for k, v in (daten.get("felder") or {}).items() if isinstance(k, str)}
-    ae = woche_aenderungen(con, konto["id"], montag)
+    ae = im_zeitraum(woche_aenderungen(con, konto["id"], montag), von, bis)
     pdf = ausfuellen(con, konto, montag, grund, felder, von, bis, ae)
     von = von or ae["von"] or montag.isoformat()
     bis = bis or ae["bis"] or von

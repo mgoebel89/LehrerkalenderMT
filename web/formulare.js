@@ -98,28 +98,40 @@ const Formulare = (() => {
     felderZeigen();
     const stundenOrt = el('div', { class: 'stapel', style: 'gap:6px' });
     let vonAuto = !vorgabe.von, bisAuto = !vorgabe.bis;
-    von.addEventListener('input', () => { vonAuto = false; });
-    bis.addEventListener('input', () => { bisAuto = false; });
+    let V = null;   // Ausfaelle und Vertretungen der gewaehlten Woche
+    // Nur Stunden im Zeitraum „am / von“ bis „bis“ kommen ins Formular; die uebrigen der Woche werden ausgegraut gezeigt
+    const stundenZeigen = () => {
+      if (!V) return;
+      const drin = e => (!von.value || e.datum >= von.value) && (!bis.value || e.datum <= bis.value);
+      const anzahl = V.eintraege.filter(drin).length;
+      L.setzen(stundenOrt,
+        V.eintraege.length ? el('table', { class: 'liste klein formular-stunden' }, el('tbody', {}, V.eintraege.map(e => el('tr', { class: drin(e) ? null : 'aus',
+          title: drin(e) ? null : 'liegt außerhalb des Zeitraums – kommt nicht ins Formular' },
+          el('td', { text: tagKurz(e.datum) }), el('td', { class: 'mono', text: (e.block + 1) + '. Block' }), el('td', { text: e.klasse }),
+          el('td', { class: 'leise', text: drin(e) ? e.vertretung : 'nicht im Zeitraum' }))))) :
+          el('p', { class: 'leise klein', text: 'In dieser Woche ist kein Ausfall und keine Vertretung eingetragen. Das Formular geht trotzdem (z. B. für die Versicherung) – mit dem Zeitraum unten.' }),
+        V.eintraege.length && anzahl < V.eintraege.length ? el('p', { class: 'leise klein', text: anzahl + ' von ' + V.eintraege.length + ' Stunden der Woche liegen im Zeitraum und kommen ins Formular.' }) : null,
+        V.vorhanden ? el('div', { class: 'banner klein', text: 'Für diese Woche gibt es schon eine Stundenplanänderung in der Ablage.' }) : null);
+    };
+    von.addEventListener('input', () => { vonAuto = false; stundenZeigen(); });
+    bis.addEventListener('input', () => { bisAuto = false; stundenZeigen(); });
+    von.addEventListener('change', stundenZeigen);
+    bis.addEventListener('change', stundenZeigen);
     const vorschau = async () => {
       L.setzen(stundenOrt, el('p', { class: 'leise klein', text: 'Lade die Woche …' }));
       try {
-        const v = await L.api('GET', '/api/formulare/vorschau?woche=' + woche.value);
-        if (vonAuto) von.value = v.von || '';
-        if (bisAuto) bis.value = v.bis || '';
-        L.setzen(stundenOrt,
-          v.eintraege.length ? el('table', { class: 'liste klein' }, el('tbody', {}, v.eintraege.map(e => el('tr', {},
-            el('td', { text: tagKurz(e.datum) }), el('td', { class: 'mono', text: (e.block + 1) + '. Block' }), el('td', { text: e.klasse }),
-            el('td', { class: 'leise', text: e.vertretung }))))) :
-            el('p', { class: 'leise klein', text: 'In dieser Woche ist kein Ausfall und keine Vertretung eingetragen. Das Formular geht trotzdem (z. B. für die Versicherung) – mit dem Zeitraum unten.' }),
-          v.vorhanden ? el('div', { class: 'banner klein', text: 'Für diese Woche gibt es schon eine Stundenplanänderung in der Ablage.' }) : null);
-      } catch (e) { L.setzen(stundenOrt, el('div', { class: 'banner warnung klein', text: e.message })); }
+        V = await L.api('GET', '/api/formulare/vorschau?woche=' + woche.value);
+        if (vonAuto) von.value = V.von || '';
+        if (bisAuto) bis.value = V.bis || '';
+        stundenZeigen();
+      } catch (e) { V = null; L.setzen(stundenOrt, el('div', { class: 'banner warnung klein', text: e.message })); }
     };
     woche.addEventListener('change', vorschau);
     vorschau();
     const r = await L.dialog({
       titel: 'Stundenplanänderung / Beurlaubung', knopf: 'Erstellen', breit: true,
       inhalt: el('div', { class: 'stapel', style: 'gap:12px' },
-        el('div', { class: 'felder zwei' }, L.feld('Woche', woche, 'Ausfälle und Vertretungen dieser Woche kommen in die Tabelle'), el('span')),
+        el('div', { class: 'felder zwei' }, L.feld('Woche', woche, 'Ausfälle und Vertretungen dieser Woche im Zeitraum kommen in die Tabelle'), el('span')),
         el('div', { class: 'stapel', style: 'gap:4px' }, el('span', { class: 'etikett', text: 'Betroffene Stunden' }), stundenOrt),
         el('div', { class: 'felder zwei' }, L.feld('am / von', von), L.feld('bis', bis)),
         L.feld('Begründung', grund), felderOrt,

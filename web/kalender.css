@@ -434,3 +434,4 @@ label.haken.gross input { width: 24px; height: 24px; }
 .formulare .chip-knopf.stand { min-height: 30px; padding: 2px 12px; border-radius: 999px; }
 .formulare .chip-knopf.stand.gelb { background: #fdf1d6; border-color: #e3b44b; color: #7a4f00; }
 .formulare .chip-knopf.stand.gruen { background: #e7f2c8; border-color: #9fb83a; color: #4d5c00; }
+.formular-stunden tr.aus td { color: var(--leise); text-decoration: line-through; }
