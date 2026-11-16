@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#00639C">
+<title>Unterrichtsbesuche</title>
+<link rel="icon" href="/static/symbol-192.png" type="image/png" sizes="192x192">
+<link rel="stylesheet" href="/static/ub-basis.css">
+<link rel="stylesheet" href="/static/ub.css">
+<link rel="stylesheet" href="/static/ub-seiten.css">
+</head>
+<body data-seite="uebersicht" data-skripte="ub-drs.js ub-common.js ub-uebersicht.js">
+<header class="ub-leiste"><a href="/app#start">‹ Lehrerkalender MT</a><span>Unterrichtsbesuche</span></header>
+<main class="ub-rahmen">
+<div class="card">
+  <div class="toolbar">
+    <h1 style="margin:0">Unterrichtsbesuche</h1>
+    <div class="spacer"></div>
+    <a class="btn-sec" href="/unterrichtsbesuche/einstellungen">Einstellungen</a>
+    <button type="button" class="btn-sec" id="ubNeuAnw">+ Anwärter</button>
+    <button type="button" class="btn" id="ubNeuBesuch">+ Besuch</button>
+  </div>
+  <p class="muted">Verlauf im Unterrichtsbesuch vom Handy mitschreiben, danach als Protokoll ausgeben. Kategorien, Phasen und
+  Beratungsschwerpunkte legst du in den <a href="/unterrichtsbesuche/einstellungen">Einstellungen</a> fest.</p>
+</div>
+<h2 class="ub-h2">Anstehend &amp; laufend</h2>
+<div id="ubAnstehend"></div>
+<h2 class="ub-h2">Anwärter</h2>
+<div class="card-grid" id="ubAnwGrid"></div>
+<div id="ubVergangen"></div>
+</main>
+<script src="/static/ub-laden.js"></script>
+</body>
+</html>

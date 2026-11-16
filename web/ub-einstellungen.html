@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#00639C">
+<title>Einstellungen · Unterrichtsbesuche</title>
+<link rel="icon" href="/static/symbol-192.png" type="image/png" sizes="192x192">
+<link rel="stylesheet" href="/static/ub-basis.css">
+<link rel="stylesheet" href="/static/ub.css">
+<link rel="stylesheet" href="/static/ub-seiten.css">
+</head>
+<body data-seite="einstellungen" data-skripte="ub-drs.js ub-common.js ub-einstellungen.js">
+<header class="ub-leiste"><a href="/app#start">‹ Lehrerkalender MT</a><span>Unterrichtsbesuche</span></header>
+<main class="ub-rahmen">
+<p class="muted" style="margin-bottom:.3rem"><a href="/unterrichtsbesuche">Unterrichtsbesuche</a> ›</p>
+<div class="card">
+  <h1 style="margin:0 0 .4rem">Einstellungen</h1>
+  <p class="muted">Die Reihenfolge hier ist auch die Reihenfolge der Knöpfe beim Mitschreiben. Was schon in einem Protokoll steht, lässt sich
+  nicht mehr löschen, nur stilllegen: Dann verschwindet es aus der Auswahl, alte Protokolle behalten ihr Piktogramm.</p>
+</div>
+<div class="card">
+  <div class="toolbar"><h2 style="margin:0;font-size:17px">Protokoll</h2></div>
+  <label class="drs-field" style="max-width:420px;margin:0"><span class="drs-field-label">Standard-Ordnung beim Ausgeben</span>
+    <select id="ubeOrdnung"></select><span class="muted">Beim Ausgeben lässt sich jedes Mal eine andere wählen.</span></label>
+</div>
+<div class="ube-grid">
+  <div class="card">
+    <div class="toolbar"><h2 style="margin:0;font-size:17px">Beratungsschwerpunkte</h2><div class="spacer"></div>
+      <button type="button" class="btn-sec btn-sm" data-neu="kriterien">+ Neu</button></div>
+    <p class="muted" style="font-size:12px">Die Liste des Seminars, gilt für alle Anwärter. Im Besuch hakst du an, welche der Anwärter gewählt hat –
+    diese stehen beim Mitschreiben vorne, die übrigen hinter „weitere“.</p>
+    <div id="ube-kriterien"></div>
+  </div>
+  <div class="card">
+    <div class="toolbar"><h2 style="margin:0;font-size:17px">Kategorien</h2><div class="spacer"></div>
+      <button type="button" class="btn-sec btn-sm" data-neu="kategorien">+ Neu</button></div>
+    <div id="ube-kategorien"></div>
+  </div>
+  <div class="card">
+    <div class="toolbar"><h2 style="margin:0;font-size:17px">Unterrichtsphasen</h2><div class="spacer"></div>
+      <button type="button" class="btn-sec btn-sm" data-neu="phasen">+ Neu</button></div>
+    <div id="ube-phasen"></div>
+  </div>
+</div>
+</main>
+<script src="/static/ub-laden.js"></script>
+</body>
+</html>

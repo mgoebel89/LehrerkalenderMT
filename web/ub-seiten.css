@@ -1,0 +1,80 @@
+/* Seitenstile der Unterrichtsbesuche (aus den Vorlagen des alten Lehrerkalenders). */
+/* aus index.html */
+.ub-grid { display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .ub-card { border: 1px solid var(--border); border-radius: var(--r);
+    background: var(--surface); box-shadow: var(--shadow); padding: 14px;
+    display: flex; flex-direction: column; gap: .3rem; }
+  .ub-card.laufend { border: 2px solid var(--blau); }
+  .ub-card-kopf { display: flex; align-items: baseline; gap: .6rem; }
+  .ub-card-datum { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ub-card-zeit { font-size: 12px; color: var(--muted); }
+  .ub-card-name { font-weight: 600; font-size: 15px; color: var(--text); text-decoration: none; }
+  .ub-card-name:hover { color: var(--blau); }
+  .ub-card-thema { font-size: 13px; color: #3b4a5a; }
+  .ub-card-meta { font-size: 11px; color: var(--muted); }
+  .ub-card-fuss { display: flex; gap: .5rem; margin-top: .5rem; padding-top: .6rem;
+    border-top: 1px solid var(--border); }
+  .ub-card-fuss .btn, .ub-card-fuss .btn-sec { flex: 1; justify-content: center; text-align: center; }
+  .ub-status { font-size: 10px; font-weight: 700; border-radius: 999px; padding: 2px 9px;
+    margin-left: auto; background: #f1f4f7; color: #4a5b6d; white-space: nowrap; }
+  .ub-status.laufend { background: var(--blau); color: #fff; }
+  .ub-status.abgeschlossen { background: #eef4ee; color: #2e7d32; }
+  .ub-h2 { font-size: 17px; margin: 1.4rem 0 .7rem; }
+  .ub-liste { width: 100%; border-collapse: collapse; }
+  .ub-liste td { padding: .5rem .4rem; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .ub-liste tr { cursor: pointer; }
+  .ub-liste tr:hover td { background: #f6f9fc; }
+  .ub-still { opacity: .55; }
+  .ub-wahl { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .ub-wahl button { text-align: left; border: 1px solid var(--border); background: var(--surface);
+    border-radius: var(--r); padding: 10px 12px; cursor: pointer; font: inherit; }
+  .ub-wahl button.aktiv { border: 2px solid var(--blau); background: var(--blau-hell); }
+  .ub-wahl small { display: block; color: var(--muted); font-size: 11px; }
+
+/* aus besuch.html */
+.ubd-kopf { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+  .ubd-kopf h1 { margin: 0; font-size: 22px; }
+  .ubd-meta { font-size: 13px; color: var(--muted); margin-top: .2rem; }
+  .ubd-daten { width: 100%; border-collapse: collapse; }
+  .ubd-daten th { text-align: left; vertical-align: top; width: 10.5rem; hyphens: manual; font-size: 12px;
+    color: var(--muted); font-weight: 600; padding: .45rem .4rem .45rem 0; }
+  .ubd-daten td { padding: .45rem 0; font-size: 14px; white-space: pre-wrap; }
+  .ubd-daten tr + tr { border-top: 1px solid var(--border); }
+  .ub-status { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 3px 10px;
+    background: #f1f4f7; color: #4a5b6d; }
+  .ub-status.laufend { background: var(--blau); color: #fff; }
+  .ub-status.abgeschlossen { background: #eef4ee; color: #2e7d32; }
+  @media (max-width: 760px) { .ubd-daten th { width: 6.5rem; } }
+
+/* aus einstellungen.html */
+.ube-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    align-items: start; }
+  .ube-zeile { display: flex; align-items: center; gap: .5rem; padding: .45rem .2rem;
+    border-bottom: 1px solid var(--border); }
+  .ube-zeile.still { opacity: .5; }
+  .ube-name { flex: 1; cursor: pointer; font-size: 14px; }
+  .ube-name:hover { color: var(--blau); }
+  .ube-name small { color: var(--muted); font-size: 11px; margin-left: .3rem; }
+  .ube-pfeil { border: 1px solid var(--border); background: var(--surface); border-radius: 6px;
+    width: 28px; height: 28px; cursor: pointer; color: var(--muted); font-size: 13px; line-height: 1; }
+  .ube-pfeil:disabled { opacity: .3; cursor: default; }
+  .ube-kreis { width: 32px; height: 32px; border-radius: 50%; display: inline-flex;
+    align-items: center; justify-content: center; flex: none; }
+  .ube-icons { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); }
+  .ube-icons button, .ube-farben button { border: 1px solid var(--border); background: var(--surface);
+    border-radius: 8px; height: 44px; cursor: pointer; display: inline-flex;
+    align-items: center; justify-content: center; color: #34495e; }
+  .ube-icons button.aktiv { border: 2px solid var(--blau); background: var(--blau-hell); color: var(--blau); }
+  .ube-farben { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ube-farben button { width: 44px; border: 3px solid transparent; }
+  .ube-farben button.aktiv { border-color: #1a1a1a; }
+  .ube-vorschau { display: inline-flex; align-items: center; gap: .6rem; padding: .6rem 1rem;
+    border-radius: 12px; color: #fff; font-weight: 600; }
+
+/* Rahmen im Lehrerkalender MT (an Stelle der App-Shell des alten Tools) */
+.ub-leiste { display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: var(--surface, #fff); border-bottom: 2px solid var(--blau); }
+.ub-leiste a { color: var(--blau); font-weight: 700; text-decoration: none; }
+.ub-leiste span { color: var(--muted); font-size: 13px; }
+.ub-rahmen { max-width: 1100px; margin: 0 auto; padding: 16px; }
+.ub-rahmen > .card { margin-bottom: 16px; }

@@ -506,6 +506,51 @@ MIGRATIONEN = [
         geaendert TEXT NOT NULL);
     CREATE INDEX formular_lehrkraft ON formular (lehrkraft_id, von)
     """,
+    # 16: Stufe F2 Unterrichtsbesuche (aus dem alten Lehrerkalender, Schema wie dort): Einstellungen, Kategorien, Phasen,
+    #     Beratungsschwerpunkte, Anwaerter, Besuche mit Schwerpunkten, Eintraege; Fotos/Skizzen als Blob. Das Modul
+    #     schaltet jede Lehrkraft fuer sich ein (lehrkraft.ub_an).
+    """
+    ALTER TABLE lehrkraft ADD COLUMN ub_an INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE ub_einstellung (
+        lehrkraft_id INTEGER PRIMARY KEY REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        standard_ordnung TEXT NOT NULL DEFAULT 'chronologisch');
+    CREATE TABLE ub_kategorie (
+        id INTEGER PRIMARY KEY, lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        name TEXT NOT NULL DEFAULT '', icon TEXT NOT NULL DEFAULT 'auge', farbe TEXT NOT NULL DEFAULT '#00639C',
+        spalte TEXT NOT NULL DEFAULT 'verlauf', position INTEGER NOT NULL DEFAULT 0, aktiv INTEGER NOT NULL DEFAULT 1);
+    CREATE TABLE ub_phase (
+        id INTEGER PRIMARY KEY, lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        name TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0, aktiv INTEGER NOT NULL DEFAULT 1);
+    CREATE TABLE ub_kriterium (
+        id INTEGER PRIMARY KEY, lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        name TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0, aktiv INTEGER NOT NULL DEFAULT 1);
+    CREATE TABLE ub_anwaerter (
+        id INTEGER PRIMARY KEY, lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        name TEXT NOT NULL DEFAULT '', faecher TEXT NOT NULL DEFAULT '', seminar TEXT NOT NULL DEFAULT '',
+        notiz TEXT NOT NULL DEFAULT '', aktiv INTEGER NOT NULL DEFAULT 1, erstellt TEXT NOT NULL);
+    CREATE TABLE ub_besuch (
+        id INTEGER PRIMARY KEY, lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        anwaerter_id INTEGER NOT NULL REFERENCES ub_anwaerter(id) ON DELETE CASCADE,
+        datum TEXT NOT NULL DEFAULT '', beginn TEXT NOT NULL DEFAULT '', ende TEXT NOT NULL DEFAULT '',
+        klasse TEXT NOT NULL DEFAULT '', raum TEXT NOT NULL DEFAULT '', thema TEXT NOT NULL DEFAULT '',
+        lernziele TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'geplant', reflexion TEXT NOT NULL DEFAULT '',
+        vereinbarungen TEXT NOT NULL DEFAULT '', erstellt TEXT NOT NULL, geaendert TEXT NOT NULL);
+    CREATE INDEX ub_besuch_lehrkraft ON ub_besuch (lehrkraft_id, datum);
+    CREATE TABLE ub_schwerpunkt (
+        id INTEGER PRIMARY KEY, besuch_id INTEGER NOT NULL REFERENCES ub_besuch(id) ON DELETE CASCADE,
+        kriterium_id INTEGER, position INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE ub_eintrag (
+        id INTEGER PRIMARY KEY, besuch_id INTEGER NOT NULL REFERENCES ub_besuch(id) ON DELETE CASCADE,
+        art TEXT NOT NULL DEFAULT 'eintrag', zeit TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0,
+        phase_id INTEGER, kategorie_id INTEGER, text TEXT NOT NULL DEFAULT '', kriterium_id INTEGER,
+        wertung TEXT NOT NULL DEFAULT '', bezug_id INTEGER, foto_uuid TEXT NOT NULL DEFAULT '', foto_name TEXT NOT NULL DEFAULT '',
+        skizze_json TEXT NOT NULL DEFAULT '', skizze_uuid TEXT NOT NULL DEFAULT '', skizze_name TEXT NOT NULL DEFAULT '',
+        erstellt TEXT NOT NULL);
+    CREATE INDEX ub_eintrag_besuch ON ub_eintrag (besuch_id);
+    CREATE TABLE ub_datei (
+        uuid TEXT PRIMARY KEY, lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        name TEXT NOT NULL, mime TEXT NOT NULL, daten BLOB NOT NULL, erstellt TEXT NOT NULL)
+    """,
 ]
 
 

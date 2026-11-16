@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#00639C">
+<title>Unterrichtsbesuch</title>
+<link rel="icon" href="/static/symbol-192.png" type="image/png" sizes="192x192">
+<link rel="stylesheet" href="/static/ub-basis.css">
+<link rel="stylesheet" href="/static/ub.css">
+<link rel="stylesheet" href="/static/ub-seiten.css">
+</head>
+<body data-seite="besuch" data-skripte="ub-drs.js ub-common.js ub-zeichnen.js ub-eintrag.js ub-besuch.js">
+<header class="ub-leiste"><a href="/app#start">‹ Lehrerkalender MT</a><span>Unterrichtsbesuche</span></header>
+<main class="ub-rahmen">
+<p class="muted" style="margin-bottom:.3rem"><a href="/unterrichtsbesuche">Unterrichtsbesuche</a> ›</p>
+<div class="card">
+  <div class="ubd-kopf">
+    <div>
+      <h1 id="ubdName" data-ub="name"></h1>
+      <div class="ubd-meta" id="ubdMeta"></div>
+    </div>
+    <span style="margin-left:auto" class="ub-status" id="ubdStatus"></span>
+  </div>
+  <div class="toolbar" style="margin-top:1rem;flex-wrap:wrap">
+    <a class="btn" data-ub="id" href="/unterrichtsbesuche/{id}/erfassen">Erfassen</a>
+    <button type="button" class="btn-sec" id="ubdPdf">Protokoll ausgeben</button>
+    <button type="button" class="btn-sec" id="ubdEdit">Kopfdaten bearbeiten</button>
+    <button type="button" class="btn-sec" id="ubdStatusBtn"></button>
+    <div class="spacer"></div>
+    <button type="button" class="btn-danger" id="ubdDel">Löschen</button>
+  </div>
+</div>
+<div id="ubdVorige"></div>
+<div class="card"><table class="ubd-daten" id="ubdDaten"></table></div>
+<div class="card">
+  <div class="toolbar"><h2 style="margin:0;font-size:17px">Verlauf</h2><div class="spacer"></div>
+    <button type="button" class="btn-sec btn-sm" id="ubdNeuPhase">+ Phase</button>
+    <button type="button" class="btn-sec btn-sm" id="ubdNeuEintrag">+ Eintrag</button></div>
+  <p class="muted" style="font-size:12px;margin:.2rem 0 .4rem">Eintrag anklicken zum Bearbeiten. Die Reihenfolge ergibt sich aus der Uhrzeit – zum Verschieben die Uhrzeit ändern.</p>
+  <div id="ubdVerlauf"></div>
+</div>
+<div class="card">
+  <h2 style="margin:0 0 .6rem;font-size:17px">Nachbereitung</h2>
+  <label class="drs-field"><span class="drs-field-label">Notizen aus dem Reflexionsgespräch</span><textarea id="ubdReflexion" rows="6"></textarea></label>
+  <label class="drs-field"><span class="drs-field-label">Vereinbarungen / Ziele für den nächsten Besuch</span><textarea id="ubdVereinbarungen" rows="4"></textarea>
+    <span class="muted">Erscheinen beim nächsten Besuch von <span data-ub="name"></span> als Erinnerung – in der Erfassung und im Protokoll.</span></label>
+  <div class="toolbar"><div class="spacer"></div><span class="muted" id="ubdNbStand" style="font-size:12px"></span>
+    <button type="button" class="btn" id="ubdNbSpeichern">Nachbereitung speichern</button></div>
+</div>
+</main>
+<script src="/static/ub-laden.js"></script>
+</body>
+</html>

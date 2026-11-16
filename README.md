@@ -25,7 +25,8 @@ Das Konzept (Fassung 2, freigegeben am 14.11.2026) liegt in `docs/KONZEPT.html`.
 | Schule | Schullogo (Admin, Grunddaten → Schule und Logo; Bild wird im Browser zu JPEG), Schulname und Webadresse; Logo auf der Anmeldeseite und in der Kopfzeile; Dokumente im DRS-Design: Logo oben links, Angaben rechts, feine Linie, Farbband Blau/Grün/Pink/Gelb (4:1:1:1) im Fuß | gebaut (0.12.0) |
 | E | Teilen im Kollegium | offen |
 | F1 | Formularcenter mit Ablage und Stand (erstellt, abgegeben, genehmigt); Stundenplanänderung/Beurlaubung füllt das Schul-PDF aus Ausfällen und Vertretungen der Woche (Vorlage lädt der Admin hoch, nicht im Repo); Unterschrift und Paraphe mit Stift oder Finger zeichnen; Start auch nach Ausfall/Vertretung, aus der Woche und aus einem Termin (Migration 15; braucht python3-pypdf und python3-reportlab) | gebaut (0.13.0) |
-| F2/F3 | Unterrichtsbesuche, Paperless | offen |
+| F2 | Unterrichtsbesuche aus dem alten Lehrerkalender übernommen, je Konto einschaltbar (Einstellungen › Konto) und nur für das eigene Konto sichtbar: Anwärter, Besuchs-Assistent, Handy-Erfassung mit Phasen, Kategorien, Beratungsschwerpunkten, Wertung, Foto und Skizze, Nachbereitung, Protokoll als PDF/ODT mit Schullogo (Migration 16; braucht python3-reportlab und python3-pil) | gebaut (0.14.0) |
+| F3 | Paperless | offen |
 | G | VPN, Diktat, Feinschliff | offen |
 
 ## Installation (Proxmox)

@@ -11,6 +11,7 @@ const BEREICHE = [
   { a: 'planung', text: 'Planung', sym: 'plan' },
   { a: 'pruefungen', text: 'Prüfungen', sym: 'pruefung' },
   { a: 'formulare', text: 'Formulare', sym: 'formular' },
+  { a: 'unterrichtsbesuche', text: 'Unterrichtsbesuche', sym: 'auge', adresse: '/unterrichtsbesuche', nurUb: true },
   { a: 'einstellungen', text: 'Einstellungen', sym: 'einstellungen' },
   { a: 'admin-konten', text: 'Konten', sym: 'lehrkraefte', admin: true, gruppe: 'Admin' },
   { a: 'admin-grunddaten', text: 'Grunddaten', sym: 'pakete', admin: true },
@@ -29,6 +30,8 @@ function navigation(aktiv) {
   const teile = [];
   for (const b of BEREICHE) {
     if (b.admin && S.konto.rolle !== 'admin') continue;
+    if (b.nurUb && !S.konto.ub_an) continue;
+    if (b.adresse) { teile.push(el('a', { href: b.adresse }, L.symbol(b.sym), b.text)); continue; }
     if (b.gruppe) teile.push(el('span', { class: 'etikett', style: 'padding:12px 12px 4px', text: b.gruppe }));
     if (b.spaeter) {
       teile.push(el('span', { class: 'nav-spaeter', title: 'kommt mit ' + b.spaeter }, L.symbol(b.sym), b.text,
@@ -45,7 +48,7 @@ async function zeigen() {
   const ziel = (location.hash || '#start').slice(1);
   const haupt = ziel.startsWith('einstellungen') ? 'einstellungen' : ziel.startsWith('planung') ? 'planung'
     : ziel.startsWith('pruefung') ? 'pruefungen' : ziel;
-  const bereich = BEREICHE.find(b => b.a === haupt && !b.spaeter && (!b.admin || S.konto.rolle === 'admin')) || BEREICHE[0];
+  const bereich = BEREICHE.find(b => b.a === haupt && !b.spaeter && !b.adresse && (!b.admin || S.konto.rolle === 'admin')) || BEREICHE[0];
   navigation(bereich.a);
   L.setzen(inhalt, el('p', { class: 'leise', text: 'Lädt …' }));
   try {
@@ -178,7 +181,26 @@ function kontoZeigen(ort) {
                 el('button', { type: 'button', onclick: ersatzcodesErneuern }, L.symbol('refresh'), 'Neue Ersatzcodes'),
                 el('button', { type: 'button', class: 'warnen', onclick: faktorAus }, 'Ausschalten')))
           : el('div', {}, el('button', { type: 'button', class: 'haupt', onclick: faktorEin }, L.symbol('schloss'), 'Einschalten'))),
-      Formulare.unterschriftKarte()));
+      Formulare.unterschriftKarte(),
+      ubKarte()));
+}
+
+// Unterrichtsbesuche (Stufe F2): je Konto einschaltbar, die Besuche sieht nur, wer sie angelegt hat
+function ubKarte() {
+  const an = !!S.konto.ub_an;
+  return el('div', { class: 'karte stapel' },
+    el('div', { class: 'zeile' }, el('h2', { text: 'Unterrichtsbesuche' }),
+      el('span', { class: 'rechts' }, el('span', { class: 'chip ' + (an ? 'gruen' : ''), text: an ? 'an' : 'aus' }))),
+    el('p', { class: 'leise klein', text: 'Für Fachleiter und Mentoren: Besuche bei Anwärtern vom Handy mitschreiben (Phasen, Beobachtungen, Fotos, Skizzen) und als Protokoll (PDF/ODT) ausgeben. Die Besuche sieht nur dein Konto. Ausschalten blendet den Menüpunkt aus, die Daten bleiben.' }),
+    el('div', { class: 'zeile' },
+      el('button', { type: 'button', class: an ? null : 'haupt', onclick: async () => {
+        try {
+          await L.api('POST', '/api/ub/modul', { an: !an });
+          S.konto.ub_an = !an;
+          zeigen();
+        } catch (e) { L.meldung(e.message, true); }
+      } }, an ? 'Ausschalten' : 'Einschalten'),
+      an ? el('a', { class: 'knopf', href: '/unterrichtsbesuche' }, L.symbol('extern'), 'Öffnen') : null));
 }
 
 async function faktorEin() {

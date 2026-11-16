@@ -1,0 +1,585 @@
+/* Basis-Stile des alten Lehrerkalenders (drs.css), nur fuer die Seiten der Unterrichtsbesuche. */
+:root {
+  --blau: #00639C;
+  --blau-hell: #E6F3FA;
+  --blau-dunkel: #004a75;
+  --gruen: #B1C800;
+  --pink: #D4005E;
+  --gelb: #F8B442;
+  --border: #e2e5e9;
+  --bg: #f4f5f6;
+  --white: #fff;
+  --surface: #ffffff;
+  --text: #1a1a1a;
+  --muted: #666;
+  --r: 8px;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.04);
+  --sidebar-w: 244px;
+  --sidebar-collapsed-w: 64px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DIN Pro', Calibri, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* ===== App-Shell (Sidebar + Inhalt) ===== */
+.app-shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh; z-index: 30;
+  transition: width .18s ease, flex-basis .18s ease;
+}
+.sidebar-head {
+  display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-head .brand-logo { height: 34px; width: auto; flex: 0 0 auto; }
+.sidebar-brand { flex: 1; min-width: 0; }
+.sidebar-brand strong {
+  display: block; font-size: .98rem; color: var(--blau); font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sidebar-brand small { color: var(--muted); font-size: .74rem; }
+.sidebar-collapse {
+  border: 1px solid var(--border); background: #fff; color: var(--muted);
+  width: 26px; height: 26px; border-radius: 6px; cursor: pointer; flex: 0 0 auto;
+  line-height: 1; padding: 0; font-size: 15px;
+}
+.sidebar-collapse:hover { background: var(--blau-hell); color: var(--blau); }
+
+.sidebar-nav { flex: 1; overflow-y: auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
+.nav-group-label {
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+  padding: 12px 10px 4px; font-weight: 600;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px;
+  color: var(--text); cursor: pointer; white-space: nowrap; font-size: .92rem;
+  text-decoration: none; border: none; background: none; width: 100%;
+  font-family: inherit; text-align: left;
+}
+.nav-item:hover { background: var(--blau-hell); text-decoration: none; }
+.nav-item.active { background: var(--blau); color: #fff; }
+.nav-item .nav-icon { flex: 0 0 20px; width: 20px; height: 20px; display: inline-flex; }
+.nav-item .nav-icon svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+.nav-item .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nav-item.nav-logout { color: var(--pink); }
+.nav-spacer { margin-top: auto; }
+.sidebar-foot {
+  border-top: 1px solid var(--border); padding: 10px 14px;
+  display: flex; align-items: center; gap: .5rem; font-size: 13px;
+}
+
+/* Eingeklappt (nur Desktop): nur Icons */
+.app-shell.sidebar-collapsed .sidebar { width: var(--sidebar-collapsed-w); flex-basis: var(--sidebar-collapsed-w); }
+.app-shell.sidebar-collapsed .sidebar-brand,
+.app-shell.sidebar-collapsed .nav-group-label,
+.app-shell.sidebar-collapsed .nav-item .nav-label,
+.app-shell.sidebar-collapsed .sidebar-foot span { display: none; }
+.app-shell.sidebar-collapsed .sidebar-head { justify-content: center; }
+.app-shell.sidebar-collapsed .nav-item { justify-content: center; padding: 8px; }
+
+.content-area { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sidebar-backdrop { display: none; }
+.mobile-bar { display: none; }
+
+/* ===== Inhalt ===== */
+.wrapper { max-width: 1100px; width: 100%; margin: 24px auto; padding: 0 24px 60px; }
+.wrapper--center { display: flex; align-items: flex-start; justify-content: center; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+.card-narrow { max-width: 440px; margin: 4rem auto; }
+
+/* Werkzeugleiste über einer Liste: Titel links, Aktionen rechts.
+   `.spacer` schiebt alles Folgende nach rechts. */
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.toolbar .spacer { flex: 1; }
+
+/* Einstellungen mit Kategorie-Unternavigation (Muster Gemeindeverwaltung):
+   links die Kategorien, rechts immer genau EINE davon. Alle Kategorien
+   bleiben im DOM und werden nur ein-/ausgeblendet — so überleben die
+   Handler der eingebetteten Skripte den Wechsel. */
+.settings-layout { display: grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: start; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 16px; }
+.settings-nav button {
+  text-align: left; border: 1px solid transparent; background: transparent;
+  padding: 9px 12px; border-radius: 7px; cursor: pointer;
+  color: var(--text); font-size: 14px; font-family: inherit;
+}
+.settings-nav button:hover { background: #eef2f7; }
+.settings-nav button.active { background: var(--blau); border-color: var(--blau); color: #fff; font-weight: 600; }
+.settings-content { min-width: 0; }
+.settings-cat[hidden] { display: none; }
+
+/* Zweispaltiges Formularraster. Auf dem Handy einspaltig — sonst sprengen vor
+   allem `<input type=file>` (große Mindestbreite) und lange Beschriftungen die
+   375-px-Breite. Das `!important` hebt die `grid-column`-Angaben auf, die als
+   Inline-Stil an den vollbreiten Zeilen hängen: In einem einspaltigen Raster
+   würde `grid-column: 1/3` sonst eine zweite Spalte erfinden. */
+.form-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem 1rem; }
+.form-2 .full { grid-column: 1 / -1; }
+/* Mehrspaltige Sonderfälle mit fester Spaltenbreite (Kalender hinzufügen:
+   Bezeichnung, Farbwähler, URL, Knopf). */
+.form-cols { display: grid; gap: .6rem; align-items: end;
+  grid-template-columns: minmax(120px, 1fr) 100px minmax(160px, 2fr) auto; }
+
+@media (max-width: 760px) {
+  .form-2 { grid-template-columns: 1fr; }
+  .form-2 > * { grid-column: auto !important; }
+  .form-cols { grid-template-columns: 1fr; align-items: stretch; }
+}
+
+@media (max-width: 760px) {
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-nav {
+    position: static; flex-direction: row; flex-wrap: nowrap; overflow-x: auto;
+    gap: 4px; scrollbar-width: none; padding-bottom: 4px;
+  }
+  .settings-nav::-webkit-scrollbar { display: none; }
+  .settings-nav button { white-space: nowrap; flex: 0 0 auto; }
+}
+
+h1 { font-size: 22px; color: var(--blau); margin-bottom: 1rem; }
+h2 { font-size: 18px; color: var(--blau); margin: 1.5rem 0 .8rem; }
+h1:first-child, h2:first-child { margin-top: 0; }
+
+label { display: block; font-size: 13px; font-weight: 500; margin: 1rem 0 .3rem; color: var(--muted); }
+input[type=text], input[type=password], input[type=email], input[type=date], input[type=time],
+input[type=number], input:not([type]), select, textarea {
+  width: 100%; padding: 8px 10px; font-size: 14px;
+  border: 1px solid var(--border); border-radius: 6px;
+  font-family: inherit; background: var(--white); color: inherit;
+}
+textarea { min-height: 90px; resize: vertical; }
+/* Fokus als klarer Rahmen statt als Schein — er sitzt innen (`offset: -1px`),
+   damit er in engen Rastern nichts verschiebt. */
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--blau); outline-offset: -1px; border-color: var(--blau);
+}
+
+/* ===== Knöpfe =====
+   Rangfolge wie in der Gemeindeverwaltung: In einer Ansicht ist genau EINE
+   Aktion gefüllt (`.btn`), alles andere steht ruhig daneben (`.btn-sec`).
+   Vorher war auch die Nebenaktion kräftig blau umrandet — dadurch schrie die
+   Oberfläche an jeder Stelle gleich laut.
+   Bewusst KEINE Regel auf das nackte `button`-Element: In dieser App sind
+   Kacheln, Karten und Board-Spalten selbst Buttons; eine globale Regel würde
+   sie alle mit Rahmen und Polster überziehen. */
+.btn, .btn-sec, .btn-danger, .btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 6px; padding: 8px 14px; font-size: 14px; font-weight: 500;
+  cursor: pointer; font-family: inherit; text-decoration: none;
+  border: 1px solid var(--border); background: var(--white); color: var(--text);
+  transition: background .12s, border-color .12s;
+}
+.btn { background: var(--blau); border-color: var(--blau); color: #fff; font-weight: 600; }
+.btn:hover { background: var(--blau-dunkel); border-color: var(--blau-dunkel); }
+
+/* Diese drei stehen bewusst NACH `.btn` und wiederholen Fläche, Farbe und
+   Rahmen vollständig: In den Bestandsvorlagen (vor allem im Profil) steht an
+   vielen Nebenaktionen `class="btn btn-sec"`. Ohne eigene Angaben gewänne dort
+   `.btn` und aus jedem „Entfernen" oder „Verbindung testen" würde ein
+   gefüllter Hauptknopf. */
+.btn-sec { background: var(--white); border-color: var(--border); color: var(--text); font-weight: 500; }
+.btn-sec:hover { background: #f0f2f5; }
+.btn-danger { background: var(--white); color: var(--pink); border-color: #f3c6d6; font-weight: 500; }
+.btn-danger:hover { background: #fdf1f5; }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text); font-weight: 500; }
+.btn-ghost:hover { background: #f0f2f5; }
+.btn-sm { padding: 4px 9px; font-size: 12.5px; }
+.btn[disabled], .btn-sec[disabled], .btn-danger[disabled] { opacity: .5; cursor: default; }
+
+.flash { padding: 10px 13px; border-radius: 6px; margin-bottom: 1rem; font-size: 13px; }
+.flash-err { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+.flash-ok  { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+.flash-warn{ background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 9px 11px; text-align: left; border-bottom: 1px solid #eee; }
+th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .5px; }
+tr:hover td { background: #fafafa; }
+
+.muted { color: var(--muted); font-size: 12px; }
+.row-spread { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+
+/* Login-/Setup-Kopfleiste (ohne Sidebar) */
+.nav {
+  background: var(--white); border-bottom: 1px solid var(--border);
+  padding: .8rem 1.5rem; display: flex; justify-content: space-between; align-items: center;
+}
+.nav a { color: var(--blau); text-decoration: none; font-weight: 600; margin-right: 1rem; }
+.nav a:hover { text-decoration: underline; }
+.nav .right { color: var(--muted); font-size: 12px; }
+
+.badge { display: inline-block; padding: 2px 8px; font-size: 11px; border-radius: 4px; font-weight: 600; }
+.b-admin { background: #fff3e0; color: #e65100; }
+.b-teacher { background: var(--blau-hell); color: var(--blau); }
+.b-inactive { background: #eee; color: var(--muted); }
+
+/* ===== Dashboard / Übersicht ===== */
+.dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; margin-top: 8px; }
+.dash-card { display: flex; flex-direction: column; }
+.dash-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.dash-card-head h3 { font-size: 1rem; color: var(--blau); margin: 0; }
+.dash-icon { font-size: 1.3rem; line-height: 1; }
+.dash-card-body { flex: 1; }
+.dash-list { list-style: none; margin: 0; padding: 0; }
+.dash-list li { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.dash-list li:last-child { border-bottom: none; }
+.dash-date { flex: 0 0 auto; min-width: 96px; color: var(--muted); font-size: .85rem; white-space: nowrap; }
+.dash-main { flex: 1; min-width: 0; }
+.dash-card-foot { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: .9rem; }
+.dash-card-foot a { color: var(--blau); text-decoration: none; font-weight: 600; }
+.dash-empty { color: var(--muted); font-size: .9rem; padding: 8px 0; }
+
+/* ===== Aufgaben (Vikunja) ===== */
+.task-form {
+  display: grid; grid-template-columns: minmax(0,1fr) 170px 140px auto;
+  gap: .5rem; align-items: end;
+}
+.task-list { list-style: none; margin: .6rem 0 0; padding: 0; }
+.task-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.task-item:last-child { border-bottom: none; }
+.task-check { width: 18px; height: 18px; margin-top: 2px; flex: 0 0 auto; cursor: pointer; }
+.task-main { flex: 1; min-width: 0; }
+.task-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.task-due.is-overdue { color: var(--pink); font-weight: 600; }
+.task-prio { background: #fff3e0; color: #e65100; }
+.task-label { color: #fff; text-shadow: 0 0 2px rgba(0,0,0,.35); }
+.task-del { flex: 0 0 auto; background: transparent; cursor: pointer; border-radius: 6px; }
+
+/* ===== Stammdaten (Klassen / Fächer) ===== */
+.sd-form {
+  display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 140px auto;
+  gap: .5rem; align-items: end;
+}
+.sd-inline { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.sd-inline input { max-width: 240px; }
+.sd-check { display: flex; align-items: center; gap: .3rem; margin: 0; font-weight: normal; font-size: 12px; }
+.sd-check input { width: auto; }
+
+/* ===== Stundenplan-Einstellungen ===== */
+.hol-form {
+  display: grid; grid-template-columns: minmax(0,1fr) 160px 160px 180px auto;
+  gap: .5rem; align-items: end;
+}
+.ab-preview { display: flex; flex-wrap: wrap; gap: 6px; }
+.ab-chip {
+  display: inline-flex; flex-direction: column; align-items: center;
+  padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--border); min-width: 74px;
+}
+.ab-chip small { font-weight: normal; font-size: 10px; color: var(--muted); }
+.ab-chip.ab-A { background: var(--blau-hell); color: var(--blau); border-color: var(--blau); }
+.ab-chip.ab-B { background: #f4f7e0; color: #6b7a00; border-color: var(--gruen); }
+.feiertage { list-style: none; margin: 0; padding: 0; columns: 2; font-size: 13px; }
+.feiertage li { padding: 3px 0; break-inside: avoid; }
+.feiertage .muted { display: inline-block; min-width: 130px; }
+
+/* ===== Versions-Editor (Grundstundenplan) ===== */
+.ve-grid { table-layout: fixed; min-width: 900px; }
+.ve-grid th, .ve-grid td { border: 1px solid var(--border); vertical-align: top; padding: 6px; }
+.ve-grid thead th { background: var(--blau-hell); color: var(--blau); text-align: center; }
+.ve-slot { background: #fafafa; text-align: left; text-transform: none; font-size: 12px; }
+.ve-row {
+  display: flex; align-items: flex-start; gap: 4px;
+  background: var(--blau-hell); border-radius: 6px; padding: 5px 6px; margin-bottom: 4px;
+}
+.ve-row.ve-ab { background: #f4f7e0; }
+.ve-row-main { flex: 1; min-width: 0; font-size: 12px; display: flex; flex-direction: column; }
+.ve-row-main strong { font-size: 12px; }
+.ve-del {
+  border: none; background: none; color: var(--pink); cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 2px;
+}
+.ve-add summary {
+  cursor: pointer; color: var(--blau); font-size: 12px; font-weight: 600;
+  list-style: none; padding: 2px 0;
+}
+.ve-add summary::-webkit-details-marker { display: none; }
+.ve-add[open] summary { margin-bottom: 4px; }
+.ve-add form { display: flex; flex-direction: column; gap: 4px; }
+.ve-add select, .ve-add input { font-size: 12px; padding: 5px 6px; }
+
+/* Stundenplan-Grid: auf schmalen Geräten horizontal scrollen */
+.tt-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ===== Responsive ===== */
+@media (max-width: 900px) {
+  .mobile-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .menu-toggle {
+    border: 1px solid var(--border); background: #fff; border-radius: 7px;
+    width: 38px; height: 38px; font-size: 1.2rem; cursor: pointer; line-height: 1; padding: 0;
+  }
+  .mobile-logo { height: 26px; width: auto; }
+  .mobile-title { font-weight: 600; color: var(--blau); font-size: 14px; }
+
+  .sidebar {
+    position: fixed; left: 0; top: 0; height: 100vh;
+    transform: translateX(-100%); transition: transform .2s ease;
+    box-shadow: 0 0 40px rgba(0,0,0,.2);
+  }
+  .app-shell.nav-open .sidebar { transform: translateX(0); }
+  .app-shell.nav-open .sidebar-backdrop {
+    display: block; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 25;
+  }
+  /* Auf dem Handy immer volle Beschriftung, nie „collapsed" */
+  .app-shell.sidebar-collapsed .sidebar { width: var(--sidebar-w); flex-basis: var(--sidebar-w); }
+  .app-shell.sidebar-collapsed .sidebar-brand,
+  .app-shell.sidebar-collapsed .nav-item .nav-label,
+  .app-shell.sidebar-collapsed .nav-group-label,
+  .app-shell.sidebar-collapsed .sidebar-foot span { display: revert; }
+  .sidebar-collapse { display: none; }
+}
+
+@media (max-width: 760px) {
+  .wrapper { margin: 14px auto; padding: 0 12px 48px; }
+  .card { padding: 1.2rem; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 16px; }
+
+  .dash-grid { grid-template-columns: 1fr; }
+  .dash-date { min-width: 84px; }
+
+  /* Aufgaben-Formular untereinander statt vierspaltig quetschen */
+  .task-form { grid-template-columns: 1fr; }
+  .task-form .btn { width: 100%; justify-content: center; }
+
+  .sd-form, .hol-form { grid-template-columns: 1fr; }
+  .sd-form .btn, .hol-form .btn { width: 100%; justify-content: center; }
+  .feiertage { columns: 1; }
+
+  /* Breite Tabellen scrollen statt quetschen */
+  .card:has(> table) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .card > table { min-width: 560px; }
+  .tt-scroll .tt-grid { min-width: 720px; }
+
+  .row-spread { align-items: flex-start; }
+}
+
+@media (max-width: 460px) {
+  input[type=text], input[type=password], input[type=email], input[type=date],
+  input[type=time], input[type=number], input:not([type]), select, textarea, button, .btn {
+    font-size: 16px; /* verhindert Auto-Zoom in iOS */
+  }
+  .btn { padding: 11px 18px; }
+}
+
+/* ===== Kacheln, Karten, Chips ===== */
+
+.tile-grid {
+  display: grid; gap: 14px; margin-bottom: 1.4rem;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+.tile {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 16px; display: flex; flex-direction: column; gap: 6px;
+  box-shadow: var(--shadow);
+}
+.tile-head { display: flex; align-items: center; gap: 9px; color: var(--blau); }
+.tile-head .tile-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.tile-zahl { font-size: 26px; font-weight: 600; line-height: 1.1; }
+.tile-sub { color: var(--muted); font-size: 12px; min-height: 18px; }
+.tile .btn, .tile .btn-sec { width: 100%; justify-content: center; margin-top: 8px; }
+.tile-warn { border: 2px solid var(--gelb); }
+.tile-warn .tile-head, .tile-warn .tile-zahl { color: #8a5a00; }
+
+.card-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+/* Karte als Ganzes klickbar -> Detail-Modal. Bewusst ein <button>, kein <a>:
+   verschachtelte Links brechen im Browser auseinander (siehe Dashboard-Karten). */
+.obj-card {
+  text-align: left; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 14px; cursor: pointer; font: inherit; color: inherit;
+  display: flex; flex-direction: column; gap: 4px; transition: border-color .12s, box-shadow .12s;
+}
+.obj-card:hover { border-color: var(--blau); box-shadow: var(--shadow); }
+.obj-card-head { display: flex; align-items: center; gap: 8px; color: var(--blau); }
+.obj-card-title { font-weight: 600; color: var(--text); font-size: 15px; }
+.obj-card-meta { color: var(--muted); font-size: 12px; }
+.obj-card.inaktiv { opacity: .55; }
+.obj-card .key { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--blau-hell); color: var(--blau-dunkel);
+  border-radius: 8px; padding: 6px 11px; font-size: 14px;
+}
+.chip button {
+  background: none; border: 0; color: inherit; cursor: pointer; font-size: 15px;
+  line-height: 1; padding: 0;
+}
+.chip-add {
+  border: 1px dashed var(--border); background: none; color: var(--muted);
+  border-radius: 8px; padding: 6px 11px; font-size: 14px; cursor: pointer;
+}
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.drs-icon { display: inline-flex; }
+
+/* ===== Overlay, Modal, Assistent ===== */
+
+/* Oben ausgerichtet und scrollend statt mittig: Ein langer Dialog (die
+   Entscheidungsmatrix, der Feedbackpunkt-Editor) wächst sonst über beide
+   Bildschirmkanten hinaus und man kommt an die Knöpfe im Fuß nicht mehr ran. */
+.drs-overlay {
+  position: fixed; inset: 0; z-index: 60; background: rgba(15, 25, 35, .45);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 16px; overflow-y: auto;
+}
+.drs-modal, .wiz {
+  background: var(--surface); border-radius: var(--r); width: 100%; max-width: 560px;
+  max-height: calc(100vh - 80px); display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,.25);
+}
+.wiz { max-width: 1040px; }
+.drs-modal-head, .wiz-head {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+}
+.drs-modal-head h3, .wiz-head h3 { font-size: 16px; margin: 0; }
+.drs-x {
+  margin-left: auto; background: none; border: 0; font-size: 22px; line-height: 1;
+  color: var(--muted); cursor: pointer; padding: 0 4px;
+}
+.drs-modal-body, .wiz-body { padding: 20px; overflow: auto; flex: 1 1 auto; }
+.drs-modal-foot, .wiz-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 20px; border-top: 1px solid var(--border); background: #fafbfc;
+  border-radius: 0 0 var(--r) var(--r);
+}
+.wiz-foot .btn { margin-left: auto; }
+.drs-modal-foot { justify-content: flex-end; }
+.wiz-hint { color: var(--muted); font-size: 12px; }
+
+.wiz-steps { display: flex; gap: 6px; margin-left: auto; }
+.wiz-step {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px;
+}
+.wiz-num {
+  width: 18px; height: 18px; border-radius: 50%; background: var(--bg);
+  display: flex; align-items: center; justify-content: center; font-size: 11px;
+}
+.wiz-step.active { color: var(--blau); border-color: var(--blau); }
+.wiz-step.active .wiz-num { background: var(--blau); color: #fff; }
+.wiz-step.done .wiz-num { background: var(--gruen); color: #173404; }
+.wiz .flash { margin: 12px 16px -4px; }
+
+.drs-field { display: block; margin-bottom: 14px; }
+.drs-field-label { display: block; font-weight: 500; font-size: 13px; margin-bottom: 4px; color: var(--muted); }
+.drs-field .muted { display: block; margin-top: 3px; }
+.drs-adv { margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.drs-adv summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.drs-adv-body { padding-top: 10px; }
+.drs-facts { margin: .6rem 0 .6rem 1.1rem; font-size: 14px; }
+
+.drs-toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(12px);
+  background: var(--text); color: #fff; padding: 10px 16px; border-radius: 8px;
+  font-size: 13px; z-index: 80; opacity: 0; pointer-events: none; transition: opacity .16s, transform .16s;
+}
+.drs-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@media (max-width: 760px) {
+  .drs-overlay { padding: 0; align-items: stretch; }
+  .drs-modal, .wiz { max-width: none; max-height: 100vh; border-radius: 0; }
+  .wiz-step .wiz-label { display: none; }
+  .drs-modal-foot, .wiz-foot { border-radius: 0; }
+}
+
+/* ---------- Fragedialog: Namen Schülern zuordnen (exams.js) ---------- */
+.fz { display: flex; flex-direction: column; gap: 12px; min-height: 260px; }
+.fz p { margin: 0; }
+.fz-kopf { display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+  color: var(--blau); }
+.fz-kopf .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.fz-karte { border: 1px solid var(--blau); background: var(--blau-hell);
+  border-radius: var(--r); padding: 14px 16px; }
+.fz-name { font-size: 20px; font-weight: 700; color: var(--blau); }
+.fz-proz { font-weight: 600; color: var(--text); white-space: nowrap; }
+.fz-optionen, .fz-suche-treffer { display: grid; gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.fz-suche-treffer { margin-top: 6px; }
+.fz-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; padding: 10px 12px; min-height: 44px; border: 1px solid var(--border);
+  border-radius: var(--r); background: var(--surface); cursor: pointer; font: inherit; }
+.fz-opt:hover:not([disabled]) { border-color: var(--blau); background: var(--blau-hell); }
+.fz-opt.fz-aktiv { border-color: var(--blau); box-shadow: inset 0 0 0 1px var(--blau); }
+.fz-opt[disabled] { opacity: .5; cursor: not-allowed; }
+.fz-opt-name { font-weight: 600; }
+.fz-opt-sub { font-size: 12px; color: var(--muted); }
+.fz-badge { margin-left: 6px; font-size: 10px; font-weight: 700; color: var(--blau);
+  background: var(--blau-hell); border-radius: 8px; padding: 1px 6px; }
+.fz-anlegen { border-top: 1px dashed var(--border); padding-top: 10px; }
+.fz-frage { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.fz-anlegen-zeile { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.fz-anlegen-zeile select { width: auto; }
+.fz-liste { display: flex; flex-direction: column; gap: 4px; max-height: 45vh; overflow: auto; }
+.fz-check { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--r); cursor: pointer; }
+.fz-check input { width: auto; margin: 0; }
+.fz-check > span:nth-child(2) { flex: 1; }
+.fz-summe { margin: 0; padding-left: 18px; line-height: 1.8; }
+.fz-details summary { cursor: pointer; color: var(--blau); font-size: 13px; }
+.fz-mini { margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.6;
+  max-height: 30vh; overflow: auto; }
+.fz-ziel { border-top: 1px solid var(--border); padding-top: 10px; }
+.fz-nav { display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; margin-top: auto; padding-top: 8px; }
+
+/* ---------- Unterschrift/Paraphe zeichnen (unterschrift.js) ---------- */
+.usz { position: fixed; inset: 0; z-index: 55; background: #eef1f4;
+  display: flex; flex-direction: column; }
+.usz-leiste { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.usz-werkzeuge { display: flex; align-items: center; gap: 6px; flex: 1; flex-wrap: wrap;
+  justify-content: center; }
+.usz-k { min-height: 44px; min-width: 44px; padding: 0 12px; display: inline-flex;
+  align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface); font: inherit; font-size: 14px; cursor: pointer; }
+.usz-k.an { border-color: var(--blau); background: var(--blau-hell); color: var(--blau);
+  font-weight: 600; }
+.usz-farbe { width: 16px; height: 16px; border-radius: 50%; display: inline-block; }
+.usz-trenner { width: 1px; height: 28px; background: var(--border); margin: 0 4px; }
+.usz-hinweis { text-align: center; font-size: 13px; color: var(--muted); padding: 8px 12px 0; }
+.usz-buehne { flex: 1; display: flex; align-items: center; justify-content: center;
+  min-height: 0; }
+.usz-blatt { position: relative; background: #fff; border-radius: var(--r);
+  box-shadow: var(--shadow); }
+.usz-canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+/* Grundlinie nur zur Orientierung — sie landet nicht im Bild */
+.usz-linie { position: absolute; left: 6%; right: 6%; top: 72%;
+  border-top: 2px dashed #b8c2cc; pointer-events: none; }
+.usz-vorschau { background: #fff; border: 1px solid var(--border); border-radius: var(--r);
+  padding: 24px 24px 12px; display: flex; flex-direction: column; align-items: flex-end; }
+.usz-v-sig { max-height: 55px; max-width: 200px; display: block; }
+.usz-v-paraphe { max-height: 40px; max-width: 120px; display: block; }
+.usz-v-linie { width: 210px; border-top: 1px solid #000; margin-top: 2px; }

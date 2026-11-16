@@ -19,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates
+from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, ub, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -33,6 +33,9 @@ OHNE_TLS = os.environ.get("LEHRERKALENDER_OHNE_TLS") == "1"
 COOKIE = "lkmt"
 KOPF = "X-Lehrerkalender"
 MAX_BODY = 1024 * 1024
+MAX_BODY_GROSS = 16 * 1024 * 1024        # Fotos und Skizzen der Unterrichtsbesuche (Base64)
+GROSSE_ANFRAGEN = re.compile(r"/api/ub/eintraege/\d+/(foto|skizze)")
+UB_SEITEN = {"": "ub-uebersicht.html", "/einstellungen": "ub-einstellungen.html", "/besuch": "ub-besuch.html", "/erfassen": "ub-erfassen.html"}
 SEITEN = {"/anmelden": "anmelden.html", "/app": "app.html", "/einrichtung": "einrichtung.html", "/einladung": "einladung.html"}
 STATISCH = re.compile(r"/static/([a-z0-9_-]+\.(css|js|svg|png|ico))")
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
@@ -105,7 +108,8 @@ class Handler(BaseHTTPRequestHandler):
     def body(self):
         """JSON-Inhalt einer POST-Anfrage. Liest immer den ganzen Inhalt (sonst bricht die Verbindung ab)."""
         laenge = _ganzzahl(self.headers.get("Content-Length") or 0)
-        if laenge > MAX_BODY:
+        grenze = MAX_BODY_GROSS if GROSSE_ANFRAGEN.fullmatch(urllib.parse.urlsplit(self.path).path) else MAX_BODY
+        if laenge > grenze:
             raise Fehler(413, "Die Anfrage ist zu groß.")
         roh = self.rfile.read(laenge) if laenge else b""
         if self.headers.get(KOPF) != "1":
@@ -190,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
         con = None
         try:
             con = db.verbinden(self.server.db_pfad)
-            if methode == "GET" and not pfad.startswith("/api/"):
+            if methode == "GET" and not pfad.startswith("/api/") and not UB_PROTOKOLL.fullmatch(pfad):
                 return self.seite(con, pfad)
             for m, muster, funktion in ROUTEN:
                 treffer = muster.fullmatch(pfad)
@@ -202,6 +206,8 @@ class Handler(BaseHTTPRequestHandler):
             raise Fehler(404, "Nicht gefunden.")
         except Fehler as f:
             self.antwort(f.status, {"fehler": f.meldung})
+        except ub.UbFehler as f:
+            self.antwort(f.status, {"fehler": str(f), "detail": str(f)})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
                 updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler) as f:
@@ -225,6 +231,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.umleiten("/einrichtung" if not konten.hat_konten(con) else "/anmelden")
         if pfad in SEITEN:
             return self.datei(os.path.join(WEB_DIR, SEITEN[pfad]), "text/html")
+        ub_seite = re.fullmatch(r"/unterrichtsbesuche(/einstellungen|/\d+(/erfassen)?)?", pfad)
+        if ub_seite:   # Unterrichtsbesuche: eigene Seiten wie im alten Lehrerkalender (Daten holt ub-laden.js)
+            teil = ub_seite.group(1) or ""
+            name = UB_SEITEN["/erfassen" if ub_seite.group(2) else ("/besuch" if teil and teil != "/einstellungen" else teil)]
+            return self.datei(os.path.join(WEB_DIR, name), "text/html")
         treffer = STATISCH.fullmatch(pfad)
         if treffer:
             return self.datei(os.path.join(WEB_DIR, treffer.group(1)))
@@ -861,6 +872,68 @@ def api_formularvorlage(h, con, daten):
     h.antwort(200, {"vorlagen": formulare.vorlagen(con)})
 
 
+# --- Unterrichtsbesuche (Stufe F2, Adressen wie im alten Lehrerkalender) ---
+
+def _ub(h, con):
+    k = h.konto(con)
+    if not k.get("ub_an"):
+        raise Fehler(403, "Die Unterrichtsbesuche sind für dein Konto ausgeschaltet (Einstellungen › Konto).")
+    return ub.Kontext(con, k["id"], k["name"])
+
+
+def _ub_schritt(funktion, lesen=False):
+    """Aufruf mit Kontext; Aenderungen in einer Transaktion. funktion(kontext, daten, *ids)."""
+    def schritt(h, con, daten, *ids):
+        kx = _ub(h, con)
+        ids = [int(i) if i.isdigit() else i for i in ids]
+        if lesen:
+            return h.antwort(200, funktion(kx, daten, *ids))
+        with db.transaktion(con):
+            r = funktion(kx, daten, *ids)
+        h.antwort(200, r)
+    return schritt
+
+
+def api_ub_seite(h, con, daten, seite, bid=None):
+    kx = _ub(h, con)
+    with db.transaktion(con):          # beim ersten Mal legt einstellung() die Vorgaben an
+        if seite == "uebersicht":
+            r = ub.seite_uebersicht(kx, db.heute().isoformat())
+        elif seite == "einstellungen":
+            r = ub.seite_einstellungen(kx)
+        else:
+            r = ub.seite_besuch(kx, int(bid))
+    h.antwort(200, r)
+
+
+def api_ub_modul(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        con.execute("UPDATE lehrkraft SET ub_an = ? WHERE id = ?", (1 if daten.get("an") else 0, k["id"]))
+    h.antwort(200, {"an": bool(daten.get("an"))})
+
+
+def api_ub_datei(h, con, daten, uuid_, name):
+    kx = _ub(h, con)
+    d = ub.datei(kx, uuid_)
+    if d is None:
+        raise Fehler(404, "Nicht gefunden.")
+    h.antwort(200, d.read_bytes(), ub.datei_mime(kx, uuid_) or "application/octet-stream", extra=[("Cache-Control", "private, max-age=86400")], cache=True)
+
+
+def api_ub_protokoll(h, con, daten, bid, fmt):
+    from . import ub_protokoll_odt, ub_protokoll_pdf
+    kx = _ub(h, con)
+    b = ub.besuch_obj(kx, int(bid))
+    modul, typ = (ub_protokoll_pdf, "application/pdf") if fmt == "pdf" else (ub_protokoll_odt, "application/vnd.oasis.opendocument.text")
+    inhalt = modul.erzeuge(kx, kx, b, mit_fotos=h.abfrage("fotos") != "0", ordnung=h.abfrage("ordnung") or None)
+    name = "Unterrichtsbesuch_%s_%s.%s" % (b.datum or "ohne-Datum", re.sub(r"[^A-Za-z0-9ÄÖÜäöüß_-]+", "_", b.anwaerter.name or ""), fmt)
+    if fmt == "pdf":
+        h.antwort(200, inhalt, typ, extra=[("Content-Disposition", "inline; filename*=UTF-8''%s" % urllib.parse.quote(name))])
+    else:
+        h.herunterladen(inhalt, typ, name)
+
+
 def api_moodle_vorschau(h, con, daten):
     k = h.konto(con)
     h.antwort(200, moodle.vorschau(con, k["id"], daten))
@@ -948,6 +1021,7 @@ def api_update_sicherung(h, con, daten, name):
 
 
 ID = r"(\d+)"
+UB_PROTOKOLL = re.compile(r"/unterrichtsbesuche/\d+/protokoll\.(pdf|odt)")
 ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/status", api_status),
     ("POST", r"/api/einrichtung", api_einrichtung),
@@ -971,6 +1045,34 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/schule/logo/da", api_logo_da),
     ("POST", r"/api/schule", api_schule),
     ("POST", r"/api/formularvorlage", api_formularvorlage),
+    ("GET", r"/api/ub/seite/(uebersicht|einstellungen)", api_ub_seite),
+    ("GET", r"/api/ub/seite/(besuch)/" + ID, api_ub_seite),
+    ("POST", r"/api/ub/modul", api_ub_modul),
+    ("GET", r"/api/files/([a-f0-9]{32})/([^/]+)", api_ub_datei),
+    ("GET", r"/unterrichtsbesuche/" + ID + r"/protokoll\.(pdf|odt)", api_ub_protokoll),
+    ("POST", r"/api/ub/einstellungen-allgemein", _ub_schritt(lambda k, d: ub.standard_ordnung_setzen(k, d))),
+    ("GET", r"/api/ub/katalog", _ub_schritt(lambda k, d: ub.katalog(k), lesen=True)),
+    ("POST", r"/api/ub/einstellungen/(kategorien|phasen|kriterien)", _ub_schritt(lambda k, d, art: ub.einstellung_anlegen(k, art, d))),
+    ("POST", r"/api/ub/einstellungen/(kategorien|phasen|kriterien)/reihenfolge",
+     _ub_schritt(lambda k, d, art: ub.einstellung_reihenfolge(k, art, d.get("ids")))),
+    ("POST", r"/api/ub/einstellungen/(kategorien|phasen|kriterien)/" + ID + "/save", _ub_schritt(lambda k, d, art, oid: ub.einstellung_speichern(k, art, oid, d))),
+    ("POST", r"/api/ub/einstellungen/(kategorien|phasen|kriterien)/" + ID + "/delete", _ub_schritt(lambda k, d, art, oid: ub.einstellung_loeschen(k, art, oid))),
+    ("POST", r"/api/ub/anwaerter", _ub_schritt(lambda k, d: {"ok": True, "anwaerter": ub.anwaerter_dict(ub._anwaerter_zeile(k, ub.anwaerter_anlegen(k, d)))})),
+    ("POST", r"/api/ub/anwaerter/" + ID + "/save", _ub_schritt(lambda k, d, aid: ub.anwaerter_speichern(k, aid, d))),
+    ("GET", r"/api/ub/anwaerter/" + ID + "/besuche", _ub_schritt(lambda k, d, aid: ub.anwaerter_besuche(k, aid), lesen=True)),
+    ("POST", r"/api/ub/anwaerter/" + ID + "/delete", _ub_schritt(lambda k, d, aid: ub.anwaerter_loeschen(k, aid))),
+    ("POST", r"/api/ub/besuche", _ub_schritt(lambda k, d: ub.besuch_anlegen(k, d))),
+    ("GET", r"/api/ub/besuche/" + ID, _ub_schritt(lambda k, d, bid: {"ok": True, "besuch": ub.besuch_dict(k, ub.besuch_obj(k, bid), True)}, lesen=True)),
+    ("POST", r"/api/ub/besuche/" + ID + "/save", _ub_schritt(lambda k, d, bid: ub.besuch_speichern(k, bid, d))),
+    ("POST", r"/api/ub/besuche/" + ID + "/delete", _ub_schritt(lambda k, d, bid: ub.besuch_loeschen(k, bid))),
+    ("POST", r"/api/ub/besuche/" + ID + "/eintraege", _ub_schritt(lambda k, d, bid: ub.eintrag_anlegen(k, bid, d))),
+    ("POST", r"/api/ub/eintraege/" + ID + "/save", _ub_schritt(lambda k, d, eid: ub.eintrag_speichern(k, eid, d))),
+    ("POST", r"/api/ub/eintraege/" + ID + "/delete", _ub_schritt(lambda k, d, eid: ub.eintrag_loeschen(k, eid))),
+    ("POST", r"/api/ub/eintraege/" + ID + "/foto", _ub_schritt(lambda k, d, eid: ub.foto_speichern(k, eid, d))),
+    ("POST", r"/api/ub/eintraege/" + ID + "/foto/delete", _ub_schritt(lambda k, d, eid: ub.foto_loeschen(k, eid))),
+    ("GET", r"/api/ub/eintraege/" + ID + "/skizze", _ub_schritt(lambda k, d, eid: ub.skizze_lesen(k, eid), lesen=True)),
+    ("POST", r"/api/ub/eintraege/" + ID + "/skizze", _ub_schritt(lambda k, d, eid: ub.skizze_speichern(k, eid, d))),
+    ("POST", r"/api/ub/eintraege/" + ID + "/skizze/delete", _ub_schritt(lambda k, d, eid: ub.skizze_loeschen(k, eid))),
     ("GET", r"/api/formulare", api_formulare),
     ("GET", r"/api/formulare/vorschau", api_formular_vorschau),
     ("POST", r"/api/formulare/stundenplanaenderung", api_formular_erstellen),
