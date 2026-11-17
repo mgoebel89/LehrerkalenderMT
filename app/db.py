@@ -551,6 +551,22 @@ MIGRATIONEN = [
         uuid TEXT PRIMARY KEY, lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
         name TEXT NOT NULL, mime TEXT NOT NULL, daten BLOB NOT NULL, erstellt TEXT NOT NULL)
     """,
+    # 17: Unterrichtsinhalt (Text fuers Klassenbuch in WebUntis) und eigene Notizen je gehaltener Stunde. Wie beim Ist
+    #     ist (Lehrkraft, Datum, Beginn) eindeutig; Klasse/Gruppe zum Wiederfinden der Vorstunde.
+    """
+    CREATE TABLE stunde_eintrag (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        datum TEXT NOT NULL,
+        beginn TEXT NOT NULL,
+        klasse_id INTEGER NOT NULL REFERENCES klasse(id),
+        gruppe_id INTEGER REFERENCES gruppe(id) ON DELETE SET NULL,
+        inhalt TEXT NOT NULL DEFAULT '',
+        notizen TEXT NOT NULL DEFAULT '',
+        geaendert TEXT NOT NULL,
+        UNIQUE (lehrkraft_id, datum, beginn));
+    CREATE INDEX stunde_eintrag_klasse ON stunde_eintrag (lehrkraft_id, klasse_id, datum)
+    """,
 ]
 
 

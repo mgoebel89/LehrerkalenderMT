@@ -658,6 +658,13 @@ def api_ist(h, con, daten):
     h.antwort(200, planung.stunde(con, k["id"], daten.get("datum"), daten.get("beginn")))
 
 
+def api_stunde_eintrag(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        planung.eintrag_setzen(con, k["id"], daten.get("datum"), daten.get("beginn"), daten)
+    h.antwort(200, planung.stunde(con, k["id"], daten.get("datum"), daten.get("beginn")))
+
+
 def api_ist_offen(h, con, daten):
     k = h.konto(con)
     h.antwort(200, {"offen": planung.offene_ist(con, k["id"])})
@@ -1273,6 +1280,7 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/planung", api_planung),
     ("GET", r"/api/stunde", api_stunde),
     ("POST", r"/api/ist", api_ist),
+    ("POST", r"/api/stunde/eintrag", api_stunde_eintrag),
     ("GET", r"/api/ist/offen", api_ist_offen),
     ("POST", r"/api/ist/alle", api_ist_alle),
     ("POST", r"/api/planung/uebernehmen", _planung_schritt(lambda con, k, d, _: planung.aus_bibliothek(con, k["id"], d))),

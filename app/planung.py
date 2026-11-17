@@ -13,9 +13,13 @@ Begriffe
                Themen fliessen in Reihenfolge in die Bloecke ohne Lernfeld.
 
 Fliessen: Die Bloecke eines Strangs sind die regulaeren Stunden laut Stundenplan im Schuljahr (ohne Ferien, Feiertage,
-Ausfaelle, Stunden mit Vertretung und weggeschobene), dazu Zusatzstunden und hierher verschobene Stunden. Festgesetzte
-Themen (Stecknadel) belegen zuerst ihre Bloecke ab dem festgesetzten Block, die uebrigen fuellen in Listenreihenfolge
-die freien Bloecke. Was nicht mehr passt, ist Ueberlauf (rot in der Planung).
+Ausfaelle, Stunden mit Vertretung und weggeschobene), dazu Zusatzstunden und hierher verschobene Stunden. Pruefungen mit
+festem Termin belegen ihren Block als Erstes (gleich welches Lernfeld er hat) und unterbrechen damit den Unterricht.
+Danach belegen festgesetzte Themen (Stecknadel) ihre Bloecke ab dem festgesetzten Block, die uebrigen fuellen in
+Listenreihenfolge die freien Bloecke. Was nicht mehr passt, ist Ueberlauf (rot in der Planung).
+
+Unterrichtsinhalt und Notizen: je gehaltener Stunde (Tabelle stunde_eintrag), nicht je Planungsblock. Der Inhalt ist der
+Text fuer das Klassenbuch in WebUntis; Thema und Lernsituation dienen nur der Planung.
 """
 import datetime
 
@@ -545,9 +549,32 @@ def fliessen(themen, bloecke, ist=None):
     for t in themen:
         spur_themen.setdefault(t["lernfeld_id"] if t["lernfeld_id"] in spuren else None, []).append(t)
 
+    # 0. Pruefungen unterbrechen den Unterricht: sie belegen ihren Termin vor allem anderen, gleich welches Lernfeld
+    #    der Block hat und ob dort ein festgesetztes Thema liegt (bei mehreren Bloecken die folgenden desselben Tages).
+    #    Alles andere fliesst drumherum und laeuft danach nahtlos weiter.
+    frei_alle = [True] * len(bloecke)
+    for t in themen:
+        if not (t.get("pruefung_id") and t.get("fest_datum")):
+            continue
+        x = info[t["id"]]
+        start = next((i for i, b in enumerate(bloecke) if (t["fest_datum"], t["fest_beginn"]) in
+                      b.get("keys", {(b["datum"], b["beginn"])})), None)
+        if start is None:
+            x["nadel"] = "fehlt"
+            x["ende"] = True                    # ohne Unterricht zum Termin bleibt sie leer
+            continue
+        x["nadel"] = "ok"
+        i = start
+        while i < len(bloecke) and bloecke[i]["datum"] == bloecke[start]["datum"] and len(x["bloecke"]) < t["bloecke"]:
+            if frei_alle[i]:
+                frei_alle[i] = False
+                x["bloecke"].append(i)
+                x["zuordnung"].append(None)
+            i += 1
+
     for spur, liste in spur_themen.items():
         idx = spur_bloecke.get(spur, [])
-        frei = [True] * len(idx)
+        frei = [frei_alle[i] for i in idx]
 
         def fuellen(t, n):
             """Belegt ab Position n freie Bloecke fuer t, bis der (veraenderliche) Bedarf gedeckt ist."""
@@ -580,14 +607,12 @@ def fliessen(themen, bloecke, ist=None):
 
         # 1. festgesetzte Themen ab ihrem Block
         for t in liste:
-            if not t.get("fest_datum"):
+            if not t.get("fest_datum") or t.get("pruefung_id"):   # Pruefungen liegen schon (Schritt 0)
                 continue
             start = next((n for n, i in enumerate(idx) if (t["fest_datum"], t["fest_beginn"]) in
                           bloecke[i].get("keys", {(bloecke[i]["datum"], bloecke[i]["beginn"])})), None)
             if start is None:
                 info[t["id"]]["nadel"] = "fehlt"
-                if t.get("pruefung_id"):              # eine Pruefung fliesst nie: ohne Unterricht zum Termin bleibt sie leer
-                    info[t["id"]]["ende"] = True
                 continue
             info[t["id"]]["nadel"] = "ok"
             fuellen(t, start)
@@ -841,6 +866,7 @@ def stunde(con, lid, datum, beginn, jetzt=None):
     sj = grunddaten.schuljahr_zum(con, datum)
     zeile = con.execute("SELECT stand FROM ist WHERE lehrkraft_id = ? AND datum = ? AND beginn = ?", (lid, datum, beginn)).fetchone()
     ergebnis["ist"] = zeile["stand"] if zeile else None
+    ergebnis.update(_eintraege(con, lid, datum, b["beginn"], kid, gid))
     if sj is None:
         return ergebnis
     ergebnis["schuljahr"] = sj["name"]
@@ -862,7 +888,10 @@ def stunde(con, lid, datum, beginn, jetzt=None):
         ls = next((y for y in t["ls"] if y["id"] == x["ls_id"]), None)
         ls_teil = x["ls_teil"] if ls else None
         ls_von = info[t["id"]]["ls_laenge"].get(ls["id"]) if ls else None
+        if t["pruefung_id"]:
+            ergebnis["vorschlag"] = "Prüfung: " + t["titel"]
         ergebnis["thema"] = {"id": t["id"], "titel": t["titel"], "teil": x["teil"], "von": x["von"], "ls": ls["titel"] if ls else "",
+                             "pruefung": bool(t["pruefung_id"]),
                              "ls_teil": ls_teil, "ls_von": ls_von,
                              "hinweis": (ls["hinweis"] if ls and ls["hinweis"] else t["hinweis"]),
                              "lernfeld": lf["nummer"] if lf else "", "lernfeld_name": lf["name"] if lf else ""}
@@ -876,6 +905,59 @@ def stunde(con, lid, datum, beginn, jetzt=None):
             "SELECT id, titel FROM termin WHERE lehrkraft_id = ? AND art = 'merker' AND datum = ? AND beginn = ? AND klasse_id = ?",
             (lid, n["datum"], n["beginn"], kid))]
     return ergebnis
+
+
+INHALT_MAX, NOTIZEN_MAX = 2000, 10000
+
+
+def _eintraege(con, lid, datum, beginn, kid, gid):
+    """Unterrichtsinhalt und Notizen dieser Stunde, die letzte Stunde der Klasse mit Eintrag davor (bei einer Gruppe:
+    deren Stunden und die der ganzen Klasse) und die Inhalte der anderen Gruppen am selben Tag."""
+    z = con.execute("SELECT inhalt, notizen, geaendert FROM stunde_eintrag WHERE lehrkraft_id = ? AND datum = ? AND beginn = ?",
+                    (lid, datum, beginn)).fetchone()
+    gnamen = {g["id"]: g["name"] for g in stundenplan.gruppen(con, lid)}
+    v = con.execute("SELECT datum, beginn, gruppe_id, inhalt, notizen FROM stunde_eintrag WHERE lehrkraft_id = ? AND klasse_id = ? "
+                    "AND (datum < ? OR (datum = ? AND beginn < ?)) AND (inhalt != '' OR notizen != '') "
+                    + ("AND COALESCE(gruppe_id, 0) IN (0, ?) " if gid else "") + "ORDER BY datum DESC, beginn DESC LIMIT 1",
+                    (lid, kid, datum, datum, beginn) + ((gid,) if gid else ())).fetchone()
+    andere = [] if not gid else [
+        {"gruppe": gnamen.get(y["gruppe_id"], ""), "beginn": y["beginn"], "inhalt": y["inhalt"]} for y in con.execute(
+            "SELECT beginn, gruppe_id, inhalt FROM stunde_eintrag WHERE lehrkraft_id = ? AND klasse_id = ? AND datum = ? "
+            "AND gruppe_id IS NOT NULL AND gruppe_id != ? AND inhalt != '' ORDER BY beginn", (lid, kid, datum, gid))]
+    return {"eintrag": {"inhalt": z["inhalt"] if z else "", "notizen": z["notizen"] if z else "", "geaendert": z["geaendert"] if z else None},
+            "vorstunde": {"datum": v["datum"], "beginn": v["beginn"], "gruppe": gnamen.get(v["gruppe_id"], "") if v["gruppe_id"] else "",
+                          "inhalt": v["inhalt"], "notizen": v["notizen"]} if v else None,
+            "andere_gruppe": andere, "vorschlag": ""}
+
+
+def eintrag_setzen(con, lid, datum, beginn, daten):
+    """Unterrichtsinhalt und/oder Notizen einer gehaltenen Stunde speichern (fehlende Felder bleiben, wie sie sind).
+    Sind danach beide leer, verschwindet der Eintrag."""
+    try:
+        datetime.date.fromisoformat(datum)
+    except (TypeError, ValueError):
+        raise PlanungFehler("Ungültiges Datum.")
+    s = stunde(con, lid, datum, beginn)
+    alt = s["eintrag"]
+    neu = {}
+    for feld, grenze, name in (("inhalt", INHALT_MAX, "Der Unterrichtsinhalt"), ("notizen", NOTIZEN_MAX, "Die Notizen")):
+        wert = daten.get(feld)
+        if wert is None:
+            neu[feld] = alt[feld]
+            continue
+        if not isinstance(wert, str):
+            raise PlanungFehler("Ungültige Eingabe.")
+        wert = wert.replace("\r\n", "\n").strip()
+        if len(wert) > grenze:
+            raise PlanungFehler("%s darf höchstens %d Zeichen haben." % (name, grenze))
+        neu[feld] = wert
+    if not neu["inhalt"] and not neu["notizen"]:
+        con.execute("DELETE FROM stunde_eintrag WHERE lehrkraft_id = ? AND datum = ? AND beginn = ?", (lid, datum, s["beginn"]))
+        return
+    con.execute("INSERT INTO stunde_eintrag (lehrkraft_id, datum, beginn, klasse_id, gruppe_id, inhalt, notizen, geaendert) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (lehrkraft_id, datum, beginn) DO UPDATE SET inhalt = excluded.inhalt, "
+                "notizen = excluded.notizen, klasse_id = excluded.klasse_id, gruppe_id = excluded.gruppe_id, geaendert = excluded.geaendert",
+                (lid, datum, s["beginn"], s["klasse"]["id"], s["gruppe"]["id"] if s["gruppe"] else None, neu["inhalt"], neu["notizen"], db.jetzt()))
 
 
 def ist_setzen(con, lid, datum, beginn, stand):

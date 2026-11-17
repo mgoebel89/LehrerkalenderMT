@@ -1,8 +1,9 @@
 'use strict';
 // Stunden-Overlay (Stufe C2, Voransicht B, nach WebUntis-Vorbild): alles zu einer gehaltenen Stunde auf einen Blick.
-// Thema aus der Planung mit Ist-Stand (wie geplant / braucht 1 Block mehr / schon fertig, Rueckgaengig), Lehrstoff
-// kopieren, Merker dieser und der naechsten Stunde, Termine des Tages; blaettern zur vorigen/naechsten Stunde der Klasse.
-// Jeder Tipp wird sofort gespeichert.
+// Thema aus der Planung mit Ist-Stand (wie geplant / braucht 1 Block mehr / schon fertig, Rueckgaengig), Unterrichtsinhalt
+// (Text fuers Klassenbuch, in WebUntis kopieren) und eigene Notizen je Stunde, Merker dieser und der naechsten Stunde,
+// Termine des Tages; blaettern zur vorigen/naechsten Stunde der Klasse. Jeder Tipp wird sofort gespeichert, Texte kurz
+// nach dem Tippen.
 const Stunde = (() => {
   const el = L.el;
   const IST = [
@@ -24,9 +25,50 @@ const Stunde = (() => {
     const vor = el('button', { type: 'button', class: 'leicht', 'aria-label': 'Nächste Stunde der Klasse' }, L.symbol('rechts'));
 
     const laden = async (d, b) => {
-      try { S = await L.api('GET', '/api/stunde?datum=' + d + '&beginn=' + encodeURIComponent(b)); rueck = null; gespeichert = ''; zeichnen(); }
+      await textSpeichern();
+      try { S = await L.api('GET', '/api/stunde?datum=' + d + '&beginn=' + encodeURIComponent(b)); rueck = null; gespeichert = ''; felderBauen(); zeichnen(); }
       catch (e) { L.meldung(e.message, true); }
     };
+
+    // --- Unterrichtsinhalt und Notizen: die Felder bleiben beim Neuzeichnen erhalten (Fokus, Getipptes). Gespeichert
+    // wird kurz nach dem Tippen, beim Verlassen des Feldes, beim Blaettern und beim Schliessen ---
+    let F = null, timer = null, laufend = Promise.resolve();
+    function felderBauen() {
+      const e = S.eintrag;
+      const inhalt = el('textarea', { rows: 3, maxlength: 2000, placeholder: 'Was heute dran war – so steht es im Klassenbuch.', 'aria-label': 'Unterrichtsinhalt' });
+      const notizen = el('textarea', { rows: 4, maxlength: 10000, placeholder: 'Deine Notizen zu dieser Stunde (nur für dich).', 'aria-label': 'Notizen' });
+      inhalt.value = e.inhalt || S.vorschlag || '';
+      notizen.value = e.notizen;
+      F = { inhalt, notizen, stand: { inhalt: e.inhalt, notizen: e.notizen } };
+      for (const t of [inhalt, notizen]) {
+        t.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(textSpeichern, 900); status.textContent = ''; });
+        t.addEventListener('blur', () => textSpeichern());
+      }
+    }
+    function textSpeichern() {
+      clearTimeout(timer);
+      if (!F) return laufend;
+      const f = F, neu = { inhalt: f.inhalt.value.trim(), notizen: f.notizen.value.trim() };
+      // ein unveraenderter Pruefungs-Vorschlag wird erst gespeichert, wenn er geaendert oder kopiert wird
+      const inhaltNeu = neu.inhalt === (S.vorschlag || '') && !f.stand.inhalt && !f.kopiert ? '' : neu.inhalt;
+      if (inhaltNeu === f.stand.inhalt && neu.notizen === f.stand.notizen) return laufend;
+      const ort = { datum: S.datum, beginn: S.beginn };
+      laufend = laufend.then(async () => {
+        try {
+          const r = await L.api('POST', '/api/stunde/eintrag', Object.assign({}, ort, { inhalt: inhaltNeu, notizen: neu.notizen }));
+          f.stand = { inhalt: r.eintrag.inhalt, notizen: r.eintrag.notizen };
+          if (F === f) { S.eintrag = r.eintrag; status.textContent = 'gespeichert ' + new Date().toTimeString().slice(0, 5); }
+        } catch (e) { L.meldung(e.message, true); }
+      });
+      return laufend;
+    }
+    function uebernehmen(text) {
+      const t = F.inhalt;
+      const alt = t.value.trim();
+      t.value = !alt || alt === (S.vorschlag || '') ? text : alt + '\n' + text;
+      t.focus();
+      textSpeichern();
+    }
     zurueck.addEventListener('click', () => S.vorige && laden(S.vorige.datum, S.vorige.beginn));
     vor.addEventListener('click', () => S.naechste && laden(S.naechste.datum, S.naechste.beginn));
 
@@ -67,10 +109,12 @@ const Stunde = (() => {
     }
 
     function kopieren() {
-      const t = S.thema;
-      const text = t.titel + (t.hinweis ? '\n' + t.hinweis : '');
-      navigator.clipboard.writeText(text).then(() => L.meldung('Lehrstoff in der Zwischenablage, jetzt in WebUntis einfügen.'),
-        () => L.meldung('Kopieren ging nicht. Bitte den Text markieren und kopieren.', true));
+      const text = F.inhalt.value.trim();
+      if (!text) { L.meldung('Bitte zuerst den Unterrichtsinhalt eintragen.', true); F.inhalt.focus(); return; }
+      F.kopiert = true;
+      textSpeichern();
+      navigator.clipboard.writeText(text).then(() => L.meldung('Unterrichtsinhalt in der Zwischenablage, jetzt in WebUntis einfügen.'),
+        () => { F.inhalt.select(); L.meldung('Kopieren ging nicht. Der Text ist markiert: Strg+C drücken.', true); });
     }
 
     const info = () => ({ datum: S.datum, beginn: S.beginn, ende: S.ende, name: S.klasse.name + (S.gruppe ? ' · ' + S.gruppe.name : '') });
@@ -111,12 +155,30 @@ const Stunde = (() => {
           !begonnen ? el('p', { class: 'leise klein', text: 'Den Ist-Stand bestätigst du ab Beginn der Stunde.' })
             : !S.ist ? el('p', { class: 'klein', style: 'color:#9a6400;font-weight:600', text: 'Ist noch nicht bestätigt.' }) : null,
           rueck ? el('div', {}, el('button', { type: 'button', class: 'klein', onclick: rueckgaengig }, L.symbol('undo'), 'Rückgängig')) : null,
-        ], el('button', { type: 'button', class: 'klein', onclick: kopieren }, L.symbol('kopie'), 'Lehrstoff kopieren')));
+        ]));
       } else {
         teile.push(abschnitt('plan', 'Thema aus der Planung', null, el('p', { class: 'leise' },
           S.schuljahr ? 'Für diese Stunde ist kein Thema geplant. ' : 'Dieses Datum liegt in keinem Schuljahr. ',
           el('a', { href: '#planung', text: 'Zur Planung' }))));
       }
+      // Unterrichtsinhalt (fuers Klassenbuch) und Notizen dieser Stunde
+      const v = S.vorstunde;
+      const vWann = v ? L.tag(v.datum) + ' ' + v.beginn + (v.gruppe ? ' · ' + v.gruppe : '') : '';
+      teile.push(abschnitt('stift', 'Unterrichtsinhalt', null, [
+        F.inhalt,
+        el('div', { class: 'zeile' },
+          el('button', { type: 'button', class: 'haupt klein', onclick: kopieren }, L.symbol('kopie'), 'In WebUntis kopieren'),
+          v && v.inhalt ? el('button', { type: 'button', class: 'klein', title: 'Vorstunde ' + vWann + ': ' + v.inhalt, onclick: () => uebernehmen(v.inhalt) },
+            L.symbol('rueck'), 'Aus Vorstunde übernehmen') : null,
+          S.andere_gruppe.map(a => el('button', { type: 'button', class: 'klein', title: a.gruppe + ' ' + a.beginn + ': ' + a.inhalt, onclick: () => uebernehmen(a.inhalt) },
+            L.symbol('rueck'), 'Von ' + a.gruppe + ' übernehmen'))),
+        S.vorschlag && !S.eintrag.inhalt ? el('p', { class: 'leise klein', text: 'Vorschlag zur Prüfung: gespeichert wird er, sobald du ihn änderst oder kopierst.' }) : null,
+      ]));
+      teile.push(abschnitt('formular', 'Notizen', null, [
+        v && v.notizen ? el('div', { class: 'stapel', style: 'gap:4px' }, el('span', { class: 'etikett', text: 'aus der Vorstunde · ' + vWann }),
+          el('p', { class: 'klein hinweis-text', text: v.notizen })) : null,
+        F.notizen,
+      ]));
       // Merker
       const neuerMerker = el('input', { maxlength: 200, placeholder: 'z. B. Aufgabe 4 besprechen', 'aria-label': 'Merker für die nächste Stunde' });
       neuerMerker.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); merkerNeu(neuerMerker); } });
@@ -151,15 +213,17 @@ const Stunde = (() => {
         ? S.termine.map(t => el('div', { class: 'zeile' }, el('span', { class: 'mono leise klein', text: t.beginn || 'ganztags' }), el('span', { text: t.titel })))
         : el('p', { class: 'leise klein', text: 'Keine.' })));
       L.setzen(rumpf, teile);
-      status.textContent = gespeichert;
+      if (gespeichert) status.textContent = gespeichert;
     }
 
     const status = el('span', { class: 'gesp leise klein', 'aria-live': 'polite' });
+    felderBauen();
     zeichnen();
     await L.dialog({
       titel: 'Stunde', knopf: 'Schließen', abbrechen: null, breit: true, fokus: false, speichern: () => true,
       inhalt: el('div', { class: 'ov stapel', style: 'gap:12px' }, el('div', { class: 'ov-kopf' }, zurueck, kopfTitel, vor), status, rumpf),
     });
+    await textSpeichern();
     if (geaendert && danach) danach();
   }
 
