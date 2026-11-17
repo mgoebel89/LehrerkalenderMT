@@ -793,7 +793,33 @@ def api_dokumente_ablegen(h, con, daten):
     titel = (daten.get("titel") or "").strip() or os.path.splitext(name)[0].replace("_", " ")
     task = paperless.hochladen(con, k["id"], DATEN_DIR, name, inhalt, "application/pdf", titel, datum,
                                daten.get("korrespondent") or 0, daten.get("typ") or 0, daten.get("tags") or [])
+    if daten.get("quelle") in ("ergebnis", "rueckmeldung"):   # haengt an der Pruefung, sobald Paperless es verarbeitet hat
+        with db.transaktion(con):
+            paperless.anhaengen_wartend(con, _ganzzahl(daten.get("id")), task, titel)
     h.antwort(200, {"task": task, "titel": titel})
+
+
+# Anhaenge an Pruefungen (F3c): ohne umschliessende Transaktion, weil dabei Paperless gefragt wird (bis zu 20 s);
+# die einzelnen Schreibzugriffe sind kurz und laufen im Autocommit.
+
+def api_pruefung_dokumente(h, con, daten, pid):
+    k = h.konto(con)
+    pruefungen._pruefung(con, k["id"], _ganzzahl(pid))
+    h.antwort(200, {"anhaenge": paperless.anhaenge(con, k["id"], DATEN_DIR, int(pid))})
+
+
+def api_pruefung_dokument_anhaengen(h, con, daten, pid):
+    k = h.konto(con)
+    pruefungen._pruefung(con, k["id"], _ganzzahl(pid))
+    paperless.anhaengen(con, k["id"], DATEN_DIR, int(pid), daten.get("dokument"))
+    h.antwort(200, {"anhaenge": paperless.anhaenge(con, k["id"], DATEN_DIR, int(pid))})
+
+
+def api_pruefung_dokument_loesen(h, con, daten, pid, aid):
+    k = h.konto(con)
+    pruefungen._pruefung(con, k["id"], _ganzzahl(pid))
+    paperless.anhang_loesen(con, int(pid), int(aid))
+    h.antwort(200, {"anhaenge": paperless.anhaenge(con, k["id"], DATEN_DIR, int(pid))})
 
 
 def api_dokumente_aufgabe(h, con, daten):
@@ -1423,6 +1449,9 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/dokumente/stammlisten", api_dokumente_stammlisten),
     ("GET", r"/api/dokumente/aufgabe", api_dokumente_aufgabe),
     ("POST", r"/api/dokumente/ablegen", api_dokumente_ablegen),
+    ("GET", r"/api/pruefung/" + ID + r"/dokumente", api_pruefung_dokumente),
+    ("POST", r"/api/pruefung/" + ID + r"/dokumente", api_pruefung_dokument_anhaengen),
+    ("POST", r"/api/pruefung/" + ID + r"/dokumente/" + ID + r"/loesen", api_pruefung_dokument_loesen),
     ("GET", r"/api/dokumente", api_dokumente),
     ("GET", r"/api/dokumente/" + ID, api_dokument),
     ("POST", r"/api/dokumente/" + ID, api_dokument_aendern),

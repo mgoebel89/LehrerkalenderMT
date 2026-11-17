@@ -696,7 +696,8 @@ const Pruefungen = (() => {
         el('div', { class: 'karte stapel' }, el('h3', { text: 'Moodle-Bewertungsbuch' }),
           el('p', { class: 'leise klein', text: 'CSV mit E-Mail-Adresse, Bewertung (Prozent) und Feedback (Note). In Moodle: Bewertungen → Import → CSV-Datei; Zuordnung „E-Mail-Adresse“ ↔ „E-Mail-Adresse“, dann die Spalte „Bewertung“ dem Bewertungsaspekt zuordnen (Höchstwert 100).' }),
           X.ohne_email.length ? el('div', { class: 'banner warnung klein', text: 'Ohne E-Mail-Adresse (fehlt in der CSV): ' + X.ohne_email.join(', ') + '. Ergänze sie in der Schülerliste.' }) : null,
-          el('div', {}, knopf('CSV herunterladen', 'hoch', '/moodle.csv')))));
+          el('div', {}, knopf('CSV herunterladen', 'hoch', '/moodle.csv'))),
+        Dokumente.pruefungKarte(p.id)));
     };
     if (X && X.pid === p.id && X.geaendert === E.pruefung.geaendert) zeichne();
     else L.api('GET', '/api/pruefung/' + p.id + '/export').then(x => { X = Object.assign(x, { pid: p.id }); zeichne(); }).catch(e => L.setzen(ort, el('div', { class: 'banner warnung', text: e.message })));

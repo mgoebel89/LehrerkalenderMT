@@ -572,6 +572,19 @@ MIGRATIONEN = [
     """
     ALTER TABLE lehrkraft ADD COLUMN paperless TEXT
     """,
+    # 19: Stufe F3c: Paperless-Dokumente an Pruefungen (nur fuer die eigene Lehrkraft). paperless_id NULL = abgelegter
+    #     Export, den Paperless noch verarbeitet (task); beim naechsten Auflisten wird die Nummer nachgetragen.
+    """
+    CREATE TABLE pruefung_dokument (
+        id INTEGER PRIMARY KEY,
+        pruefung_id INTEGER NOT NULL REFERENCES pruefung(id) ON DELETE CASCADE,
+        paperless_id INTEGER,
+        task TEXT,
+        titel TEXT NOT NULL DEFAULT '',
+        erstellt TEXT NOT NULL,
+        UNIQUE (pruefung_id, paperless_id));
+    CREATE INDEX pruefung_dokument_pruefung ON pruefung_dokument (pruefung_id)
+    """,
 ]
 
 

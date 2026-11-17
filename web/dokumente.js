@@ -253,7 +253,68 @@ const Dokumente = (() => {
     });
     if (!r) return;
     L.meldung('„' + r.titel + '“ geht an Paperless …');
-    warten(r.task);
+    // Ergebnisliste/Rueckmeldeboegen haengen danach an der Pruefung: deren Karte laedt neu, sobald Paperless fertig ist
+    warten(r.task, () => document.dispatchEvent(new CustomEvent('paperless-abgelegt', { detail: { quelle, id: angaben.id } })));
+  }
+
+  // --- Dokumente an einer Pruefung (Stufe F3c): Karte in Pruefung › Export ---
+  function pruefungKarte(pid) {
+    if (typeof S === 'undefined' || !S.konto || !S.konto.paperless) return null;
+    const karte = el('div', { class: 'karte stapel' });
+    const liste = el('div', { class: 'stapel', style: 'gap:6px' }, el('p', { class: 'leise klein', text: 'Lädt …' }));
+    let anhaenge = [];
+
+    const zeichnen = () => L.setzen(liste, anhaenge.length ? anhaenge.map(a => el('div', { class: 'zeile dok-anhang' },
+      L.symbol('formular'),
+      a.wartet ? el('span', { class: 'leise', text: a.titel || 'Dokument' })
+        : el('a', { href: '/api/dokumente/' + a.dokument + '/preview', target: '_blank', rel: 'noopener', text: a.titel || 'Dokument #' + a.dokument }),
+      a.wartet ? el('span', { class: 'chip gelb klein', title: 'Paperless verarbeitet das Dokument noch', text: 'kommt' }) : null,
+      el('button', { type: 'button', class: 'leicht klein rechts', 'aria-label': 'Anhang lösen', title: 'Nur lösen, in Paperless bleibt es',
+        onclick: () => loesen(a) }, L.symbol('muell'))))
+      : el('p', { class: 'leise klein', text: 'Noch nichts angehängt.' }));
+
+    async function laden() {
+      try { anhaenge = (await L.api('GET', '/api/pruefung/' + pid + '/dokumente')).anhaenge; zeichnen(); }
+      catch (e) { L.setzen(liste, el('div', { class: 'banner warnung klein', text: e.message })); }
+    }
+    async function loesen(a) {
+      try { anhaenge = (await L.api('POST', '/api/pruefung/' + pid + '/dokumente/' + a.id + '/loesen', {})).anhaenge; zeichnen(); }
+      catch (e) { L.meldung(e.message, true); }
+    }
+    async function suchen() {
+      const feld = el('input', { type: 'search', placeholder: 'Titel oder Inhalt …', 'aria-label': 'In Paperless suchen' });
+      const treffer = el('div', { class: 'stapel dok-treffer', style: 'gap:4px' }, el('p', { class: 'leise klein', text: 'Lädt …' }));
+      let folge_ = 0, timer = null;
+      const zu = () => { const d = treffer.closest('dialog'); if (d) d.dispatchEvent(new Event('cancel')); };
+      async function holen() {
+        const meine = ++folge_;
+        let d;
+        try { d = await L.api('GET', '/api/dokumente?' + new URLSearchParams({ suche: feld.value.trim(), sortierung: '-created' })); }
+        catch (e) { L.setzen(treffer, el('div', { class: 'banner warnung klein', text: e.message })); return; }
+        if (meine !== folge_) return;
+        const schon = new Set(anhaenge.map(a => a.dokument));
+        L.setzen(treffer, d.dokumente.length ? d.dokumente.map(x => el('button', { type: 'button', class: 'dok-treffer-zeile',
+          disabled: schon.has(x.id) ? true : null, onclick: async () => {
+            try { anhaenge = (await L.api('POST', '/api/pruefung/' + pid + '/dokumente', { dokument: x.id })).anhaenge; zeichnen(); zu(); }
+            catch (e) { L.meldung(e.message, true); }
+          } }, el('b', { text: x.titel || '(ohne Titel)' }), el('span', { class: 'leise klein', text: datumText(x.datum) + (schon.has(x.id) ? ' · hängt schon' : '') })))
+          : el('p', { class: 'leise klein', text: 'Nichts gefunden.' }));
+      }
+      feld.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(holen, 300); });
+      holen();
+      await L.dialog({ titel: 'Dokument aus Paperless anhängen', knopf: 'Schließen', abbrechen: null, speichern: () => true, breit: true,
+        inhalt: el('div', { class: 'stapel', style: 'gap:10px' }, feld, treffer,
+          el('p', { class: 'leise klein', text: 'Zu sehen sind Dokumente mit deinen Anzeige-Tags. Tipp auf ein Dokument hängt es an.' })) });
+    }
+
+    const neu = ev => { if (!karte.isConnected) { document.removeEventListener('paperless-abgelegt', neu); return; }
+      if (String(ev.detail.id) === String(pid)) laden(); };
+    document.addEventListener('paperless-abgelegt', neu);
+    L.setzen(karte, el('h3', { text: 'Dokumente in Paperless' }),
+      el('p', { class: 'leise klein', text: 'Aufgabenblatt, Erwartungshorizont, eingescannte Arbeiten … Abgelegte Ergebnislisten und Rückmeldebögen hängen automatisch hier. Nur du siehst sie.' }),
+      liste, el('div', {}, el('button', { type: 'button', onclick: suchen }, L.symbol('plus'), 'Anhängen …')));
+    laden();
+    return karte;
   }
 
   // Knopf "In Paperless" fuer andere Bereiche; ohne verbundenes Paperless nichts
@@ -349,5 +410,5 @@ const Dokumente = (() => {
     return ort_;
   }
 
-  return { zeigen, kontoKarte, senden, warten, ablegen, ablegenKnopf };
+  return { zeigen, kontoKarte, senden, warten, ablegen, ablegenKnopf, pruefungKarte };
 })();

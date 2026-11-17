@@ -122,6 +122,33 @@ class Dokumente(unittest.TestCase):
         with self.assertRaises(paperless.PaperlessFehler):
             paperless.hochladen(self.con, self.lid, self.ordner, "x.pdf", b"")
 
+    def test_anhaenge_an_pruefungen(self):
+        """F3c: anhaengen per Nummer, abgelegte Exporte warten auf Paperless, Doppelte und Abgelehntes fallen weg."""
+        self.verbinden(upload_tag=3)
+        self.con.execute("PRAGMA foreign_keys = OFF")   # ohne echte Pruefung (die prueft der Server vorher)
+        paperless.anhaengen(self.con, self.lid, self.ordner, 7, 1)
+        with self.assertRaises(paperless.PaperlessFehler):
+            paperless.anhaengen(self.con, self.lid, self.ordner, 7, 1)         # schon dran
+        with self.assertRaises(paperless.PaperlessFehler):
+            paperless.anhaengen(self.con, self.lid, self.ordner, 7, 99)        # gibt es nicht
+        task = paperless.hochladen(self.con, self.lid, self.ordner, "Ergebnisliste.pdf", b"%PDF-1.4 x", titel="Ergebnisliste KA")
+        paperless.anhaengen_wartend(self.con, 7, task, "Ergebnisliste KA")
+        paperless.anhaengen_wartend(self.con, 7, "11111111-2222-3333-4444-555555555555", "nie verarbeitet")
+        attrappe.Attrappe.D["tasks"]["66666666-2222-3333-4444-555555555555"] = {"status": "FAILURE", "result": "duplicate"}
+        paperless.anhaengen_wartend(self.con, 7, "66666666-2222-3333-4444-555555555555", "abgelehnt")
+        a = paperless.anhaenge(self.con, self.lid, self.ordner, 7)
+        self.assertEqual([(x["titel"], x["dokument"], x["wartet"]) for x in a],
+                         [("Arbeitsblatt Pneumatik", 1, False), ("Ergebnisliste KA", 4, False), ("nie verarbeitet", None, True)])
+        self.assertEqual(paperless.anhaenge(self.con, self.lid, self.ordner, 8), [])   # andere Pruefung
+        # derselbe Export noch einmal abgelegt (Paperless liefert dieselbe Nummer): kein doppelter Anhang
+        attrappe.Attrappe.D["tasks"]["77777777-2222-3333-4444-555555555555"] = {"status": "SUCCESS", "related_document": 4}
+        paperless.anhaengen_wartend(self.con, 7, "77777777-2222-3333-4444-555555555555", "Ergebnisliste KA")
+        self.assertEqual(len(paperless.anhaenge(self.con, self.lid, self.ordner, 7)), 3)
+        paperless.anhang_loesen(self.con, 7, a[0]["id"])
+        self.assertEqual([x["titel"] for x in paperless.anhaenge(self.con, self.lid, self.ordner, 7)], ["Ergebnisliste KA", "nie verarbeitet"])
+        with self.assertRaises(paperless.PaperlessFehler):
+            paperless.anhang_loesen(self.con, 8, a[1]["id"])                    # gehoert zu einer anderen Pruefung
+
 
 @unittest.skipIf(cryptography is None, "cryptography fehlt (python3-cryptography)")
 class DokumenteUeberDenServer(unittest.TestCase):

@@ -182,7 +182,10 @@ def _anfrage(k, methode, pfad, parameter=None, json_inhalt=None, roh=None, typ=N
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return r.status, r.read(), r.headers
     except urllib.error.HTTPError as e:
-        text = e.read()[:300].decode("utf-8", "replace")
+        try:
+            text = e.read()[:300].decode("utf-8", "replace")
+        finally:
+            e.close()
         if e.code in (401, 403):
             raise PaperlessFehler("Paperless lehnt den API-Token ab.", 401)
         if e.code == 404:
@@ -411,3 +414,61 @@ def aufgabe(con, lid, daten_dir, task_id):
     t = liste[0]
     return {"stand": t.get("status") or "PENDING", "dokument": t.get("related_document"),
             "fehler": (t.get("result") or "") if t.get("status") == "FAILURE" else ""}
+
+
+# --- Dokumente an Pruefungen (Stufe F3c) ---
+# Die Pruefung gehoert der Lehrkraft (der Aufrufer prueft das mit pruefungen._pruefung); die Anhaenge zeigen auf ihr
+# eigenes Paperless und sind fuer niemanden sonst sichtbar.
+
+def anhaenge(con, lid, daten_dir, pid):
+    """Anhaenge einer Pruefung. Abgelegte Exporte, die Paperless noch verarbeitet, bekommen hier ihre Nummer (oder
+    verschwinden, wenn Paperless sie abgelehnt hat). Ist Paperless gerade nicht erreichbar, bleiben sie wartend."""
+    zeilen = [dict(z) for z in con.execute("SELECT * FROM pruefung_dokument WHERE pruefung_id = ? ORDER BY erstellt, id", (pid,))]
+    for z in zeilen:
+        if z["paperless_id"] or not z["task"]:
+            continue
+        try:
+            a = aufgabe(con, lid, daten_dir, z["task"])
+        except PaperlessFehler:
+            continue
+        if a["stand"] == "SUCCESS" and a["dokument"]:
+            vorhanden = con.execute("SELECT id FROM pruefung_dokument WHERE pruefung_id = ? AND paperless_id = ?",
+                                    (pid, a["dokument"])).fetchone()
+            if vorhanden:
+                con.execute("DELETE FROM pruefung_dokument WHERE id = ?", (z["id"],))
+                z["weg"] = True
+            else:
+                con.execute("UPDATE pruefung_dokument SET paperless_id = ?, task = NULL WHERE id = ?", (a["dokument"], z["id"]))
+                z.update(paperless_id=a["dokument"], task=None)
+        elif a["stand"] in ("FAILURE", "REVOKED"):
+            con.execute("DELETE FROM pruefung_dokument WHERE id = ?", (z["id"],))
+            z["weg"] = True
+    return [{"id": z["id"], "dokument": z["paperless_id"], "titel": z["titel"], "wartet": not z["paperless_id"],
+             "erstellt": z["erstellt"]} for z in zeilen if not z.get("weg")]
+
+
+def anhaengen(con, lid, daten_dir, pid, did):
+    """Ein vorhandenes Paperless-Dokument an die Pruefung haengen (Titel aus Paperless)."""
+    d = dokument(con, lid, daten_dir, did)
+    if con.execute("SELECT 1 FROM pruefung_dokument WHERE pruefung_id = ? AND paperless_id = ?", (pid, d["id"])).fetchone():
+        raise PaperlessFehler("Dieses Dokument hängt schon an der Prüfung.")
+    con.execute("INSERT INTO pruefung_dokument (pruefung_id, paperless_id, titel, erstellt) VALUES (?, ?, ?, ?)",
+                (pid, d["id"], d["titel"][:200], _jetzt()))
+
+
+def anhaengen_wartend(con, pid, task, titel):
+    """Abgelegter Export: haengt an, sobald Paperless ihn verarbeitet hat (siehe anhaenge)."""
+    if task:
+        con.execute("INSERT INTO pruefung_dokument (pruefung_id, task, titel, erstellt) VALUES (?, ?, ?, ?)",
+                    (pid, task, (titel or "")[:200], _jetzt()))
+
+
+def anhang_loesen(con, pid, aid):
+    """Nur die Verbindung loesen, in Paperless bleibt das Dokument."""
+    if not con.execute("DELETE FROM pruefung_dokument WHERE id = ? AND pruefung_id = ?", (aid, pid)).rowcount:
+        raise PaperlessFehler("Diesen Anhang gibt es nicht.")
+
+
+def _jetzt():
+    from . import db
+    return db.jetzt()
