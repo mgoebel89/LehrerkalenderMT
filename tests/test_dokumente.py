@@ -214,6 +214,32 @@ class DokumenteUeberDenServer(unittest.TestCase):
         status, _, _ = self.anfrage("GET", "/api/dokumente", keks=False)
         self.assertEqual(status, 401)
 
+    def test_pdf_ansehen(self):
+        """PDF-Exporte: ?ansehen=1 zeigt sie im Tab (inline), sonst Download; Fehler im Tab als lesbare Seite."""
+        con = db.verbinden(db.pfad(self.ordner))
+        with db.transaktion(con):
+            lid = con.execute("SELECT id FROM lehrkraft WHERE kuerzel = 'gob'").fetchone()[0]
+            fid = con.execute("INSERT INTO formular (lehrkraft_id, art, betrifft, von, bis, daten, pdf, stand, erstellt, geaendert) "
+                              "VALUES (?, 'stundenplanaenderung', 'KW 48', '2026-11-23', '2026-11-27', '{}', ?, 'erstellt', ?, ?)",
+                              (lid, b"%PDF-1.4 formular", db.jetzt(), db.jetzt())).lastrowid
+        con.close()
+        status, inhalt, kopf = self.anfrage("GET", "/api/formular/%d.pdf" % fid)
+        self.assertEqual(status, 200)
+        self.assertTrue(kopf["Content-Disposition"].startswith("attachment;"))
+        status, inhalt, kopf = self.anfrage("GET", "/api/formular/%d.pdf?ansehen=1" % fid)
+        self.assertEqual((status, inhalt[:8]), (200, b"%PDF-1.4"))
+        self.assertTrue(kopf["Content-Disposition"].startswith("inline;"))
+        self.assertIn("filename*=UTF-8''", kopf["Content-Disposition"])
+        status, inhalt, kopf = self.anfrage("GET", "/api/formular/99999.pdf?ansehen=1")
+        self.assertIn(status, (400, 404))
+        self.assertTrue(kopf["Content-Type"].startswith("text/html"))
+        self.assertIn("nicht anzeigen", inhalt.decode())
+        status, inhalt, kopf = self.anfrage("GET", "/api/formular/99999.pdf")          # die App bekommt weiter JSON
+        self.assertIn("fehler", json.loads(inhalt))
+        status, inhalt, kopf = self.anfrage("GET", "/api/admin/sicherung.zip?ansehen=1&x=<b>", keks=False)
+        self.assertEqual(status, 401)
+        self.assertNotIn("<b>", inhalt.decode().replace("<body", ""))
+
     def test_ablegen(self):
         """F3b: der Server erzeugt das PDF eines Exports und legt es selbst in Paperless ab."""
         con = db.verbinden(db.pfad(self.ordner))

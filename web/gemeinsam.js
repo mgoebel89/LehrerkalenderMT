@@ -250,6 +250,13 @@ const L = {
     return L.el('label', { class: 'feld' }, beschriftung, eingabe, hilfe ? L.el('span', { class: 'hilfe', text: hilfe }) : null);
   },
 
+  // PDF in neuem Tab zeigen (Browser-Ansicht: drucken, speichern). Blockt der Browser das Fenster, wird heruntergeladen.
+  ansehen(url) {
+    const w = window.open(url + (url.includes('?') ? '&' : '?') + 'ansehen=1', '_blank');
+    if (w) { w.opener = null; return Promise.resolve(); }
+    return L.herunterladen(url);
+  },
+
   async herunterladen(url) {
     // ueber fetch, damit Fehler (z. B. keine Schueler) als Meldung erscheinen statt als leere Seite
     const antwort = await fetch(url, { credentials: 'same-origin' });

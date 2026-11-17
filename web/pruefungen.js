@@ -400,7 +400,7 @@ const Pruefungen = (() => {
         z.rechenweg.map(r => el('div', { class: 'mono klein rechenweg-zeile', text: r })),
         z.fehlend.length ? el('div', { class: 'banner warnung', text: 'Nicht bewertet und nicht mitgerechnet: ' + z.fehlend.join(', ') }) : null,
         z.notiz ? el('p', { class: 'klein' }, el('b', { text: 'Notiz: ' }), z.notiz) : null,
-        el('div', { class: 'zeile' }, el('button', { type: 'button', class: 'klein', onclick: () => L.herunterladen('/api/pruefung/' + E.pruefung.id + '/rueckmeldung.pdf?schueler=' + z.id).catch(e => L.meldung(e.message, true)) },
+        el('div', { class: 'zeile' }, el('button', { type: 'button', class: 'klein', onclick: () => L.ansehen('/api/pruefung/' + E.pruefung.id + '/rueckmeldung.pdf?schueler=' + z.id).catch(e => L.meldung(e.message, true)) },
           L.symbol('formular'), 'Rückmeldebogen (PDF)'),
           Dokumente.ablegenKnopf('rueckmeldung', { id: E.pruefung.id, schueler: z.id, titel: 'Rückmeldebogen ' + E.pruefung.titel + ' ' + z.name,
             datum: E.pruefung.datum || E.pruefung.fenster_bis, was: 'Rückmeldebogen von ' + z.name }))),
@@ -672,7 +672,8 @@ const Pruefungen = (() => {
       const mitNote = X.notenspalte.filter(z => z.note).length;
       const download = async (pfad, knopf) => {
         knopf.disabled = true;
-        try { await L.herunterladen('/api/pruefung/' + p.id + pfad); } catch (e) { L.meldung(e.message, true); }
+        const url = '/api/pruefung/' + p.id + pfad;
+        try { await (pfad.endsWith('.pdf') ? L.ansehen(url) : L.herunterladen(url)); } catch (e) { L.meldung(e.message, true); }
         knopf.disabled = false;
       };
       const knopf = (text, sym, pfad) => { const b = el('button', { type: 'button' }, L.symbol(sym), text); b.addEventListener('click', () => download(pfad, b)); return b; };
@@ -685,7 +686,7 @@ const Pruefungen = (() => {
           el('div', { class: 'notenspalte' }, el('table', { class: 'liste' }, el('tbody', {}, X.notenspalte.map(z => el('tr', { class: z.aktiv ? null : 'aus' },
             el('td', { text: z.name }), el('td', { class: 'mono zahl', text: z.note || (z.fehlt ? 'fehlt' : '') }))))))),
         el('div', { class: 'karte stapel' }, el('h3', { text: 'PDF zum Abheften' }),
-          el('p', { class: 'leise klein', text: 'Ergebnisliste mit Notenspiegel für deine Akte; Rückmeldebögen je Schüler (eine Seite, ohne Daten anderer, mit Unterschriftszeilen) zum Aushändigen.' }),
+          el('p', { class: 'leise klein', text: 'Ergebnisliste mit Notenspiegel für deine Akte; Rückmeldebögen je Schüler (eine Seite, ohne Daten anderer, mit Unterschriftszeilen) zum Aushändigen. Öffnet sich in einem neuen Tab: dort drucken oder speichern.' }),
           el('div', { class: 'zeile' }, knopf('Ergebnisliste', 'liste', '/ergebnis.pdf'), knopf('Rückmeldebögen', 'formular', '/rueckmeldung.pdf')),
           S.konto.paperless ? el('div', { class: 'zeile' },
             Dokumente.ablegenKnopf('ergebnis', { id: p.id, titel: 'Ergebnisliste ' + p.titel, datum: p.datum || p.fenster_bis,

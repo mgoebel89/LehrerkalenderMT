@@ -53,7 +53,7 @@ const Formulare = (() => {
             el('td', {}, el('button', { type: 'button', class: 'chip-knopf stand ' + farbe, title: 'Tippen: weiter auf „' + NAECHSTER[f.stand] + '“',
               onclick: () => stand(f, NAECHSTER[f.stand]) }, text)),
             el('td', { class: 'knoepfe' },
-              el('button', { type: 'button', class: 'klein', onclick: () => pdf(f) }, L.symbol('hoch'), 'PDF'),
+              el('button', { type: 'button', class: 'klein', title: 'PDF in neuem Tab öffnen (drucken, speichern)', onclick: () => pdf(f) }, L.symbol('auge'), 'PDF'),
               Dokumente.ablegenKnopf('formular', { id: f.id, titel: f.artname.split(' / ')[0] + ' ' + f.betrifft, datum: f.von,
                 was: f.artname + ' · ' + f.betrifft }, 'Paperless'),
               el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Löschen', onclick: () => loeschen(f) }, L.symbol('muell'))));
@@ -67,7 +67,7 @@ const Formulare = (() => {
   }
 
   async function pdf(f) {
-    try { await L.herunterladen('/api/formular/' + f.id + '.pdf'); } catch (e) { L.meldung(e.message, true); }
+    try { await L.ansehen('/api/formular/' + f.id + '.pdf'); } catch (e) { L.meldung(e.message, true); }
   }
 
   async function loeschen(f) {
@@ -145,7 +145,7 @@ const Formulare = (() => {
     if (!r) return false;
     U.formulare = r.formulare;
     L.meldung('Formular erstellt und abgelegt.');
-    try { await L.herunterladen('/api/formular/' + r.id + '.pdf'); } catch (e) { L.meldung(e.message, true); }
+    try { await L.ansehen('/api/formular/' + r.id + '.pdf'); } catch (e) { L.meldung(e.message, true); }
     if (ort && ort.isConnected) zeichnen();
     return true;
   }

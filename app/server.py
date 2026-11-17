@@ -8,6 +8,7 @@ LEHRERKALENDER_BIND, LEHRERKALENDER_OHNE_TLS.
 Alle Aenderungen laufen ueber POST mit JSON und dem Kopf X-Lehrerkalender: 1 (Schutz vor fremden Formularen).
 """
 import datetime
+import html
 import json
 import mimetypes
 import os
@@ -103,8 +104,23 @@ class Handler(BaseHTTPRequestHandler):
         self.antwort(200, inhalt, typ)
 
     def herunterladen(self, inhalt, typ, dateiname):
+        """Datei ausliefern. PDFs mit ?ansehen=1 zeigt der Browser im Tab (zum Drucken), sonst Download."""
         name = urllib.parse.quote(dateiname)
-        self.antwort(200, inhalt, typ, extra=[("Content-Disposition", "attachment; filename*=UTF-8''%s" % name)])
+        art = "inline" if typ == "application/pdf" and self.ansehen() else "attachment"
+        self.antwort(200, inhalt, typ, extra=[("Content-Disposition", "%s; filename*=UTF-8''%s" % (art, name))])
+
+    def ansehen(self):
+        return self.command in ("GET", "HEAD") and self.abfrage("ansehen") == "1"
+
+    def fehler(self, status, meldung, **mehr):
+        """Fehlerantwort: JSON fuer die App; im PDF-Tab (?ansehen=1) eine kleine lesbare Seite statt rohem JSON."""
+        if self.ansehen():
+            seite = ("<!doctype html><html lang=\"de\"><meta charset=\"utf-8\"><title>Lehrerkalender MT</title>"
+                     "<body style=\"font-family:system-ui,sans-serif;max-width:40em;margin:3em auto;padding:0 1em\">"
+                     "<h1 style=\"font-size:1.3em\">Das PDF lässt sich nicht anzeigen</h1><p>%s</p>"
+                     "<p style=\"color:#666\">Diesen Tab einfach schließen.</p></body></html>") % html.escape(meldung)
+            return self.antwort(status, seite.encode("utf-8"), "text/html; charset=utf-8")
+        self.antwort(status, dict({"fehler": meldung}, **mehr))
 
     def body(self):
         """JSON-Inhalt einer POST-Anfrage. Liest immer den ganzen Inhalt (sonst bricht die Verbindung ab)."""
@@ -231,22 +247,22 @@ class Handler(BaseHTTPRequestHandler):
                 self.body()
             raise Fehler(404, "Nicht gefunden.")
         except Fehler as f:
-            self.antwort(f.status, {"fehler": f.meldung})
+            self.fehler(f.status, f.meldung)
         except ub.UbFehler as f:
-            self.antwort(f.status, {"fehler": str(f), "detail": str(f)})
+            self.fehler(f.status, str(f), detail=str(f))
         except paperless.PaperlessFehler as f:
-            self.antwort(f.status, {"fehler": str(f)})
+            self.fehler(f.status, str(f))
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
                 updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler, vpn.VpnFehler,
                 wiederherstellung.WiederherstellungFehler) as f:
-            self.antwort(400, {"fehler": str(f)})
+            self.fehler(400, str(f))
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
         except Exception as f:   # unerwartet: protokollieren, aber nichts Internes verraten
             print("FEHLER %s %s: %r" % (methode, pfad, f), file=sys.stderr, flush=True)
             try:
-                self.antwort(500, {"fehler": "Interner Fehler. Bitte später noch einmal versuchen."})
+                self.fehler(500, "Interner Fehler. Bitte später noch einmal versuchen.")
             except OSError:
                 pass
         finally:
