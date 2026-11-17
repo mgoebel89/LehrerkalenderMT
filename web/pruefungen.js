@@ -400,8 +400,10 @@ const Pruefungen = (() => {
         z.rechenweg.map(r => el('div', { class: 'mono klein rechenweg-zeile', text: r })),
         z.fehlend.length ? el('div', { class: 'banner warnung', text: 'Nicht bewertet und nicht mitgerechnet: ' + z.fehlend.join(', ') }) : null,
         z.notiz ? el('p', { class: 'klein' }, el('b', { text: 'Notiz: ' }), z.notiz) : null,
-        el('div', {}, el('button', { type: 'button', class: 'klein', onclick: () => L.herunterladen('/api/pruefung/' + E.pruefung.id + '/rueckmeldung.pdf?schueler=' + z.id).catch(e => L.meldung(e.message, true)) },
-          L.symbol('formular'), 'Rückmeldebogen (PDF)'))),
+        el('div', { class: 'zeile' }, el('button', { type: 'button', class: 'klein', onclick: () => L.herunterladen('/api/pruefung/' + E.pruefung.id + '/rueckmeldung.pdf?schueler=' + z.id).catch(e => L.meldung(e.message, true)) },
+          L.symbol('formular'), 'Rückmeldebogen (PDF)'),
+          Dokumente.ablegenKnopf('rueckmeldung', { id: E.pruefung.id, schueler: z.id, titel: 'Rückmeldebogen ' + E.pruefung.titel + ' ' + z.name,
+            datum: E.pruefung.datum || E.pruefung.fenster_bis, was: 'Rückmeldebogen von ' + z.name }))),
     });
   }
 
@@ -685,6 +687,11 @@ const Pruefungen = (() => {
         el('div', { class: 'karte stapel' }, el('h3', { text: 'PDF zum Abheften' }),
           el('p', { class: 'leise klein', text: 'Ergebnisliste mit Notenspiegel für deine Akte; Rückmeldebögen je Schüler (eine Seite, ohne Daten anderer, mit Unterschriftszeilen) zum Aushändigen.' }),
           el('div', { class: 'zeile' }, knopf('Ergebnisliste', 'liste', '/ergebnis.pdf'), knopf('Rückmeldebögen', 'formular', '/rueckmeldung.pdf')),
+          S.konto.paperless ? el('div', { class: 'zeile' },
+            Dokumente.ablegenKnopf('ergebnis', { id: p.id, titel: 'Ergebnisliste ' + p.titel, datum: p.datum || p.fenster_bis,
+              was: 'Ergebnisliste mit Notenspiegel: ' + p.titel }, 'Ergebnisliste in Paperless'),
+            Dokumente.ablegenKnopf('rueckmeldung', { id: p.id, titel: 'Rückmeldebögen ' + p.titel, datum: p.datum || p.fenster_bis,
+              was: 'Alle Rückmeldebögen in einem PDF: ' + p.titel }, 'Rückmeldebögen in Paperless')) : null,
           el('p', { class: 'leise klein', text: 'Einen einzelnen Bogen gibt es auch über den Rechenweg (Tipp auf die Note).' })),
         el('div', { class: 'karte stapel' }, el('h3', { text: 'Moodle-Bewertungsbuch' }),
           el('p', { class: 'leise klein', text: 'CSV mit E-Mail-Adresse, Bewertung (Prozent) und Feedback (Note). In Moodle: Bewertungen → Import → CSV-Datei; Zuordnung „E-Mail-Adresse“ ↔ „E-Mail-Adresse“, dann die Spalte „Bewertung“ dem Bewertungsaspekt zuordnen (Höchstwert 100).' }),

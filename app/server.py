@@ -755,6 +755,47 @@ def api_dokumente_hochladen(h, con):
     h.antwort(200, {"task": task})
 
 
+def _ablage_quelle(h, con, k, daten):
+    """Erzeugt das PDF eines Exports wie beim Herunterladen: (Bytes, Dateiname, Datum fuer Paperless)."""
+    quelle, oid = daten.get("quelle"), _ganzzahl(daten.get("id"))
+    if quelle in ("ergebnis", "rueckmeldung"):
+        p = pruefungen._pruefung(con, k["id"], oid)
+        datum = p["datum"] or p["fenster_bis"] or ""
+        if quelle == "ergebnis":
+            inhalt, name = exporte.ergebnis_pdf(con, k["id"], oid, k["name"])
+        else:
+            sid = daten.get("schueler")
+            inhalt, name = exporte.rueckmeldung_pdf(con, k["id"], oid, _ganzzahl(sid) if sid else None, k["name"])
+        return inhalt, name, datum
+    if quelle == "formular":
+        inhalt, name = formulare.pdf_von(con, k["id"], oid)
+        z = con.execute("SELECT von FROM formular WHERE id = ? AND lehrkraft_id = ?", (oid, k["id"])).fetchone()
+        return inhalt, name, (z["von"] or "") if z else ""
+    if quelle == "ub":
+        from . import ub_protokoll_pdf
+        kx = _ub(h, con)
+        b = ub.besuch_obj(kx, oid)
+        inhalt = ub_protokoll_pdf.erzeuge(kx, kx, b, mit_fotos=daten.get("fotos", True) not in (False, 0, "0"),
+                                          ordnung=daten.get("ordnung") or None)
+        name = "Unterrichtsbesuch_%s_%s.pdf" % (b.datum or "ohne-Datum", re.sub(r"[^A-Za-z0-9ÄÖÜäöüß_-]+", "_", b.anwaerter.name or ""))
+        return inhalt, name, b.datum or ""
+    raise Fehler(400, "Unbekannte Quelle.")
+
+
+def api_dokumente_ablegen(h, con, daten):
+    """Export (Ergebnisliste, Rueckmeldeboegen, Formular, Besuchsprotokoll) direkt im eigenen Paperless ablegen, mit
+    Upload-Tag und Speicherpfad aus den Einstellungen. Der Browser laedt dafuer nichts herunter und wieder hoch."""
+    k = h.konto(con)
+    if not paperless.verbunden(con, k["id"]):
+        raise Fehler(400, "Paperless ist nicht verbunden: unter Einstellungen › Konto Adresse und API-Token eintragen.")
+    inhalt, name, datum = _ablage_quelle(h, con, k, daten)
+    datum = daten.get("datum") or (datum[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}.*", datum or "") else "")
+    titel = (daten.get("titel") or "").strip() or os.path.splitext(name)[0].replace("_", " ")
+    task = paperless.hochladen(con, k["id"], DATEN_DIR, name, inhalt, "application/pdf", titel, datum,
+                               daten.get("korrespondent") or 0, daten.get("typ") or 0, daten.get("tags") or [])
+    h.antwort(200, {"task": task, "titel": titel})
+
+
 def api_dokumente_aufgabe(h, con, daten):
     k = h.konto(con)
     h.antwort(200, paperless.aufgabe(con, k["id"], DATEN_DIR, h.abfrage("id") or ""))
@@ -1381,6 +1422,7 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/dokumente/konfig/loeschen", api_dokumente_konfig_loeschen),
     ("GET", r"/api/dokumente/stammlisten", api_dokumente_stammlisten),
     ("GET", r"/api/dokumente/aufgabe", api_dokumente_aufgabe),
+    ("POST", r"/api/dokumente/ablegen", api_dokumente_ablegen),
     ("GET", r"/api/dokumente", api_dokumente),
     ("GET", r"/api/dokumente/" + ID, api_dokument),
     ("POST", r"/api/dokumente/" + ID, api_dokument_aendern),

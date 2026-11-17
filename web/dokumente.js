@@ -225,6 +225,44 @@ const Dokumente = (() => {
     warten(task, () => { if (ergebnisOrt && ergebnisOrt.isConnected) neuLaden(); });
   }
 
+  // --- In Paperless ablegen (Stufe F3b): Exporte erzeugt der Server und legt sie selbst ab ---
+  // quelle: 'ergebnis' | 'rueckmeldung' | 'formular' (Unterrichtsbesuche: eigener Weg in ub-eintrag.js)
+  // angaben: { id, schueler, titel (Vorschlag), datum, was (Text fuer die Ueberschrift) }
+  async function ablegen(quelle, angaben) {
+    let st;
+    try { st = ST || await L.api('GET', '/api/dokumente/stammlisten'); } catch (e) { L.meldung(e.message, true); return; }
+    ST = st;
+    const titel = el('input', { maxlength: 128, value: angaben.titel || '', placeholder: 'leer = Dateiname' });
+    const datum = el('input', { type: 'date', value: (angaben.datum || '').slice(0, 10) });
+    const korr = auswahl(st.korrespondenten, 0);
+    const typ = auswahl(st.typen, 0);
+    const tags = tagWahl(st.tags, []);
+    const upTag = nachId(st.tags, st.upload_tag), pfad = nachId(st.pfade, st.pfad);
+    const r = await L.dialog({
+      titel: 'In Paperless ablegen', knopf: 'Ablegen',
+      inhalt: el('div', { class: 'stapel', style: 'gap:10px' },
+        angaben.was ? el('p', { class: 'klein', text: angaben.was }) : null,
+        L.feld('Titel', titel),
+        el('div', { class: 'felder zwei' }, L.feld('Dokumentdatum', datum), L.feld('Dokumenttyp', typ)),
+        L.feld('Korrespondent', korr),
+        el('div', { class: 'feld' }, 'Weitere Tags', tags.knoten),
+        el('p', { class: 'leise klein', text: 'Automatisch: ' + [upTag ? 'Tag „' + upTag.name + '“' : '', pfad ? 'Speicherpfad „' + pfad.name + '“' : '']
+          .filter(Boolean).join(', ') + (upTag || pfad ? '.' : 'nichts (Upload-Tag und Speicherpfad unter Einstellungen › Konto).') })),
+      speichern: () => L.api('POST', '/api/dokumente/ablegen', { quelle, id: angaben.id, schueler: angaben.schueler || null,
+        titel: titel.value, datum: datum.value, korrespondent: korr.value || 0, typ: typ.value || 0, tags: tags.wert() }),
+    });
+    if (!r) return;
+    L.meldung('„' + r.titel + '“ geht an Paperless …');
+    warten(r.task);
+  }
+
+  // Knopf "In Paperless" fuer andere Bereiche; ohne verbundenes Paperless nichts
+  function ablegenKnopf(quelle, angaben, text) {
+    if (typeof S === 'undefined' || !S.konto || !S.konto.paperless) return null;
+    return el('button', { type: 'button', class: 'klein', title: 'Direkt in deinem Paperless ablegen',
+      onclick: () => ablegen(quelle, typeof angaben === 'function' ? angaben() : angaben) }, L.symbol('archiv'), text || 'In Paperless');
+  }
+
   // --- Einstellungen › Konto: Paperless verbinden ---
 
   function kontoKarte() {
@@ -311,5 +349,5 @@ const Dokumente = (() => {
     return ort_;
   }
 
-  return { zeigen, kontoKarte, senden, warten };
+  return { zeigen, kontoKarte, senden, warten, ablegen, ablegenKnopf };
 })();

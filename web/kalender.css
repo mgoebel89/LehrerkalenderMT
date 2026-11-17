@@ -447,7 +447,9 @@ label.haken.gross input { width: 24px; height: 24px; }
 .vpn-daten dd { margin: 0; overflow-wrap: anywhere; }
 
 /* --- Dokumente (Paperless, Stufe F3) --- */
-.dok-filter input[type=search] { flex: 1 1 240px; min-width: 0; }
+.dok-filter { flex-wrap: nowrap; }
+.dok-filter input[type=search] { flex: 1 1 auto; min-width: 0; width: auto; }
+.dok-filter select { flex: 0 0 auto; width: auto; }
 .dok-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .dok-chip { border: 1px solid var(--linie-stark); background: var(--karte); border-radius: 999px; padding: 3px 12px; font-size: .82rem; cursor: pointer; }
 .dok-chip.an { background: var(--blau); border-color: var(--blau); color: #fff; }

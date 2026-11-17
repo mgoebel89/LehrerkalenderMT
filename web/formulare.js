@@ -54,6 +54,8 @@ const Formulare = (() => {
               onclick: () => stand(f, NAECHSTER[f.stand]) }, text)),
             el('td', { class: 'knoepfe' },
               el('button', { type: 'button', class: 'klein', onclick: () => pdf(f) }, L.symbol('hoch'), 'PDF'),
+              Dokumente.ablegenKnopf('formular', { id: f.id, titel: f.artname.split(' / ')[0] + ' ' + f.betrifft, datum: f.von,
+                was: f.artname + ' · ' + f.betrifft }, 'Paperless'),
               el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Löschen', onclick: () => loeschen(f) }, L.symbol('muell'))));
         }))))
         : el('div', { class: 'leer', text: filter === 'alle' ? 'Noch keine Formulare.' : 'Alles genehmigt.' }));

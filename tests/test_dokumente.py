@@ -186,6 +186,26 @@ class DokumenteUeberDenServer(unittest.TestCase):
         self.assertEqual(sorted(attrappe.Attrappe.D["uploads"][-1]["felder"]["tags"]), ["1", "3"])
         status, _, _ = self.anfrage("GET", "/api/dokumente", keks=False)
         self.assertEqual(status, 401)
+
+    def test_ablegen(self):
+        """F3b: der Server erzeugt das PDF eines Exports und legt es selbst in Paperless ab."""
+        con = db.verbinden(db.pfad(self.ordner))
+        with db.transaktion(con):
+            lid = con.execute("SELECT id FROM lehrkraft WHERE kuerzel = 'gob'").fetchone()[0]
+            fid = con.execute("INSERT INTO formular (lehrkraft_id, art, betrifft, von, bis, daten, pdf, stand, erstellt, geaendert) "
+                              "VALUES (?, 'stundenplanaenderung', 'KW 47', '2026-11-16', '2026-11-20', '{}', ?, 'erstellt', ?, ?)",
+                              (lid, b"%PDF-1.4 formular", db.jetzt(), db.jetzt())).lastrowid
+        con.close()
+        status, inhalt, _ = self.anfrage("POST", "/api/dokumente/ablegen", json.dumps({"quelle": "formular", "id": fid, "tags": [4]}).encode(),
+                                         {"Content-Type": "application/json"})
+        self.assertEqual(status, 200, inhalt)
+        self.assertEqual(json.loads(inhalt)["titel"], "Stundenplanaenderung 2026-11-16")
+        up = attrappe.Attrappe.D["uploads"][-1]
+        self.assertEqual((up["datei"], up["felder"]["created"], sorted(up["felder"]["tags"])),
+                         ("Stundenplanaenderung 2026-11-16.pdf", ["2026-11-16"], ["3", "4"]))
+        for daten in ({"quelle": "formular", "id": fid + 99}, {"quelle": "gibtsnicht", "id": 1}):
+            status, _, _ = self.anfrage("POST", "/api/dokumente/ablegen", json.dumps(daten).encode(), {"Content-Type": "application/json"})
+            self.assertEqual(status, 400, daten)
         status, _, _ = self.anfrage("POST", "/api/dokumente/hochladen?name=a.pdf", b"x", {"Content-Type": "application/pdf"}, keks=False)
         self.assertIn(status, (401, 403))
 

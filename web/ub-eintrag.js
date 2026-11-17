@@ -552,8 +552,11 @@
 
   /* Export-Dialog: Format, Ordnung, Fotos. Vorbelegt mit der Standard-Ordnung
    * aus den Einstellungen. ODT kommt als Download, PDF öffnet im neuen Tab. */
-  UBC.exportDialog = function (besuchId, ordnungen, standard) {
-    const { el, modal } = window.DRS;
+  UBC.exportDialog = async function (besuchId, ordnungen, standard) {
+    const { el, modal, postJSON, getJSON, toast } = window.DRS;
+    // Lehrerkalender MT (Stufe F3b): mit verbundenem Paperless zusaetzlich "In Paperless ablegen" (PDF, ohne Download)
+    let paperless = false;
+    try { paperless = (await getJSON('/api/dokumente/konfig')).verbunden; } catch (_) { /* ohne Paperless */ }
     let format = 'pdf';
     let ordnung = standard || 'chronologisch';
     const fotos = el('input', { type: 'checkbox', checked: true });
@@ -576,6 +579,13 @@
       ]),
       actions: [
         { label: 'Abbrechen', kind: 'sec', onClick: function (c) { c(); } },
+      ].concat(paperless ? [{ label: 'In Paperless ablegen', kind: 'sec', onClick: async function (c) {
+          try {
+            const r = await postJSON('/api/dokumente/ablegen', { quelle: 'ub', id: besuchId, ordnung: ordnung, fotos: fotos.checked });
+            toast('„' + r.titel + '“ geht als PDF an Paperless.');
+            c();
+          } catch (e) { toast(e.message); }
+        } }] : []).concat([
         { label: 'Ausgeben', kind: 'primary', onClick: function (c) {
           const url = '/unterrichtsbesuche/' + besuchId + '/protokoll.' + format
             + '?ordnung=' + encodeURIComponent(ordnung) + '&fotos=' + (fotos.checked ? 1 : 0);
@@ -583,7 +593,7 @@
           else location.href = url;
           c();
         } },
-      ],
+      ]),
     });
   };
 })();
