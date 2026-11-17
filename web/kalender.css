@@ -435,3 +435,13 @@ label.haken.gross input { width: 24px; height: 24px; }
 .formulare .chip-knopf.stand.gelb { background: #fdf1d6; border-color: #e3b44b; color: #7a4f00; }
 .formulare .chip-knopf.stand.gruen { background: #e7f2c8; border-color: #9fb83a; color: #4d5c00; }
 .formular-stunden tr.aus td { color: var(--leise); text-decoration: line-through; }
+
+/* VPN (Admin > System, vpn.js) */
+.vpn-karte h3 { margin: 6px 0 0; font-size: 1rem; }
+.vpn-schritte { margin: 0; padding-left: 22px; display: grid; gap: 14px; }
+.vpn-schritte > li::marker { font-weight: 700; color: var(--blau); }
+.vpn-text { margin: 0; padding: 10px 12px; background: #f4f6f9; border: 1px solid var(--linie); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; max-height: 22em; overflow: auto; }
+.vpn-conf { width: 100%; min-height: 12em; font-size: .8rem; white-space: pre; }
+.vpn-daten { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
+.vpn-daten dt { color: var(--leise); }
+.vpn-daten dd { margin: 0; overflow-wrap: anywhere; }

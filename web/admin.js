@@ -597,7 +597,7 @@ const Admin = (() => {
     if (r) { L.meldung('Gespeichert.'); danach(); }
   }
 
-  // --- System: Update, Sicherung, Protokoll ---
+  // --- System: Update, Sicherung, VPN (vpn.js), Protokoll ---
 
   async function system() {
     const [u, p] = await Promise.all([L.api('GET', '/api/admin/update'), L.api('GET', '/api/admin/protokoll')]);
@@ -621,6 +621,7 @@ const Admin = (() => {
           el('div', {}, el('button', { type: 'button', onclick: () => L.herunterladen('/api/admin/sicherung.zip').catch(f => L.meldung(f.message, true)) }, L.symbol('laden'), 'Sicherung herunterladen')),
           u.sicherungen.length ? el('div', { class: 'stapel', style: 'gap:4px' }, u.sicherungen.map(s =>
             el('a', { href: '/api/admin/update/sicherung/' + s.name, class: 'klein', text: s.name + ' (' + Math.round(s.groesse / 1024) + ' KB)' }))) : null)),
+      Vpn.karte(),
       el('div', { class: 'karte stapel' },
         el('h2', { text: 'Änderungsprotokoll' }),
         p.protokoll.length ? el('div', { class: 'rollbar' }, el('table', { class: 'liste' }, el('tbody', {}, p.protokoll.map(z => el('tr', {},

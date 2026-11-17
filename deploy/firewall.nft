@@ -1,6 +1,7 @@
 #!/usr/sbin/nft -f
 # Lehrerkalender MT: Firewall im Container (install.sh legt sie als /etc/lehrerkalender/firewall.nft ab, lehrerkalender-firewall.service
-# laedt sie beim Start). Von aussen nur Webseite (443, dazu 80 fuer Umleitung und /ca.crt) und SSH.
+# laedt sie beim Start). Von aussen nur Webseite (443, dazu 80 fuer Umleitung und /ca.crt) und SSH, ueber das VPN (wg0)
+# nur HTTPS - auch an die Schuladresse.
 # Ausgehende Verbindungen (Updates, Kalender-Abos) und ihre Antworten bleiben frei.
 # Eigene Tabelle: andere Regeln im Container bleiben unberuehrt.
 table inet lehrerkalender
@@ -11,10 +12,24 @@ table inet lehrerkalender {
 		iif "lo" accept
 		ct state established,related accept
 		ct state invalid drop
+		# VPN (lehrerkalender vpn): von dort nur HTTPS, kein SSH, kein HTTP, kein Ping
+		iifname "wg0" tcp dport 443 accept
+		iifname "wg0" drop
 		meta l4proto { icmp, ipv6-icmp } accept
 		tcp dport { 22, 80, 443 } accept
 	}
 	chain weiter {
 		type filter hook forward priority filter; policy drop;
+	}
+	# Antworten auf Verbindungen, die ueber das VPN hereinkamen, gehen ueber das VPN zurueck (ip rule fwmark 0x7464 ->
+	# Tabelle 7464 -> wg0, siehe deploy/vpn.sh), auch wenn sie an die Schuladresse gingen oder das Heimnetz dieselben
+	# Adressen wie das Schulnetz hat. Ohne wg0 trifft das kein Paket.
+	chain vpn_merken {
+		type filter hook prerouting priority mangle; policy accept;
+		iifname "wg0" ct state new ct mark set 0x7464
+	}
+	chain vpn_zurueck {
+		type route hook output priority mangle; policy accept;
+		ct mark 0x7464 meta mark set 0x7464
 	}
 }

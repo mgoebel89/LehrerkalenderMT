@@ -1,0 +1,10 @@
+# Admin > System > VPN: der Webdienst legt /var/lib/lehrerkalender/vpn/anfrage.json an.
+[Unit]
+Description=Lehrerkalender MT: VPN-Auftrag aus Admin > System
+
+[Path]
+PathExists=/var/lib/lehrerkalender/vpn/anfrage.json
+Unit=lehrerkalender-vpn-anfrage.service
+
+[Install]
+WantedBy=multi-user.target

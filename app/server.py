@@ -19,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, ub, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates
+from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, ub, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates, vpn
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -210,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
             self.antwort(f.status, {"fehler": str(f), "detail": str(f)})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
-                updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler) as f:
+                updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler, vpn.VpnFehler) as f:
             self.antwort(400, {"fehler": str(f)})
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -1014,6 +1014,24 @@ def api_update_anfordern(h, con, daten):
     h.antwort(200, updates.stand(DATEN_DIR))
 
 
+def api_vpn(h, con, daten):
+    _admin(h, con)
+    h.antwort(200, vpn.web_stand(DATEN_DIR))
+
+
+def api_vpn_anfordern(h, con, daten):
+    # Einrichten und Ausschalten aendern, wer von aussen an den Container kommt: dafuer das eigene Passwort
+    a = _admin(h, con)
+    if daten.get("aktion") in ("einrichten", "aus"):
+        pw = con.execute("SELECT pw FROM lehrkraft WHERE id = ?", (a["id"],)).fetchone()[0]
+        if not konten.passwort_stimmt(pw, daten.get("passwort") or ""):
+            raise vpn.VpnFehler("Das Passwort stimmt nicht.")
+    angaben = vpn.anfordern(DATEN_DIR, {k: v for k, v in daten.items() if k != "passwort"})
+    print("VPN: %s angefordert von %s%s" % (angaben["aktion"], a["kuerzel"], " (Client-Datei)" if daten.get("conf") else ""),
+          flush=True)
+    h.antwort(200, dict(vpn.web_stand(DATEN_DIR), hinweise=angaben.get("hinweise", [])))
+
+
 def api_update_sicherung(h, con, daten, name):
     _admin(h, con)
     with open(updates.sicherung_pfad(DATEN_DIR, name), "rb") as f:
@@ -1207,6 +1225,8 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/admin/sicherung\.zip", api_sicherung),
     ("GET", r"/api/admin/update", api_update),
     ("POST", r"/api/admin/update", api_update_anfordern),
+    ("GET", r"/api/admin/vpn", api_vpn),
+    ("POST", r"/api/admin/vpn", api_vpn_anfordern),
     ("GET", r"/api/admin/update/sicherung/(vor-update-[0-9_-]+\.zip)", api_update_sicherung),
 ]]
 

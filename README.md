@@ -27,7 +27,8 @@ Das Konzept (Fassung 2, freigegeben am 14.11.2026) liegt in `docs/KONZEPT.html`.
 | F1 | Formularcenter mit Ablage und Stand (erstellt, abgegeben, genehmigt); Stundenplanänderung/Beurlaubung füllt das Schul-PDF aus Ausfällen und Vertretungen der Woche (Vorlage lädt der Admin hoch, nicht im Repo); Unterschrift und Paraphe mit Stift oder Finger zeichnen; Start auch nach Ausfall/Vertretung, aus der Woche und aus einem Termin (Migration 15; braucht python3-pypdf und python3-reportlab) | gebaut (0.13.0) |
 | F2 | Unterrichtsbesuche aus dem alten Lehrerkalender übernommen, je Konto einschaltbar (Einstellungen › Konto) und nur für das eigene Konto sichtbar: Anwärter, Besuchs-Assistent, Handy-Erfassung mit Phasen, Kategorien, Beratungsschwerpunkten, Wertung, Foto und Skizze, Nachbereitung, Protokoll als PDF/ODT mit Schullogo (Migration 16; braucht python3-reportlab und python3-pil) | gebaut (0.14.0) |
 | F3 | Paperless | offen |
-| G | VPN, Diktat, Feinschliff | offen |
+| G1 | VPN (aus TrackingDRS): Container als Teilnehmer im bestehenden WireGuard-VPN, Einrichtung unter Admin → System (Werte oder fertige Client-Datei) oder per Konsole; über das VPN nur HTTPS, für alle Teilnehmer, Antworten über das VPN zurück. Von zuhause unter einer festen Zugriffsadresse (vorbelegt: Schuladresse), Zertifikat bleibt; Kopiervorlagen für VPS, WireGuard-App und Heimnetz | gebaut (0.15.0) |
+| G | Diktat, Feinschliff | offen |
 
 ## Installation (Proxmox)
 
@@ -39,7 +40,7 @@ Danach im Browser `https://<container>/einrichtung` mit dem Einrichtungscode vom
 entstehen über Einladungscodes (Admin → Konten).
 
 Im Container: `lehrerkalender einrichtungscode`, `lehrerkalender konten`, `lehrerkalender passwort <kürzel>`
-(Notfall), `lehrerkalender sicherung`, `lehrerkalender-update`.
+(Notfall), `lehrerkalender sicherung`, `lehrerkalender-update`, `lehrerkalender vpn einrichten|status|server|aus`.
 
 ## Entwickeln
 

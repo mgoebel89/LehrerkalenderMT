@@ -5,8 +5,10 @@
 #
 # Legt den Systembenutzer lehrerkalender an, Daten in /var/lib/lehrerkalender (Datenbank, Zertifikate, Sicherungen).
 # Dienste: lehrerkalender (Webseite 80/443), lehrerkalender-tls.timer (Zertifikat), lehrerkalender-firewall (nur 22/80/443),
-# lehrerkalender-update-pruefen.timer/.path und lehrerkalender-update-ausfuehren.path (Update aus dem Lehrerbereich).
-# Befehle danach: lehrerkalender (Konsole, z.B. lehrerkalender einrichtungscode), lehrerkalender-update.
+# lehrerkalender-update-pruefen.timer/.path und lehrerkalender-update-ausfuehren.path (Update aus dem Lehrerbereich),
+# lehrerkalender-vpn-anfrage.path (VPN aus Admin > System).
+# Befehle danach: lehrerkalender (Konsole, z.B. lehrerkalender einrichtungscode, lehrerkalender vpn status),
+# lehrerkalender-update.
 set -euo pipefail
 ZIEL=/opt/lehrerkalender
 DATEN=/var/lib/lehrerkalender
@@ -31,8 +33,8 @@ python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' || { echo "Lehrerk
 
 echo "==> Benutzer und Ordner"
 id lehrerkalender >/dev/null 2>&1 || useradd --system --home-dir "$DATEN" --shell /usr/sbin/nologin lehrerkalender
-install -d -o lehrerkalender -g lehrerkalender -m 750 "$DATEN" "$DATEN/update" "$DATEN/sicherungen"
-install -d -o root -g root -m 755 /var/lib/lehrerkalender-update   # Update-Ergebnisse, fuer den Webdienst nur lesbar
+install -d -o lehrerkalender -g lehrerkalender -m 750 "$DATEN" "$DATEN/update" "$DATEN/sicherungen" "$DATEN/vpn"
+install -d -o root -g root -m 755 /var/lib/lehrerkalender-update /var/lib/lehrerkalender-vpn   # Ergebnisse von root, fuer den Webdienst nur lesbar
 find "$DATEN" -maxdepth 1 -name 'lehrerkalender.sqlite*' -exec chmod 640 {} +
 install -d -o root -g root -m 755 /etc/lehrerkalender
 # der Code gehoert root: der Webdienst kann ihn nicht veraendern
@@ -43,11 +45,12 @@ echo "==> Befehle, Dienste, Firewall"
 install -o root -g root -m 755 deploy/tls.sh /usr/local/sbin/lehrerkalender-tls
 install -o root -g root -m 755 deploy/update.sh /usr/local/sbin/lehrerkalender-update
 install -o root -g root -m 755 deploy/selbstupdate.sh /usr/local/sbin/lehrerkalender-selbstupdate
+install -o root -g root -m 755 deploy/vpn.sh /usr/local/sbin/lehrerkalender-vpn
 install -o root -g root -m 755 deploy/lehrerkalender-cli.sh /usr/local/bin/lehrerkalender
 install -o root -g root -m 644 deploy/firewall.nft /etc/lehrerkalender/firewall.nft
-UPDATE_EINHEITEN="lehrerkalender-update-pruefen.path lehrerkalender-update-pruefen.timer lehrerkalender-update-ausfuehren.path"
+UPDATE_EINHEITEN="lehrerkalender-update-pruefen.path lehrerkalender-update-pruefen.timer lehrerkalender-update-ausfuehren.path lehrerkalender-vpn-anfrage.path"
 for einheit in lehrerkalender.service lehrerkalender-tls.service lehrerkalender-tls.timer lehrerkalender-firewall.service \
-    lehrerkalender-update-pruefen.service lehrerkalender-update-ausfuehren.service $UPDATE_EINHEITEN; do
+    lehrerkalender-update-pruefen.service lehrerkalender-update-ausfuehren.service lehrerkalender-vpn-anfrage.service     $UPDATE_EINHEITEN; do
   install -o root -g root -m 644 "deploy/$einheit" "/etc/systemd/system/$einheit"
 done
 systemctl daemon-reload

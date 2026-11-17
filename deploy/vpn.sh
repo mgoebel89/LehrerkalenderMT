@@ -1,0 +1,321 @@
+#!/bin/bash
+# WireGuard (Stufe G): der Container als Teilnehmer im bestehenden VPN, damit der Lehrerkalender von zuhause
+# erreichbar ist (aus TrackingDRS uebernommen). Als /usr/local/sbin/lehrerkalender-vpn installiert, Aufruf als root
+# ueber "lehrerkalender vpn ...".
+#
+#   lehrerkalender vpn einrichten   fragt Server (Adresse:Port), oeffentlichen Schluessel des Servers, VPN-Adresse des
+#                                   Containers und das VPN-Netz. Erzeugt den Schluessel im Container (er verlaesst ihn
+#                                   nie), schreibt /etc/wireguard/wg0.conf, startet die Verbindung und zeigt, was auf
+#                                   dem VPS und den Geraeten einzutragen ist.
+#   lehrerkalender vpn status       Verbindung und letzter Handshake
+#   lehrerkalender vpn server       die Eintraege fuer VPS und Geraete noch einmal zeigen
+#   lehrerkalender vpn aus          Verbindung beenden und beim Start nicht mehr aufbauen (Schluessel und Config bleiben)
+#   lehrerkalender-vpn anfrage      Auftrag aus Admin > System ausfuehren; startet systemd
+#                                   (lehrerkalender-vpn-anfrage.path), Ergebnis in /var/lib/lehrerkalender-vpn
+#
+# Ohne Rueckfragen:
+#   lehrerkalender vpn einrichten --server vpn.example.de:51820 --server-schluessel <44 Zeichen> --adresse 10.8.0.20 \
+#     [--netze "10.8.0.0/24"] [--server-ip 10.8.0.1] [--alle] [--zertifikat] [--zugriff 172.20.5.191]
+#   --alle:       alle Teilnehmer des VPN (auch das Heimnetz hinter dem Router) erreichen den Lehrerkalender; Antworten
+#                 gehen ueber den Tunnel zurueck, auf dem sie kamen.
+#   --zugriff:    Adresse, unter der der Lehrerkalender von zuhause erreichbar ist (Vorgabe: bisherige oder die
+#                 Schuladresse). Sie haengt fest an wg0 und bleibt, auch wenn sich die Schuladresse aendert; sie muss
+#                 im /16-Netz der Schuladresse liegen.
+#   --zertifikat: die VPN-Adresse kommt zusaetzlich ins Zertifikat. Ohne: Zugriff ueber die Zugriffsadresse.
+#                 (Liegt die VPN-Adresse ausserhalb des bisherigen /16-Netzes, entsteht eine neue CA, und alle Geraete
+#                 brauchen das neue Stammzertifikat.)
+# Mit einer fertigen Client-Datei fuer den Container (PrivateKey, Address, Server als [Peer], ggf. PresharedKey):
+#   lehrerkalender vpn einrichten --conf /root/container.conf [--zertifikat]
+#   (0.0.0.0/0 heisst dort: alle Absender zulassen wie --alle; DNS bleibt weg; die Datei danach loeschen)
+#
+# Zugriffsadresse ueber das VPN: Sie steht als zweite Address in wg0.conf. Der VPS traegt diese eine Adresse beim
+# Container ein (AllowedIPs .../32 und eine Route), die Geraete leiten sie ins VPN. Der Container selbst leitet nichts
+# weiter. arp_ignore/arp_announce sorgen dafuer, dass er im Schulnetz nur fuer seine eigene eth0-Adresse antwortet
+# (die Zugriffsadresse darf dort spaeter ein anderes Geraet haben).
+#
+# Sicherheit: Nur Verbindungen ins VPN-Netz laufen ueber den Tunnel; mit --alle nimmt WireGuard zwar Pakete jedes
+# Absenders an (AllowedIPs 0.0.0.0/0), Routen gibt es aber nur fuers VPN-Netz (Table = off) und fuer Antworten auf
+# Verbindungen, die ueber wg0 hereinkamen (Markierung 0x7464, Tabelle 7464). Die Firewall (deploy/firewall.nft) laesst
+# auf wg0 nur HTTPS (443) herein.
+set -euo pipefail
+WG=/etc/wireguard
+CONF=$WG/wg0.conf
+SCHLUESSEL=$WG/lehrerkalender.key
+PSK=$WG/lehrerkalender.psk
+TLS_IPS=/etc/lehrerkalender/tls-ips
+REPO=/opt/lehrerkalender
+ANFRAGE=/var/lib/lehrerkalender/vpn/anfrage.json
+STAND=/var/lib/lehrerkalender-vpn
+
+[ "$(id -u)" = 0 ] || { echo "Bitte als root ausfuehren."; exit 1; }
+
+fehler() { echo "Fehler: $*" >&2; exit 1; }
+
+frage() {   # frage <Text> <Vorgabe>: Antwort von der Konsole, leer = Vorgabe (ohne Konsole: die Vorgabe)
+  local antwort
+  if [ ! -t 0 ]; then
+    [ -n "${2:-}" ] || fehler "$1: bitte als Option angeben (siehe Kopf von lehrerkalender-vpn)."
+    echo "$2"
+    return
+  fi
+  read -r -p "$1${2:+ [$2]}: " antwort
+  echo "${antwort:-$2}"
+}
+
+aus_conf() {   # aus_conf <Schluessel>: Wert aus der vorhandenen wg0.conf (Vorgabe beim erneuten Einrichten)
+  [ -r "$CONF" ] && sed -n "s/^$1 *= *//p" "$CONF" | head -1 || true
+}
+
+schuladressen() {   # Adressen im Schulnetz (alles ausser wg0)
+  ip -4 -o addr show scope global | awk '$2 != "wg0" {split($4, a, "/"); print a[1]}'
+}
+
+server_block() {
+  local pub adresse erlaubt schule s
+  [ -s "$SCHLUESSEL" ] && [ -r "$CONF" ] || fehler "Noch nicht eingerichtet: lehrerkalender vpn einrichten"
+  pub=$(wg pubkey < "$SCHLUESSEL")
+  adresse=$(aus_conf Address); adresse=${adresse%%/*}
+  schule=$(aus_conf "# Zugriff")
+  erlaubt="$adresse/32"
+  for s in $schule; do erlaubt="$erlaubt, $s/32"; done
+  cat <<EOF
+
+=== 1. Auf dem VPS in dessen WireGuard-Config (z. B. /etc/wireguard/wg0.conf): ===
+
+[Peer]
+# Lehrerkalender MT $(hostname -s): VPN-Adresse und Zugriffsadresse, sonst nichts
+PublicKey = $pub
+AllowedIPs = $erlaubt
+
+(Steht der Container mit diesem PublicKey schon in der Server-Config, z. B. weil die Client-Datei von dort kommt:
+ dort nur die Zugriffsadresse bei AllowedIPs ergaenzen.)
+
+=== 2. Danach auf dem VPS uebernehmen (ohne bestehende Verbindungen zu trennen): ===
+  wg syncconf wg0 <(wg-quick strip wg0)
+EOF
+  for s in $schule; do echo "  ip -4 route replace $s/32 dev wg0"; done
+  cat <<EOF
+  (syncconf legt keine Routen an; nach einem Neustart des VPS macht wg-quick das selbst)
+
+=== 3. Auf den Geraeten: ===
+  Handy/Laptop mit WireGuard-App: bei AllowedIPs ergaenzen: ${schule:+$(echo $schule | sed 's/\([^ ]*\)/\1\/32/g; s/ /, /g')}
+  Heimnetz ueber Router/Fritzbox mit WireGuard: dort ${schule:+$(echo $schule | sed 's/\([^ ]*\)/\1\/32/g; s/ /, /g')} zu den Netzen ueber das VPN
+
+Dann hier pruefen: lehrerkalender vpn status
+Von zuhause: https://${schule:-$adresse}   (oder https://$adresse, wenn die VPN-Adresse im Zertifikat steht)
+EOF
+}
+
+info_ablegen() {   # info_ablegen <aktiv 0|1> [<Schnittstelle auf dem VPS>] [<aus Client-Datei 0|1>]
+  [ -s "$SCHLUESSEL" ] && [ -r "$CONF" ] || return 0
+  (cd "$REPO" && python3 -m app.vpn info-ablegen "$(wg pubkey < "$SCHLUESSEL")" "$1" "${2:-}" "${3:-}") || true
+}
+
+verbindung() {   # verbindung [--leise]: Ergebnis auch fuer die Seite ablegen
+  (cd "$REPO" && python3 -m app.vpn verbindung "$@")
+}
+
+anfrage() {   # Auftrag aus Admin > System: lesen (dabei geloescht und geprueft), ausfuehren, Ergebnis ablegen
+  local zeile aktion server schl adresse netze server_ip server_if psk datei alle zert zugriff beginn ergebnis=ok extra=()
+  export TZ=Europe/Berlin
+  umask 022
+  install -d -o root -g root -m 755 "$STAND"
+  beginn=$(date '+%Y-%m-%dT%H:%M:%S')
+  # Hinweise (stderr) kommen ins Protokoll; mit Client-Datei legt anfrage-lesen dabei die Schluessel nach /etc/wireguard
+  if ! zeile=$(cd "$REPO" && python3 -m app.vpn anfrage-lesen "$ANFRAGE" 2>"$STAND/hinweise.txt"); then
+    cp "$STAND/hinweise.txt" "$STAND/protokoll.txt"; chmod 644 "$STAND/protokoll.txt"
+    lauf_schreiben "?" "$beginn" fehler
+    return 1
+  fi
+  IFS='|' read -r aktion server schl adresse netze server_ip server_if psk datei alle zert zugriff <<< "$zeile"
+  [ -n "$psk" ] && extra+=(--psk)
+  [ -n "$alle" ] && extra+=(--alle)
+  [ -n "$datei" ] && extra+=(--aus-datei)
+  [ -n "$zert" ] && extra+=(--zertifikat)
+  [ -n "$zugriff" ] && extra+=(--zugriff "$zugriff")
+  lauf_schreiben "$aktion" "$beginn" ""
+  {
+    echo "== $beginn $aktion (aus Admin > System${datei:+, mit Client-Datei})"
+    cat "$STAND/hinweise.txt"
+    case "$aktion" in
+      einrichten) "$0" einrichten --server "$server" --server-schluessel "$schl" --adresse "$adresse" --netze "$netze" \
+                    --server-ip "$server_ip" --server-if "$server_if" "${extra[@]}" ;;
+      pruefen) "$0" status ;;
+      aus) "$0" aus ;;
+    esac
+  } < /dev/null > "$STAND/protokoll.neu" 2>&1 || ergebnis=fehler
+  chmod 644 "$STAND/protokoll.neu"
+  mv -f "$STAND/protokoll.neu" "$STAND/protokoll.txt"
+  rm -f "$STAND/hinweise.txt"
+  lauf_schreiben "$aktion" "$beginn" "$ergebnis"
+}
+
+lauf_schreiben() {   # lauf_schreiben <aktion> <beginn> <ergebnis, leer = laeuft noch>
+  local ende=null erg=null
+  [ -n "$3" ] && { ende="\"$(date '+%Y-%m-%dT%H:%M:%S')\""; erg="\"$3\""; }
+  printf '{"aktion": "%s", "beginn": "%s", "ende": %s, "ergebnis": %s}\n' "$1" "$2" "$ende" "$erg" > "$STAND/lauf.neu"
+  chmod 644 "$STAND/lauf.neu"
+  mv -f "$STAND/lauf.neu" "$STAND/lauf.json"
+}
+
+testen() {   # wartet kurz auf den ersten Handshake
+  local hs=0
+  for _ in $(seq 1 8); do
+    hs=$(wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2}' | head -1)
+    [ "${hs:-0}" != 0 ] && break
+    sleep 1
+  done
+  verbindung
+}
+
+einrichten() {
+  local server="" schl="" adresse="" netze="" server_ip="" server_if="" conf="" psk="" datei="" alle="" zert="" zugriff=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --server) server=$2; shift 2 ;;
+      --server-schluessel) schl=$2; shift 2 ;;
+      --adresse) adresse=$2; shift 2 ;;
+      --netze) netze=$2; shift 2 ;;
+      --server-ip) server_ip=$2; shift 2 ;;
+      --server-if) server_if=$2; shift 2 ;;   # nur fuer die Kopiervorlagen auf der Seite (Schnittstelle auf dem VPS)
+      --conf) conf=$2; shift 2 ;;
+      --psk) psk=1; shift ;;          # Schluessel und PSK hat anfrage-lesen schon abgelegt
+      --aus-datei) datei=1; shift ;;
+      --alle) alle=1; shift ;;
+      --zertifikat) zert=1; shift ;;
+      --zugriff) zugriff=$2; shift 2 ;;
+      *) fehler "Unbekannte Option $1" ;;
+    esac
+  done
+  local alt_adresse alt_zugriff; alt_adresse=$(aus_conf Address); alt_adresse=${alt_adresse%%,*}; alt_zugriff=$(aus_conf "# Zugriff")
+  if [ -n "$conf" ]; then   # Client-Datei: Werte und Schluessel daraus (Hinweise erscheinen direkt)
+    local werte alle_datei
+    werte=$(cd "$REPO" && python3 -m app.vpn conf-lesen "$(readlink -f "$conf")") || exit 1
+    IFS='|' read -r _ server schl adresse netze server_ip _ psk datei alle_datei _ <<< "$werte"
+    [ -n "$alle_datei" ] && alle=1
+    echo "==> Schluessel${psk:+ und PresharedKey} aus $conf uebernommen (die Datei kannst du jetzt loeschen)"
+  fi
+  if [ -z "$server" ] || [ -z "$schl" ] || [ -z "$adresse" ]; then
+    echo "WireGuard fuer den Lehrerkalender einrichten. Die Angaben findest du so:"
+    echo "  Port: ListenPort in der Server-Config. Adresse: oeffentlicher Name oder IP des Servers."
+    echo "  Schluessel: auf dem Server  wg show wg0 public-key  (den PrivateKey bitte nirgends eintippen)."
+    echo "  VPN-Adresse: eine freie Adresse im VPN-Netz (in der Server-Config bei keinem [Peer] unter AllowedIPs)."
+    echo
+  fi
+  [ -n "$server" ] || server=$(frage "Server (Adresse:Port)" "$(aus_conf Endpoint)")
+  [ -n "$schl" ] || schl=$(frage "Oeffentlicher Schluessel des Servers" "$(aus_conf PublicKey)")
+  [ -n "$adresse" ] || adresse=$(frage "VPN-Adresse dieses Containers" "${alt_adresse%/*}")
+  if [ -z "$netze" ]; then
+    netze=$(aus_conf "# Netze"); [ -n "$netze" ] || netze=$(aus_conf AllowedIPs | tr -d ',')
+    [ "$netze" = "0.0.0.0/0" ] && netze=""
+    [ -t 0 ] && [ -z "$netze" ] && netze=$(frage "VPN-Netz" "${adresse%.*}.0/24")
+  fi
+  local erg
+  erg=$(cd "$REPO" && python3 -m app.vpn pruefen "$server" "$schl" "$adresse" "$netze" "$server_ip") || exit 1
+  IFS='|' read -r adresse netze server_ip <<< "$erg"
+  [ -n "$zugriff" ] || zugriff=$alt_zugriff
+  [ -n "$zugriff" ] || zugriff=$(schuladressen | head -1)
+  [ -n "$zugriff" ] || fehler "Keine Schuladresse gefunden: bitte --zugriff <Adresse> angeben."
+  zugriff=$(cd "$REPO" && python3 -m app.vpn zugriff "$zugriff" "$adresse" "$netze" "$server_ip") || exit 1
+
+  if ! command -v wg-quick >/dev/null; then
+    echo "==> wireguard-tools installieren"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get install -y -q --no-install-recommends wireguard-tools >/dev/null 2>&1 \
+      || { apt-get update -q >/dev/null; apt-get install -y -q --no-install-recommends wireguard-tools >/dev/null; }
+  fi
+  install -d -o root -g root -m 700 "$WG"
+  if [ ! -s "$SCHLUESSEL" ]; then
+    ( umask 077; wg genkey > "$SCHLUESSEL" )
+    echo "==> Neuer Schluessel fuer den Container erzeugt"
+  fi
+  local psk_zeile=""
+  if [ -n "$psk" ] && [ -s "$PSK" ]; then
+    psk_zeile="PostUp = wg set %i peer $schl preshared-key $PSK"
+  else
+    rm -f "$PSK"
+  fi
+
+  local erlaubt=${netze// /, } routen="" n alle_text=nein
+  [ -n "$alle" ] && { erlaubt="0.0.0.0/0"; alle_text=ja; }
+  for n in $netze; do routen+="PostUp = ip -4 route replace $n dev %i"$'\n'; done
+
+  echo "==> $CONF${alle:+ (alle Teilnehmer des VPN erreichen den Lehrerkalender)}"
+  ( umask 077; cat > "$CONF.neu" <<EOF
+# Lehrerkalender MT: Verbindung zum WireGuard-Server (lehrerkalender vpn einrichten). Ueber den Tunnel laufen nur
+# Verbindungen ins VPN-Netz und Antworten auf Verbindungen, die ueber wg0 hereinkamen (Markierung in
+# deploy/firewall.nft). Der Schluessel liegt in $SCHLUESSEL und verlaesst den Container nicht.
+# Server-IP = $server_ip
+# Netze = $netze
+# Alle-Absender = $alle_text
+# Zugriff = $zugriff
+[Interface]
+Address = $adresse/32, $zugriff/32
+Table = off
+PostUp = wg set %i private-key $SCHLUESSEL
+$psk_zeile
+${routen}PostUp = ip -4 rule add fwmark 0x7464 lookup 7464 priority 1000 2>/dev/null || true
+PostUp = ip -4 route replace default dev %i table 7464
+# Pakete an die Zugriffsadresse, die ueber wg0 kommen: Rueckweg-Pruefung locker (Antwort geht per Markierung ueber wg0).
+# Im Schulnetz nur fuer die eigene eth0-Adresse antworten, nie fuer die Zugriffsadresse (ARP).
+PostUp = sysctl -q -w net.ipv4.conf.%i.rp_filter=2 || true
+PostUp = sysctl -q -w net.ipv4.conf.all.arp_ignore=1 net.ipv4.conf.all.arp_announce=2 || true
+PostDown = ip -4 rule del fwmark 0x7464 lookup 7464 priority 1000 2>/dev/null || true
+
+[Peer]
+PublicKey = $schl
+Endpoint = $server
+AllowedIPs = $erlaubt
+# hinter dem Router der Schule: Verbindung offen halten, damit der Server den Container erreicht
+PersistentKeepalive = 25
+EOF
+  )
+  mv -f "$CONF.neu" "$CONF"
+
+  install -d -m 755 /etc/lehrerkalender
+  touch "$TLS_IPS"
+  [ -n "$alt_adresse" ] && [ "${alt_adresse%/*}" != "$adresse" ] && sed -i "/^${alt_adresse%/*}\$/d" "$TLS_IPS"
+  [ -n "$alt_zugriff" ] && [ "$alt_zugriff" != "$zugriff" ] && sed -i "/^$alt_zugriff\$/d" "$TLS_IPS"
+  grep -qx "$zugriff" "$TLS_IPS" || echo "$zugriff" >> "$TLS_IPS"   # bleibt im Zertifikat, auch wenn eth0 wechselt
+  if [ -n "$zert" ]; then
+    echo "==> Zertifikat (VPN-Adresse dazu)"
+    grep -qx "$adresse" "$TLS_IPS" || echo "$adresse" >> "$TLS_IPS"
+    local tls; tls=$(/usr/local/sbin/lehrerkalender-tls --neustart)
+    [ -n "$tls" ] && echo "$tls"
+    if printf '%s' "$tls" | grep -q "neue Zertifizierungsstelle"; then
+      echo "  HINWEIS: Das Stammzertifikat ist neu. Auf allen Geraeten erneut installieren: http://<container>/ca.crt"
+    fi
+  else
+    sed -i "/^$adresse\$/d" "$TLS_IPS"
+    echo "==> Zertifikat (Zugriffsadresse $zugriff)"
+    local tls; tls=$(/usr/local/sbin/lehrerkalender-tls --neustart)
+    [ -n "$tls" ] && echo "$tls"
+  fi
+
+  echo "==> Verbindung starten"
+  systemctl enable -q wg-quick@wg0
+  systemctl restart wg-quick@wg0
+  info_ablegen 1 "$server_if" "${datei:-0}"
+  testen || true
+  server_block
+}
+
+status() {
+  [ -r "$CONF" ] || { echo "VPN nicht eingerichtet (lehrerkalender vpn einrichten)."; verbindung --leise >/dev/null 2>&1 || true; return 1; }
+  echo "Dienst: $(systemctl is-active wg-quick@wg0 || true), beim Start: $(systemctl is-enabled wg-quick@wg0 2>/dev/null || true)"
+  wg show wg0 2>/dev/null || { echo "wg0 ist nicht aktiv."; verbindung --leise >/dev/null 2>&1 || true; return 1; }
+  echo
+  verbindung || true   # das Ergebnis steht in verbindung.json (Chip auf der Seite)
+}
+
+case "${1:-}" in
+  einrichten) shift; einrichten "$@" ;;
+  status) status ;;
+  server) server_block ;;
+  aus) systemctl disable --now wg-quick@wg0 2>/dev/null || true
+       verbindung --leise >/dev/null 2>&1 || true
+       info_ablegen 0
+       echo "VPN aus. Wieder an: lehrerkalender vpn einrichten (oder Admin > System > VPN)" ;;
+  anfrage) anfrage ;;
+  *) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
