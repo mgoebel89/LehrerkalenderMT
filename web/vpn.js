@@ -166,6 +166,23 @@ const Vpn = (() => {
       });
       if (v) gestartet(v);
     };
+    // Weitere Ziele ueber das VPN (z. B. Paperless im Heimnetz): nur die Routen aendern, alles andere bleibt
+    const zieleAendern = async e => {
+      const feld = el('input', { value: (e.ziele || []).map(z => z.replace(/\/32$/, '')).join(' '), autocomplete: 'off', class: 'mono',
+        placeholder: 'z. B. 192.168.5.20' });
+      const v = await L.dialog({
+        titel: 'Weitere Ziele über das VPN',
+        inhalt: el('div', { class: 'stapel', style: 'gap:10px' },
+          el('p', { class: 'klein', text: 'Adressen in deinem Heimnetz, die der Lehrerkalender über das VPN erreichen soll, z. B. dein ' +
+            'Paperless für „Dokumente“. Dein Heimnetz muss dafür schon im VPN hängen (Router, Fritzbox oder Heimserver am VPS).' }),
+          L.feld('Adressen oder Netze (mit Leerzeichen getrennt, leer = keine)', feld,
+            'Am besten einzelne Adressen. Nicht aus dem Schulnetz, sonst wäre der Container dort nicht mehr erreichbar.'),
+          el('p', { class: 'leise klein', text: 'Die Verbindung wird dafür kurz neu aufgebaut. Am VPS ist nichts zu ändern: Er kennt dein ' +
+            'Heimnetz schon, und Antworten gehen an die VPN-Adresse des Containers.' })),
+        speichern: () => L.api('POST', '/api/admin/vpn', { aktion: 'ziele', ziele: feld.value }),
+      });
+      if (v) gestartet(v);
+    };
 
     async function laden() {
       let v;
@@ -226,6 +243,11 @@ const Vpn = (() => {
           el('dt', { text: 'VPN-Adresse' }), el('dd', {}, el('span', { class: 'mono', text: e.adresse }),
             e.zertifikat ? null : el('span', { class: 'leise klein', text: ' (nicht im Zertifikat)' })),
           el('dt', { text: 'Server' }), el('dd', { class: 'mono', text: e.server || '–' }),
+          el('dt', { text: 'Weitere Ziele' }), el('dd', {}, (e.ziele || []).length
+            ? el('span', { class: 'mono', text: e.ziele.map(z => z.replace(/\/32$/, '')).join(', ') })
+            : el('span', { class: 'leise', text: 'keine' }),
+            e.aktiv ? el('button', { type: 'button', class: 'leicht klein', disabled: gesperrt, onclick: () => zieleAendern(e),
+              style: 'margin-left:8px' }, L.symbol('stift'), 'ändern') : null),
           el('dt', { text: 'Erreichbar für' }), el('dd', { text: e.alle ? 'alle Teilnehmer deines VPN, auch dein Heimnetz (nur HTTPS)' :
             'nur Geräte mit einer Adresse im VPN-Netz ' + (e.netze || []).join(', ') }),
           t && t.zeit ? [el('dt', { text: 'Geprüft' }), el('dd', { text: L.wann(t.zeit) })] : null) : null,

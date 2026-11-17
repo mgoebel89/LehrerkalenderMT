@@ -567,6 +567,11 @@ MIGRATIONEN = [
         UNIQUE (lehrkraft_id, datum, beginn));
     CREATE INDEX stunde_eintrag_klasse ON stunde_eintrag (lehrkraft_id, klasse_id, datum)
     """,
+    # 18: Stufe F3 Dokumente: Paperless-Verbindung je Konto (JSON mit AES-GCM verschluesselt, Schluessel im Datenordner,
+    #     siehe app/paperless.py)
+    """
+    ALTER TABLE lehrkraft ADD COLUMN paperless TEXT
+    """,
 ]
 
 

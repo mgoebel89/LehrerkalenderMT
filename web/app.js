@@ -12,6 +12,7 @@ const BEREICHE = [
   { a: 'pruefungen', text: 'Prüfungen', sym: 'pruefung' },
   { a: 'formulare', text: 'Formulare', sym: 'formular' },
   { a: 'unterrichtsbesuche', text: 'Unterrichtsbesuche', sym: 'auge', adresse: '/unterrichtsbesuche', nurUb: true },
+  { a: 'dokumente', text: 'Dokumente', sym: 'archiv', nurPaperless: true },
   { a: 'einstellungen', text: 'Einstellungen', sym: 'einstellungen' },
   { a: 'admin-konten', text: 'Konten', sym: 'lehrkraefte', admin: true, gruppe: 'Admin' },
   { a: 'admin-grunddaten', text: 'Grunddaten', sym: 'pakete', admin: true },
@@ -31,6 +32,7 @@ function navigation(aktiv) {
   for (const b of BEREICHE) {
     if (b.admin && S.konto.rolle !== 'admin') continue;
     if (b.nurUb && !S.konto.ub_an) continue;
+    if (b.nurPaperless && !S.konto.paperless) continue;
     if (b.adresse) { teile.push(el('a', { href: b.adresse }, L.symbol(b.sym), b.text)); continue; }
     if (b.gruppe) teile.push(el('span', { class: 'etikett', style: 'padding:12px 12px 4px', text: b.gruppe }));
     if (b.spaeter) {
@@ -57,6 +59,7 @@ async function zeigen() {
     else if (bereich.a === 'planung') await planungZeigen(ziel === 'planung-bibliothek' ? 'bibliothek' : 'planung');
     else if (bereich.a === 'pruefungen') await pruefungenZeigen(ziel);
     else if (bereich.a === 'formulare') { titelSetzen('Formulare'); await Formulare.zeigen(inhalt); }
+    else if (bereich.a === 'dokumente') { titelSetzen('Dokumente'); await Dokumente.zeigen(inhalt); }
     else await Admin.zeigen(bereich.a, inhalt, titelSetzen);
   } catch (e) {
     if (e.status === 401) { location.href = '/anmelden'; return; }
@@ -182,7 +185,8 @@ function kontoZeigen(ort) {
                 el('button', { type: 'button', class: 'warnen', onclick: faktorAus }, 'Ausschalten')))
           : el('div', {}, el('button', { type: 'button', class: 'haupt', onclick: faktorEin }, L.symbol('schloss'), 'Einschalten'))),
       Formulare.unterschriftKarte(),
-      ubKarte()));
+      ubKarte(),
+      Dokumente.kontoKarte()));
 }
 
 // Unterrichtsbesuche (Stufe F2): je Konto einschaltbar, die Besuche sieht nur, wer sie angelegt hat

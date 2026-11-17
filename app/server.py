@@ -15,11 +15,12 @@ import re
 import socket
 import ssl
 import sys
+import tempfile
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, ub, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates, vpn, wiederherstellung
+from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, ub, notenschluessel, paperless, planung, pruefungen, qr, schule, stundenplan, totp, updates, vpn, wiederherstellung
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -233,6 +234,8 @@ class Handler(BaseHTTPRequestHandler):
             self.antwort(f.status, {"fehler": f.meldung})
         except ub.UbFehler as f:
             self.antwort(f.status, {"fehler": str(f), "detail": str(f)})
+        except paperless.PaperlessFehler as f:
+            self.antwort(f.status, {"fehler": str(f)})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
                 updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler, vpn.VpnFehler,
@@ -663,6 +666,98 @@ def api_stunde_eintrag(h, con, daten):
     with db.transaktion(con):
         planung.eintrag_setzen(con, k["id"], daten.get("datum"), daten.get("beginn"), daten)
     h.antwort(200, planung.stunde(con, k["id"], daten.get("datum"), daten.get("beginn")))
+
+
+# --- Dokumente (Stufe F3): eigenes Paperless je Konto, siehe app/paperless.py ---
+
+def api_dokumente_konfig(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, paperless.konfig_oeffentlich(con, k["id"], DATEN_DIR))
+
+
+def api_dokumente_konfig_speichern(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        anzahl = paperless.konfig_speichern(con, k["id"], DATEN_DIR, daten)
+    antwort = paperless.konfig_oeffentlich(con, k["id"], DATEN_DIR)
+    antwort["anzahl"] = anzahl
+    h.antwort(200, antwort)
+
+
+def api_dokumente_konfig_loeschen(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        paperless.konfig_loeschen(con, k["id"])
+    h.antwort(200, {"verbunden": False})
+
+
+def api_dokumente_stammlisten(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, paperless.stammlisten(con, k["id"], DATEN_DIR))
+
+
+def api_dokumente(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, paperless.suchen(con, k["id"], DATEN_DIR, h.abfrage("suche") or "",
+                                    (h.abfrage("tags") or "").split(","), h.abfrage("sortierung") or "-created",
+                                    h.abfrage("seite") or 1))
+
+
+def api_dokument(h, con, daten, did):
+    k = h.konto(con)
+    h.antwort(200, paperless.dokument(con, k["id"], DATEN_DIR, did))
+
+
+def api_dokument_aendern(h, con, daten, did):
+    k = h.konto(con)
+    h.antwort(200, paperless.aendern(con, k["id"], DATEN_DIR, did, daten))
+
+
+def api_dokument_datei(h, con, daten, did, art):
+    k = h.konto(con)
+    inhalt, typ, name = paperless.datei(con, k["id"], DATEN_DIR, did, art)
+    extra = [("Cache-Control", "private, max-age=300")]
+    anzeigen = typ.startswith("application/pdf") or (typ.startswith("image/") and "svg" not in typ)
+    if art == "download" or not anzeigen:   # fremde HTML-/SVG-Inhalte nie im eigenen Ursprung anzeigen
+        extra.append(("Content-Disposition", "attachment; filename*=UTF-8''" + urllib.parse.quote(name or "dokument")))
+    h.antwort(200, inhalt, typ, extra=extra, cache=True)
+
+
+def api_dokument_notiz(h, con, daten, did):
+    k = h.konto(con)
+    h.antwort(200, paperless.notiz_neu(con, k["id"], DATEN_DIR, did, daten.get("text")))
+
+
+def api_dokument_notiz_loeschen(h, con, daten, did, nid):
+    k = h.konto(con)
+    h.antwort(200, paperless.notiz_loeschen(con, k["id"], DATEN_DIR, did, nid))
+
+
+def api_dokumente_hochladen(h, con):
+    """Rohe POST-Anfrage: die Datei als Inhalt, Angaben als Abfrage-Parameter (name, titel, datum, korrespondent, typ, tags)."""
+    try:
+        k = h.konto(con)
+    except Fehler:
+        h.close_connection = True   # Inhalt ungelesen
+        raise
+    fd, tmp = tempfile.mkstemp(prefix="paperless-", dir=DATEN_DIR if os.path.isdir(DATEN_DIR) else None)
+    os.close(fd)
+    try:
+        h.roh_speichern(tmp, paperless.MAX_HOCHLADEN)
+        with open(tmp, "rb") as f:
+            inhalt = f.read()
+    finally:
+        os.remove(tmp)
+    task = paperless.hochladen(con, k["id"], DATEN_DIR, h.abfrage("name") or "", inhalt,
+                               (h.headers.get("Content-Type") or "").split(";")[0].strip(), h.abfrage("titel") or "",
+                               h.abfrage("datum") or "", h.abfrage("korrespondent") or 0, h.abfrage("typ") or 0,
+                               (h.abfrage("tags") or "").split(","))
+    h.antwort(200, {"task": task})
+
+
+def api_dokumente_aufgabe(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, paperless.aufgabe(con, k["id"], DATEN_DIR, h.abfrage("id") or ""))
 
 
 def api_ist_offen(h, con, daten):
@@ -1281,6 +1376,17 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/stunde", api_stunde),
     ("POST", r"/api/ist", api_ist),
     ("POST", r"/api/stunde/eintrag", api_stunde_eintrag),
+    ("GET", r"/api/dokumente/konfig", api_dokumente_konfig),
+    ("POST", r"/api/dokumente/konfig", api_dokumente_konfig_speichern),
+    ("POST", r"/api/dokumente/konfig/loeschen", api_dokumente_konfig_loeschen),
+    ("GET", r"/api/dokumente/stammlisten", api_dokumente_stammlisten),
+    ("GET", r"/api/dokumente/aufgabe", api_dokumente_aufgabe),
+    ("GET", r"/api/dokumente", api_dokumente),
+    ("GET", r"/api/dokumente/" + ID, api_dokument),
+    ("POST", r"/api/dokumente/" + ID, api_dokument_aendern),
+    ("GET", r"/api/dokumente/" + ID + r"/(preview|thumb|download)", api_dokument_datei),
+    ("POST", r"/api/dokumente/" + ID + r"/notiz", api_dokument_notiz),
+    ("POST", r"/api/dokumente/" + ID + r"/notiz/" + ID + r"/loeschen", api_dokument_notiz_loeschen),
     ("GET", r"/api/ist/offen", api_ist_offen),
     ("POST", r"/api/ist/alle", api_ist_alle),
     ("POST", r"/api/planung/uebernehmen", _planung_schritt(lambda con, k, d, _: planung.aus_bibliothek(con, k["id"], d))),
@@ -1315,7 +1421,8 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
 ]]
 
 # Datei-Uploads ohne JSON (POST, Inhalt = Datei): eigener Weg in _verteilen, der Aufgerufene liest selbst
-ROH_ROUTEN = {"/api/admin/wiederherstellung/hochladen": api_wiederherstellung_hochladen}
+ROH_ROUTEN = {"/api/admin/wiederherstellung/hochladen": api_wiederherstellung_hochladen,
+              "/api/dokumente/hochladen": api_dokumente_hochladen}
 
 
 # --- HTTP neben HTTPS: nur Umleitung und /ca.crt ---

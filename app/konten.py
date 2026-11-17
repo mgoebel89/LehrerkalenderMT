@@ -64,7 +64,8 @@ def oeffentlich(zeile):
     return {"id": zeile["id"], "kuerzel": zeile["kuerzel"], "name": zeile["name"], "rolle": zeile["rolle"],
             "pw_vorlaeufig": bool(zeile["pw_vorlaeufig"]), "gesperrt": bool(zeile["gesperrt"]),
             "zweiter_faktor": bool(zeile["totp"]), "ersatzcodes_uebrig": len(json.loads(zeile["ersatzcodes"] or "[]")),
-            "ub_an": bool(zeile["ub_an"]) if "ub_an" in zeile.keys() else False}
+            "ub_an": bool(zeile["ub_an"]) if "ub_an" in zeile.keys() else False,
+            "paperless": bool(zeile["paperless"]) if "paperless" in zeile.keys() else False}
 
 
 def _kuerzel_pruefen(kuerzel):

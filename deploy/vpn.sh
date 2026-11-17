@@ -10,12 +10,14 @@
 #   lehrerkalender vpn status       Verbindung und letzter Handshake
 #   lehrerkalender vpn server       die Eintraege fuer VPS und Geraete noch einmal zeigen
 #   lehrerkalender vpn aus          Verbindung beenden und beim Start nicht mehr aufbauen (Schluessel und Config bleiben)
+#   lehrerkalender vpn ziele "<Adressen>"   weitere Ziele ueber das VPN, z. B. Paperless im Heimnetz (192.168.5.20);
+#                                   leer = keine. Alles andere bleibt, wie es ist.
 #   lehrerkalender-vpn anfrage      Auftrag aus Admin > System ausfuehren; startet systemd
 #                                   (lehrerkalender-vpn-anfrage.path), Ergebnis in /var/lib/lehrerkalender-vpn
 #
 # Ohne Rueckfragen:
 #   lehrerkalender vpn einrichten --server vpn.example.de:51820 --server-schluessel <44 Zeichen> --adresse 10.8.0.20 \
-#     [--netze "10.8.0.0/24"] [--server-ip 10.8.0.1] [--alle] [--zertifikat] [--zugriff 172.20.5.191]
+#     [--netze "10.8.0.0/24"] [--server-ip 10.8.0.1] [--alle] [--zertifikat] [--zugriff 172.20.5.191] [--ziele "192.168.5.20"]
 #   --alle:       alle Teilnehmer des VPN (auch das Heimnetz hinter dem Router) erreichen den Lehrerkalender; Antworten
 #                 gehen ueber den Tunnel zurueck, auf dem sie kamen.
 #   --zugriff:    Adresse, unter der der Lehrerkalender von zuhause erreichbar ist (Vorgabe: bisherige oder die
@@ -111,6 +113,19 @@ info_ablegen() {   # info_ablegen <aktiv 0|1> [<Schnittstelle auf dem VPS>] [<au
   (cd "$REPO" && python3 -m app.vpn info-ablegen "$(wg pubkey < "$SCHLUESSEL")" "$1" "${2:-}" "${3:-}") || true
 }
 
+ziele_setzen() {   # ziele_setzen "<Adressen>": nur die weiteren Ziele aendern, Schluessel und alle Angaben bleiben
+  [ -r "$CONF" ] || fehler "Noch nicht eingerichtet: lehrerkalender vpn einrichten"
+  local adresse args=()
+  adresse=$(aus_conf Address); adresse=${adresse%%/*}
+  args=(--server "$(aus_conf Endpoint)" --server-schluessel "$(aus_conf PublicKey)" --adresse "$adresse"
+        --netze "$(aus_conf "# Netze")" --server-ip "$(aus_conf "# Server-IP")" --zugriff "$(aus_conf "# Zugriff")" --ziele "$1")
+  [ "$(aus_conf "# Alle-Absender")" = ja ] && args+=(--alle)
+  [ -s "$PSK" ] && args+=(--psk)
+  [ -r "$TLS_IPS" ] && grep -qx "$adresse" "$TLS_IPS" && args+=(--zertifikat)
+  grep -q '"aus_datei": true' "$STAND/einrichtung.json" 2>/dev/null && args+=(--aus-datei)
+  einrichten "${args[@]}"
+}
+
 verbindung() {   # verbindung [--leise]: Ergebnis auch fuer die Seite ablegen
   (cd "$REPO" && python3 -m app.vpn verbindung "$@")
 }
@@ -142,6 +157,7 @@ anfrage() {   # Auftrag aus Admin > System: lesen (dabei geloescht und geprueft)
                     --server-ip "$server_ip" --server-if "$server_if" "${extra[@]}" ;;
       pruefen) "$0" status ;;
       aus) "$0" aus ;;
+      ziele) "$0" ziele "$netze" ;;
     esac
   } < /dev/null > "$STAND/protokoll.neu" 2>&1 || ergebnis=fehler
   chmod 644 "$STAND/protokoll.neu"
@@ -170,6 +186,7 @@ testen() {   # wartet kurz auf den ersten Handshake
 
 einrichten() {
   local server="" schl="" adresse="" netze="" server_ip="" server_if="" conf="" psk="" datei="" alle="" zert="" zugriff=""
+  local ziele="" ziele_da=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --server) server=$2; shift 2 ;;
@@ -184,6 +201,7 @@ einrichten() {
       --alle) alle=1; shift ;;
       --zertifikat) zert=1; shift ;;
       --zugriff) zugriff=$2; shift 2 ;;
+      --ziele) ziele=$2; ziele_da=1; shift 2 ;;
       *) fehler "Unbekannte Option $1" ;;
     esac
   done
@@ -217,6 +235,8 @@ einrichten() {
   [ -n "$zugriff" ] || zugriff=$(schuladressen | head -1)
   [ -n "$zugriff" ] || fehler "Keine Schuladresse gefunden: bitte --zugriff <Adresse> angeben."
   zugriff=$(cd "$REPO" && python3 -m app.vpn zugriff "$zugriff" "$adresse" "$netze" "$server_ip") || exit 1
+  [ -n "$ziele_da" ] || ziele=$(aus_conf "# Ziele")   # weitere Ziele bleiben beim erneuten Einrichten
+  ziele=$(cd "$REPO" && python3 -m app.vpn ziele "$ziele") || exit 1
 
   if ! command -v wg-quick >/dev/null; then
     echo "==> wireguard-tools installieren"
@@ -236,9 +256,10 @@ einrichten() {
     rm -f "$PSK"
   fi
 
-  local erlaubt=${netze// /, } routen="" n alle_text=nein
+  local ueber="$netze${ziele:+ $ziele}"
+  local erlaubt=${ueber// /, } routen="" n alle_text=nein
   [ -n "$alle" ] && { erlaubt="0.0.0.0/0"; alle_text=ja; }
-  for n in $netze; do routen+="PostUp = ip -4 route replace $n dev %i"$'\n'; done
+  for n in $ueber; do routen+="PostUp = ip -4 route replace $n dev %i"$'\n'; done
 
   echo "==> $CONF${alle:+ (alle Teilnehmer des VPN erreichen den Lehrerkalender)}"
   ( umask 077; cat > "$CONF.neu" <<EOF
@@ -249,6 +270,7 @@ einrichten() {
 # Netze = $netze
 # Alle-Absender = $alle_text
 # Zugriff = $zugriff
+# Ziele = $ziele
 [Interface]
 Address = $adresse/32, $zugriff/32
 Table = off
@@ -312,6 +334,7 @@ case "${1:-}" in
   einrichten) shift; einrichten "$@" ;;
   status) status ;;
   server) server_block ;;
+  ziele) shift; ziele_setzen "${1:-}" ;;
   aus) systemctl disable --now wg-quick@wg0 2>/dev/null || true
        verbindung --leise >/dev/null 2>&1 || true
        info_ablegen 0

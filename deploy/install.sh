@@ -23,11 +23,12 @@ for befehl in python3 openssl nft git; do command -v "$befehl" >/dev/null || feh
 [ -e /usr/share/zoneinfo/Europe/Berlin ] || fehlt=1
 python3 -c 'import icalendar, recurring_ical_events' 2>/dev/null || fehlt=1   # Schulkalender-Abo (ICS)
 python3 -c 'import reportlab, pypdf, PIL' 2>/dev/null || fehlt=1   # PDF (Formulare, Feedbackboegen, Protokolle)
+python3 -c 'import cryptography' 2>/dev/null || fehlt=1   # Paperless-Zugaenge verschluesselt (Dokumente)
 if [ -n "$fehlt" ]; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -q >/dev/null
   apt-get install -y -q python3 openssl nftables git ca-certificates tzdata python3-icalendar \
-    python3-recurring-ical-events python3-reportlab python3-pypdf python3-pil >/dev/null
+    python3-recurring-ical-events python3-reportlab python3-pypdf python3-pil python3-cryptography >/dev/null
 fi
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' || { echo "Lehrerkalender MT braucht Python 3.11 oder neuer."; exit 1; }
 

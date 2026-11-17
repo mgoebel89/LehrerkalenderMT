@@ -445,3 +445,25 @@ label.haken.gross input { width: 24px; height: 24px; }
 .vpn-daten { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
 .vpn-daten dt { color: var(--leise); }
 .vpn-daten dd { margin: 0; overflow-wrap: anywhere; }
+
+/* --- Dokumente (Paperless, Stufe F3) --- */
+.dok-filter input[type=search] { flex: 1 1 240px; min-width: 0; }
+.dok-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dok-chip { border: 1px solid var(--linie-stark); background: var(--karte); border-radius: 999px; padding: 3px 12px; font-size: .82rem; cursor: pointer; }
+.dok-chip.an { background: var(--blau); border-color: var(--blau); color: #fff; }
+.dok-raster { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.dok-kachel { display: grid; grid-template-rows: auto 1fr; text-align: left; padding: 0; overflow: hidden; border: 1px solid var(--linie);
+  border-radius: 10px 4px 4px 4px; background: var(--karte); cursor: pointer; font: inherit; color: inherit; }
+.dok-kachel:hover { border-color: var(--blau-mittel); }
+.dok-bild { display: grid; place-items: center; height: 150px; background: var(--knopf); overflow: hidden; }
+.dok-bild img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.dok-bild svg { width: 40px; height: 40px; color: var(--leise); }
+.dok-text { display: grid; gap: 4px; padding: 8px 10px 10px; }
+.dok-text b { font-size: .9rem; line-height: 1.25; overflow-wrap: anywhere; }
+.dok-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.dok-tag { border-radius: 999px; padding: 0 8px; font-size: .7rem; font-weight: 600; }
+.dok-detail { display: grid; gap: 16px; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); align-items: start; }
+.dok-vorschau { display: block; border: 1px solid var(--linie); border-radius: 6px; overflow: hidden; background: var(--knopf); }
+.dok-gross { display: block; width: 100%; height: auto; }
+.dok-notiz { align-items: flex-start; flex-wrap: nowrap; }
+@media (max-width: 640px) { .dok-detail { grid-template-columns: 1fr; } .dok-raster { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }

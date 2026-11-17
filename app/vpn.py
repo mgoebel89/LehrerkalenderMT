@@ -44,7 +44,8 @@ TLS_IPS = "/etc/lehrerkalender/tls-ips"            # zusaetzliche Adressen im Ze
 VPN_DIR = os.environ.get("LEHRERKALENDER_VPN_DIR", "/var/lib/lehrerkalender-vpn")
 EINHEIT = os.environ.get("LEHRERKALENDER_VPN_EINHEIT", "/etc/systemd/system/lehrerkalender-vpn-anfrage.path")
 HANDSHAKE_MAX = 300   # Sekunden; mit Keepalive 25 erneuert WireGuard den Handshake alle 2 Minuten
-AKTIONEN = ("einrichten", "pruefen", "aus")
+AKTIONEN = ("einrichten", "pruefen", "aus", "ziele")
+MAX_ZIELE = 10
 SCHNITTSTELLE = re.compile(r"[A-Za-z0-9_.=-]{1,15}")
 LAUF_MAX = datetime.timedelta(minutes=10)   # haengt ein Auftrag laenger, darf ein neuer kommen
 
@@ -149,6 +150,35 @@ def zugriff_pruefen(zugriff, adresse, netze, server_ip, lokal=()):
                             z, ", ".join(str(netz) for _, netz in lokal),
                             ", ".join(str(ipaddress.IPv4Network("%s/16" % netz.network_address, strict=False)) for _, netz in lokal)))
     return str(z)
+
+
+def ziele_pruefen(text, lokal=()):
+    """Weitere Ziele ueber das VPN (z. B. Paperless im Heimnetz): einzelne Adressen oder kleine private Netze, die der
+    Container ueber den Tunnel erreicht. Nicht das Schulnetz (dann waere der Container dort weg) und nichts Oeffentliches."""
+    aus = []
+    for teil in (text or "").replace(",", " ").split():
+        try:
+            n = ipaddress.IPv4Network(teil, strict=False)
+        except ValueError:
+            raise VpnFehler("Ziel ungültig: %s (z. B. 192.168.5.20 oder 192.168.5.0/24)" % teil) from None
+        if n.prefixlen < 16:
+            raise VpnFehler("%s ist zu groß: höchstens ein /16-Netz, besser einzelne Adressen." % n)
+        if not n.is_private:
+            raise VpnFehler("%s ist keine Adresse aus einem Heim- oder Firmennetz (privater Bereich)." % n)
+        for name, netz in lokal:
+            if n.overlaps(netz):
+                raise VpnFehler("%s liegt im Netz von %s (%s), also im Schulnetz: dorthin geht es nicht über das VPN." % (n, name, netz))
+        if str(n) not in aus:
+            aus.append(str(n))
+    if len(aus) > MAX_ZIELE:
+        raise VpnFehler("Höchstens %d Ziele." % MAX_ZIELE)
+    return aus
+
+
+def ziele_lesen(text):
+    """Weitere Ziele aus wg0.conf (Kommentar von vpn.sh)."""
+    m = re.search(r"^[ \t]*#[ \t]*Ziele[ \t]*=[ \t]*(.*?)[ \t]*$", text, re.M)
+    return m.group(1).split() if m else []
 
 
 def konf_lesen(text):
@@ -337,6 +367,8 @@ def angaben_pruefen(d, lokal=()):
     aktion = d.get("aktion")
     if aktion not in AKTIONEN:
         raise VpnFehler("Unbekannte Aktion.")
+    if aktion == "ziele":   # nur die weiteren Ziele aendern, alles andere bleibt (vpn.sh ziele)
+        return {"aktion": aktion, "netze": " ".join(ziele_pruefen(str(d.get("ziele") or ""), lokal))}
     if aktion != "einrichten":
         return {"aktion": aktion}
     schnitt = str(d.get("server_if") or "").strip() or "wg0"
@@ -406,6 +438,8 @@ def anfordern(daten_dir, daten):
     s = web_stand(daten_dir)
     if s["laeuft"] or s["wartet"]:
         raise VpnFehler("Es läuft schon ein Auftrag. Bitte kurz warten.")
+    if daten.get("aktion") == "ziele" and not s["einrichtung"]:
+        raise VpnFehler("Bitte zuerst das VPN einrichten.")
     d = dict(daten)
     if d.get("aktion") == "einrichten" and not d.get("conf"):
         d["server"] = server_text(d.get("server"), d.get("port"))
@@ -489,7 +523,7 @@ def info_ablegen(container_schluessel, aktiv, server_if=None, aus_datei=None):
             "server_if": server_if or alt.get("server_if") or "wg0", "konf": konf,
             "aus_datei": alt.get("aus_datei", False) if aus_datei is None else aus_datei, "psk": os.path.exists(PSK),
             "alle": alle_absender(text), "schuladressen": schuladressen(), "zertifikat": _im_zertifikat(str(adresse)),
-            "zugriff": zugriff_lesen(text)}
+            "zugriff": zugriff_lesen(text), "ziele": ziele_lesen(text)}
     _schreiben("einrichtung.json", info)
     return info
 
@@ -522,6 +556,9 @@ def main(argv):
             print("|".join([*(a.get(k, "") for k in ("aktion", "server", "schluessel", "adresse", "netze", "server_ip",
                                                      "server_if")), "1" if a.get("psk") else "", "1" if a.get("privat") else "",
                             "1" if a.get("alle") else "", "1" if a.get("zertifikat") else "", a.get("zugriff") or ""]))
+            return 0
+        if argv[:1] == ["ziele"] and len(argv) == 2:
+            print(" ".join(ziele_pruefen(argv[1], eigene_netze())))
             return 0
         if argv[:1] == ["zugriff"] and len(argv) == 5:
             print(zugriff_pruefen(argv[1], argv[2], argv[3].split(), argv[4], eigene_netze()))
