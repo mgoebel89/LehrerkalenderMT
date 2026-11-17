@@ -14,6 +14,9 @@ os.environ["LEHRERKALENDER_OHNE_TLS"] = "1"
 # ist frei, wenn .dev-daten/vpn-einheit existiert (im Container: die systemd-Einheit). Auftraege bleiben liegen.
 os.environ.setdefault("LEHRERKALENDER_VPN_DIR", os.path.join(REPO, ".dev-daten", "vpn-stand"))
 os.environ.setdefault("LEHRERKALENDER_VPN_EINHEIT", os.path.join(REPO, ".dev-daten", "vpn-einheit"))
+# Sicherung einspielen: wie beim VPN; das Einspielen selbst macht im Container root, hier bleibt der Auftrag liegen
+os.environ.setdefault("LEHRERKALENDER_WIEDERHERSTELLUNG_DIR", os.path.join(REPO, ".dev-daten", "wiederherstellung-stand"))
+os.environ.setdefault("LEHRERKALENDER_WIEDERHERSTELLUNG_EINHEIT", os.path.join(REPO, ".dev-daten", "wiederherstellung-einheit"))
 os.environ["LEHRERKALENDER_BIND"] = "127.0.0.1"
 os.environ["LEHRERKALENDER_HTTP_PORT"] = sys.argv[1] if len(sys.argv) > 1 else "8472"
 sys.path.insert(0, REPO)

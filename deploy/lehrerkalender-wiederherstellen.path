@@ -1,0 +1,10 @@
+# Admin > System > Sicherung einspielen: der Webdienst legt /var/lib/lehrerkalender/wiederherstellung/einspielen an.
+[Unit]
+Description=Lehrerkalender MT: Sicherung einspielen auf Knopfdruck
+
+[Path]
+PathExists=/var/lib/lehrerkalender/wiederherstellung/einspielen
+Unit=lehrerkalender-wiederherstellen.service
+
+[Install]
+WantedBy=multi-user.target

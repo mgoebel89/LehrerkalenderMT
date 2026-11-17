@@ -1,0 +1,8 @@
+# Sicherung einspielen im Auftrag von Admin > System (als root: Dienst stoppen, austauschen lassen, Dienst starten).
+[Unit]
+Description=Lehrerkalender MT: Sicherung einspielen
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lehrerkalender-wiederherstellen anfrage
+TimeoutStartSec=20min

@@ -619,6 +619,7 @@ const Admin = (() => {
           el('h2', { text: 'Sicherung' }),
           el('p', { class: 'leise klein', text: 'Die ganze Datenbank als ZIP. Vor jedem Update legt der Container zusätzlich selbst eine Sicherung an (die letzten fünf bleiben). Dazu kommt die Proxmox-Sicherung.' }),
           el('div', {}, el('button', { type: 'button', onclick: () => L.herunterladen('/api/admin/sicherung.zip').catch(f => L.meldung(f.message, true)) }, L.symbol('laden'), 'Sicherung herunterladen')),
+          einspielenTeil(),
           u.sicherungen.length ? el('div', { class: 'stapel', style: 'gap:4px' }, u.sicherungen.map(s =>
             el('a', { href: '/api/admin/update/sicherung/' + s.name, class: 'klein', text: s.name + ' (' + Math.round(s.groesse / 1024) + ' KB)' }))) : null)),
       Vpn.karte(),
@@ -630,6 +631,115 @@ const Admin = (() => {
           el('td', { class: 'leise klein', text: Object.entries(z.daten).filter(([, v]) => v !== null && v !== undefined && v !== '')
             .map(([k, v]) => k + ': ' + (Array.isArray(v) ? v.join(', ') : v)).join(' · ') }))))))
           : el('p', { class: 'leise', text: 'Noch keine Änderungen.' })));
+  }
+
+  // --- Sicherung einspielen (z. B. Testinstanz -> Produktivsystem), siehe app/wiederherstellung.py ---
+  // Hochladen und pruefen macht der Webdienst, das Einspielen root ueber systemd (Dienst stoppt kurz). Danach sind alle
+  // Anmeldungen beendet: die Seite fuehrt zur Anmeldung.
+  function einspielenTeil() {
+    const ort = el('div', { class: 'stapel', style: 'gap:8px;border-top:1px solid var(--linie);padding-top:12px' });
+    const datei = el('input', { type: 'file', accept: '.zip,.sqlite,application/zip', hidden: true });
+    let timer = null, beobachten = false;
+    const weiter = () => { clearTimeout(timer); timer = setTimeout(() => { if (ort.isConnected) laden(); }, 2500); };
+
+    datei.addEventListener('change', async () => {
+      const d = datei.files[0];
+      datei.value = '';
+      if (!d) return;
+      L.setzen(ort, el('div', { class: 'banner', text: 'Lädt „' + d.name + '“ hoch und prüft die Sicherung …' }));
+      let antwort, inhalt = {};
+      try {
+        antwort = await fetch('/api/admin/wiederherstellung/hochladen', { method: 'POST', credentials: 'same-origin',
+          headers: { 'X-Lehrerkalender': '1', 'Content-Type': 'application/octet-stream' }, body: d });
+        try { inhalt = await antwort.json(); } catch (e) { /* leer */ }
+      } catch (e) { inhalt = { fehler: 'Keine Verbindung zum Server.' }; }
+      if (!antwort || !antwort.ok) { L.meldung(inhalt.fehler || 'Hochladen fehlgeschlagen.', true); laden(); return; }
+      zeichnen(inhalt);
+      einspielen(inhalt.hochgeladen);
+    });
+
+    const zahl = w => (w === null || w === undefined ? '–' : String(w));
+    const angaben = h => el('dl', { class: 'vpn-daten klein' },
+      el('dt', { text: 'Letzte Änderung' }), el('dd', { text: h.letzte_aenderung ? L.wann(h.letzte_aenderung) : '–' }),
+      el('dt', { text: 'Schule' }), el('dd', { text: h.schule || '–' }),
+      el('dt', { text: 'Konten' }), el('dd', { text: zahl(h.konten) + ' (Admins: ' + h.admins.join(', ') + ')' }),
+      el('dt', { text: 'Klassen' }), el('dd', { text: zahl(h.klassen) }),
+      el('dt', { text: 'Prüfungen' }), el('dd', { text: zahl(h.pruefungen) }),
+      el('dt', { text: 'Unterrichtsbesuche' }), el('dd', { text: zahl(h.besuche) }),
+      el('dt', { text: 'Datenbankstand' }), el('dd', { text: h.stand + (h.stand < h.aktueller_stand ? ' (wird beim Einspielen auf ' + h.aktueller_stand + ' gebracht)' : '') }));
+
+    async function einspielen(h) {
+      const pw = el('input', { type: 'password', required: true, autocomplete: 'current-password' });
+      const ok = el('input', { type: 'checkbox', required: true });
+      const r = await L.dialog({
+        titel: 'Sicherung einspielen?', knopf: 'Alle Daten ersetzen', gefaehrlich: true,
+        inhalt: el('div', { class: 'stapel', style: 'gap:10px' },
+          el('p', { text: 'In der Sicherung steht:' }), angaben(h),
+          el('div', { class: 'banner warnung klein', text: 'Alle Daten dieses Lehrerkalenders werden durch die Sicherung ersetzt: Konten, Stundenpläne, Planung, ' +
+            'Prüfungen und Noten, Formulare, Unterrichtsbesuche. Vorher legt der Container eine Sicherung des jetzigen Stands an. ' +
+            'Die Seite ist etwa eine Minute weg, danach melden sich alle neu an – mit den Passwörtern aus der Sicherung.' }),
+          el('p', { class: 'leise klein', text: 'Bleibt, wie es ist: das Zertifikat (Stammzertifikat auf den Geräten) und das VPN. ' +
+            'Kalender-Abos zeigen danach auf diese Adresse: Abo-Links aus der anderen Instanz in Outlook bzw. auf dem Handy neu eintragen.' }),
+          el('label', { class: 'haken' }, ok, 'Ich weiß, dass alle Daten ersetzt werden.'),
+          L.feld('Dein Passwort zur Bestätigung', pw)),
+        speichern: () => {
+          if (!ok.checked) throw new Error('Bitte bestätigen, dass alle Daten ersetzt werden.');
+          return L.api('POST', '/api/admin/wiederherstellung/einspielen', { passwort: pw.value, pruefsumme: h.pruefsumme });
+        },
+      });
+      if (r) { beobachten = true; zeichnen(r); weiter(); }
+    }
+
+    async function verwerfen() {
+      try { zeichnen(await L.api('POST', '/api/admin/wiederherstellung/verwerfen', {})); } catch (e) { L.meldung(e.message, true); }
+    }
+
+    async function laden() {
+      let v;
+      try { v = await L.api('GET', '/api/admin/wiederherstellung'); } catch (e) {
+        if (e.status === 401 && beobachten) {   // eingespielt: alle Anmeldungen sind beendet
+          L.setzen(ort, el('div', { class: 'banner', text: 'Sicherung eingespielt. Bitte neu anmelden …' }));
+          setTimeout(() => { location.href = '/anmelden'; }, 1500);
+          return;
+        }
+        if (beobachten) {   // Dienst startet gerade neu
+          L.setzen(ort, el('div', { class: 'banner', text: 'Die Sicherung wird eingespielt, der Dienst startet neu …' }));
+          weiter();
+          return;
+        }
+        L.setzen(ort, el('p', { class: 'leise klein', text: e.message }));
+        return;
+      }
+      if (v.laeuft || v.wartet) beobachten = true;
+      else if (beobachten && v.lauf && v.lauf.ende) {
+        beobachten = false;
+        L.meldung(v.lauf.ergebnis === 'ok' ? 'Sicherung eingespielt.' : 'Das Einspielen hat nicht geklappt. Details unten im Protokoll.', v.lauf.ergebnis !== 'ok');
+      }
+      zeichnen(v);
+      if (v.laeuft || v.wartet) weiter();
+    }
+
+    function zeichnen(v) {
+      const laeuft = v.laeuft || v.wartet, h = v.hochgeladen, lauf = v.lauf && v.lauf.ende ? v.lauf : null;
+      L.setzen(ort, datei,
+        el('b', { text: 'Sicherung einspielen' }),
+        el('p', { class: 'leise klein', text: 'Eine Sicherung aus „Sicherung herunterladen“ (ZIP) übernehmen, z. B. die Daten der Testinstanz ins ' +
+          'Produktivsystem. Ersetzt alle Daten hier. Die Sicherung darf nicht aus einer neueren Version stammen.' }),
+        laeuft ? el('div', { class: 'banner', text: 'Die Sicherung wird eingespielt … Danach bitte neu anmelden.' }) : null,
+        !laeuft && h ? el('div', { class: 'stapel', style: 'gap:6px' },
+          el('p', { class: 'klein', text: 'Bereit zum Einspielen (hochgeladen ' + L.wann(h.hochgeladen) + '):' }), angaben(h),
+          el('div', { class: 'zeile' },
+            el('button', { type: 'button', class: 'warnen', disabled: !v.eingerichtet, onclick: () => einspielen(h) }, 'Einspielen …'),
+            el('button', { type: 'button', class: 'klein', onclick: verwerfen }, 'Verwerfen'))) : null,
+        !laeuft && !h ? el('div', {}, el('button', { type: 'button', disabled: !v.eingerichtet, onclick: () => datei.click() },
+          L.symbol('hoch'), 'Sicherung einspielen …')) : null,
+        !v.eingerichtet ? el('p', { class: 'leise klein', text: 'Geht im Container, sobald diese Version dort installiert ist.' }) : null,
+        lauf ? el('details', {}, el('summary', { class: 'klein', text: 'Letztes Einspielen: ' + L.wann(lauf.ende) + (lauf.ergebnis === 'ok' ? ' · erledigt' : ' · fehlgeschlagen') }),
+          el('pre', { class: 'vpn-text mono', text: v.protokoll || '(kein Protokoll)' })) : null);
+    }
+
+    laden();
+    return ort;
   }
 
   async function updateAnfordern(art) {

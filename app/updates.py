@@ -21,7 +21,7 @@ from . import VERSION, db
 STAND_DIR = os.environ.get("LEHRERKALENDER_UPDATE_DIR", "/var/lib/lehrerkalender-update")
 EINHEIT = os.environ.get("LEHRERKALENDER_UPDATE_EINHEIT", "/etc/systemd/system/lehrerkalender-update-ausfuehren.path")
 ARTEN = ("pruefen", "ausfuehren")
-SICHERUNG = re.compile(r"vor-update-[0-9_-]+\.zip")
+SICHERUNG = re.compile(r"vor-(?:update|wiederherstellung)-[0-9_-]+\.zip")
 
 
 class UpdateFehler(Exception):
@@ -128,11 +128,12 @@ def sicherung(con):
     return zip_pfad
 
 
-def sicherung_ablegen(con, daten_dir, behalten=5):
-    """Sicherung vor einem Update (Konsole: lehrerkalender sicherung). Die aeltesten ueber `behalten` werden geloescht."""
+def sicherung_ablegen(con, daten_dir, behalten=5, art="update"):
+    """Sicherung vor einem Update oder dem Einspielen einer Sicherung (Konsole: lehrerkalender sicherung).
+    Die aeltesten ueber `behalten` werden geloescht."""
     ordner = os.path.join(daten_dir, "sicherungen")
     os.makedirs(ordner, mode=0o750, exist_ok=True)
-    ziel = os.path.join(ordner, "vor-update-%s.zip" % db.jetzt()[:19].replace("T", "_").replace(":", "-"))
+    ziel = os.path.join(ordner, "vor-%s-%s.zip" % (art, db.jetzt()[:19].replace("T", "_").replace(":", "-")))
     shutil.move(sicherung(con), ziel)
     os.chmod(ziel, 0o640)
     for alt in sicherungen(daten_dir)[behalten:]:

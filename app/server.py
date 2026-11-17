@@ -19,7 +19,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, ub, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates, vpn
+from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, ub, notenschluessel, planung, pruefungen, qr, schule, stundenplan, totp, updates, vpn, wiederherstellung
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -124,6 +124,29 @@ class Handler(BaseHTTPRequestHandler):
             raise Fehler(400, "Ungültige Daten.")
         return daten
 
+    def roh_speichern(self, ziel, grenze):
+        """Inhalt einer POST-Anfrage ohne JSON (Datei-Upload) in Stuecken nach ziel schreiben. Bei einem Fehler davor
+        bleibt der Inhalt ungelesen: dann die Verbindung schliessen, sonst laese der naechste Aufruf Dateireste."""
+        laenge = _ganzzahl(self.headers.get("Content-Length") or 0)
+        if self.headers.get(KOPF) != "1":
+            self.close_connection = True
+            raise Fehler(403, "Anfrage abgelehnt.")
+        if laenge <= 0:
+            self.close_connection = True
+            raise Fehler(400, "Keine Datei.")
+        if laenge > grenze:
+            self.close_connection = True
+            raise Fehler(413, "Die Datei ist zu groß (höchstens %d MB)." % (grenze // (1024 * 1024)))
+        rest = laenge
+        with open(ziel, "wb") as f:
+            while rest:
+                teil = self.rfile.read(min(rest, 1024 * 1024))
+                if not teil:
+                    self.close_connection = True
+                    raise Fehler(400, "Die Übertragung ist abgebrochen.")
+                f.write(teil)
+                rest -= len(teil)
+
     def abfrage(self, name, vorgabe=None):
         werte = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get(name)
         return werte[0] if werte else vorgabe
@@ -196,6 +219,8 @@ class Handler(BaseHTTPRequestHandler):
             con = db.verbinden(self.server.db_pfad)
             if methode == "GET" and not pfad.startswith("/api/") and not UB_PROTOKOLL.fullmatch(pfad):
                 return self.seite(con, pfad)
+            if methode == "POST" and pfad in ROH_ROUTEN:   # Datei als Inhalt (kein JSON), liest der Aufgerufene selbst
+                return ROH_ROUTEN[pfad](self, con)
             for m, muster, funktion in ROUTEN:
                 treffer = muster.fullmatch(pfad)
                 if m == methode and treffer:
@@ -210,7 +235,8 @@ class Handler(BaseHTTPRequestHandler):
             self.antwort(f.status, {"fehler": str(f), "detail": str(f)})
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
-                updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler, vpn.VpnFehler) as f:
+                updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler, vpn.VpnFehler,
+                wiederherstellung.WiederherstellungFehler) as f:
             self.antwort(400, {"fehler": str(f)})
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -1032,6 +1058,53 @@ def api_vpn_anfordern(h, con, daten):
     h.antwort(200, dict(vpn.web_stand(DATEN_DIR), hinweise=angaben.get("hinweise", [])))
 
 
+# --- Sicherung einspielen (Admin > System) ---
+
+def api_wiederherstellung(h, con, daten):
+    _admin(h, con)
+    h.antwort(200, wiederherstellung.stand(DATEN_DIR))
+
+
+def api_wiederherstellung_hochladen(h, con):
+    try:
+        a = _admin(h, con)
+    except Fehler:
+        h.close_connection = True   # Inhalt ungelesen
+        raise
+    o = wiederherstellung.ordner(DATEN_DIR)
+    os.makedirs(o, mode=0o750, exist_ok=True)
+    tmp = os.path.join(o, "upload.tmp")
+    try:
+        h.roh_speichern(tmp, wiederherstellung.MAX_HOCHLADEN)
+        angaben = wiederherstellung.bereitlegen(tmp, DATEN_DIR)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    print("Sicherung hochgeladen von %s (Stand %d, %s Konten)" % (a["kuerzel"], angaben["stand"], angaben["konten"]), flush=True)
+    h.antwort(200, wiederherstellung.stand(DATEN_DIR))
+
+
+def api_wiederherstellung_einspielen(h, con, daten):
+    # ersetzt alle Daten: dafuer das eigene Passwort
+    a = _admin(h, con)
+    pw = con.execute("SELECT pw FROM lehrkraft WHERE id = ?", (a["id"],)).fetchone()[0]
+    if not konten.passwort_stimmt(pw, daten.get("passwort") or ""):
+        raise wiederherstellung.WiederherstellungFehler("Das Passwort stimmt nicht.")
+    wiederherstellung.anfordern(DATEN_DIR, str(daten.get("pruefsumme") or ""))
+    with db.transaktion(con):
+        db.protokoll(con, a["kuerzel"], "sicherung_einspielen_angefordert")
+    print("Sicherung einspielen angefordert von %s" % a["kuerzel"], flush=True)
+    h.antwort(200, wiederherstellung.stand(DATEN_DIR))
+
+
+def api_wiederherstellung_verwerfen(h, con, daten):
+    _admin(h, con)
+    if wiederherstellung.stand(DATEN_DIR)["wartet"]:
+        raise wiederherstellung.WiederherstellungFehler("Das Einspielen ist schon beauftragt.")
+    wiederherstellung.verwerfen(DATEN_DIR)
+    h.antwort(200, wiederherstellung.stand(DATEN_DIR))
+
+
 def api_update_sicherung(h, con, daten, name):
     _admin(h, con)
     with open(updates.sicherung_pfad(DATEN_DIR, name), "rb") as f:
@@ -1227,8 +1300,14 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/admin/update", api_update_anfordern),
     ("GET", r"/api/admin/vpn", api_vpn),
     ("POST", r"/api/admin/vpn", api_vpn_anfordern),
-    ("GET", r"/api/admin/update/sicherung/(vor-update-[0-9_-]+\.zip)", api_update_sicherung),
+    ("GET", r"/api/admin/update/sicherung/(vor-(?:update|wiederherstellung)-[0-9_-]+\.zip)", api_update_sicherung),
+    ("GET", r"/api/admin/wiederherstellung", api_wiederherstellung),
+    ("POST", r"/api/admin/wiederherstellung/einspielen", api_wiederherstellung_einspielen),
+    ("POST", r"/api/admin/wiederherstellung/verwerfen", api_wiederherstellung_verwerfen),
 ]]
+
+# Datei-Uploads ohne JSON (POST, Inhalt = Datei): eigener Weg in _verteilen, der Aufgerufene liest selbst
+ROH_ROUTEN = {"/api/admin/wiederherstellung/hochladen": api_wiederherstellung_hochladen}
 
 
 # --- HTTP neben HTTPS: nur Umleitung und /ca.crt ---
