@@ -259,10 +259,12 @@ const Dokumente = (() => {
       const url = el('input', { value: k.url || '', required: true, placeholder: 'z. B. http://192.168.5.20:8000', autocomplete: 'off' });
       const token = el('input', { type: 'password', autocomplete: 'off', required: !k.verbunden,
         placeholder: k.verbunden ? 'leer = bisheriger Token' : 'aus Paperless: Profil › API-Token' });
+      const fehlerOrt = el('div', { class: 'banner warnung klein', hidden: true, role: 'alert' });
       L.setzen(ort_, kopf(el('span', { class: 'chip', text: k.verbunden ? 'verbunden' : 'aus' })), text,
         k.fehler ? el('div', { class: 'banner warnung klein', text: k.fehler }) : null,
         el('form', { class: 'stapel', style: 'gap:10px', onsubmit: async ev => {
           ev.preventDefault();
+          fehlerOrt.hidden = true;
           try {
             const r = await L.api('POST', '/api/dokumente/konfig', { url: url.value, token: token.value, tags: k.tags || [],
               upload_tag: k.upload_tag || 0, pfad: k.pfad || 0 });
@@ -270,10 +272,11 @@ const Dokumente = (() => {
             S.konto.paperless = true;
             navigation('einstellungen');
             laden();
-          } catch (e) { L.meldung(e.message, true); }
+          } catch (e) { fehlerOrt.textContent = e.message; fehlerOrt.hidden = false; }   // bleibt stehen, bis neu versucht wird
         } },
         L.feld('Adresse von Paperless', url, 'wie im Browser, ohne /api'),
         L.feld('API-Token', token, 'Paperless: oben rechts dein Name › Mein Profil › API-Auth-Token'),
+        fehlerOrt,
         el('div', { class: 'zeile' }, el('button', { type: 'submit', class: 'haupt' }, 'Verbinden'),
           aendern ? el('button', { type: 'button', onclick: laden }, 'Abbrechen') : null)));
     }

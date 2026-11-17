@@ -453,6 +453,8 @@ def anfordern(daten_dir, daten):
     auftrag = {"aktion": angaben["aktion"], "conf": d["conf"], "server_if": angaben["server_if"],
                "alle": angaben["alle"], "zertifikat": angaben["zertifikat"], "zugriff": angaben["zugriff"]} if "privat" in angaben \
         else {k: v for k, v in angaben.items() if k != "hinweise"}
+    if angaben["aktion"] == "ziele":   # root prueft erneut und liest dafuer "ziele" (nicht das Ergebnis "netze")
+        auftrag = {"aktion": "ziele", "ziele": angaben["netze"]}
     pfad = _anfrage_pfad(daten_dir)
     os.makedirs(os.path.dirname(pfad), exist_ok=True)
     fd = os.open(pfad + ".neu", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

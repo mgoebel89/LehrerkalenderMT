@@ -210,6 +210,28 @@ class VpnZiele(unittest.TestCase):
         self.assertEqual(vpn.ziele_lesen("# Ziele = \n[Interface]"), [])
         self.assertEqual(vpn.ziele_lesen("[Interface]"), [])
 
+    def test_weg_von_der_seite_bis_root(self):
+        """Webdienst legt den Auftrag ab, root liest und prueft ihn erneut: die Ziele muessen dabei ankommen
+        (0.18.0 verlor sie, weil der Auftrag sie unter "netze" ablegte, root aber "ziele" las)."""
+        ordner = tempfile.mkdtemp()
+        alt = (vpn.EINHEIT, vpn.VPN_DIR, vpn.eigene_netze)
+        try:
+            vpn.EINHEIT = os.path.join(ordner, "einheit")
+            open(vpn.EINHEIT, "w").close()
+            vpn.VPN_DIR = os.path.join(ordner, "stand")
+            os.makedirs(vpn.VPN_DIR)
+            with open(os.path.join(vpn.VPN_DIR, "einrichtung.json"), "w", encoding="utf-8") as f:
+                json.dump({"aktiv": True, "adresse": "10.0.0.9"}, f)
+            vpn.eigene_netze = lambda: self.SCHULE
+            vpn.anfordern(ordner, {"aktion": "ziele", "ziele": "192.168.6.20"})
+            a = vpn.anfrage_lesen(os.path.join(ordner, "vpn", "anfrage.json"))
+            self.assertEqual((a["aktion"], a["netze"]), ("ziele", "192.168.6.20/32"))
+            with self.assertRaises(vpn.VpnFehler):                 # Schulnetz wird auch auf dem Weg abgewiesen
+                vpn.anfordern(ordner, {"aktion": "ziele", "ziele": "172.20.5.10"})
+        finally:
+            vpn.EINHEIT, vpn.VPN_DIR, vpn.eigene_netze = alt
+            shutil.rmtree(ordner, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()
