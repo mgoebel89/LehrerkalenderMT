@@ -476,3 +476,8 @@ label.haken.gross input { width: 24px; height: 24px; }
   background: var(--karte); cursor: pointer; font: inherit; color: inherit; }
 .dok-treffer-zeile:hover:not(:disabled) { border-color: var(--blau-mittel); }
 .dok-treffer-zeile:disabled { opacity: .55; cursor: default; }
+.wp-ev.geteilt { box-shadow: inset 3px 0 0 var(--gelb); }
+.wp-ev.fremd { background: var(--karte); border-style: dashed; }
+.kollegium h3 { display: flex; align-items: center; gap: 6px; }
+.kollegium h4 { margin: 4px 0 0; font-size: .85rem; }
+span.thema-name { cursor: default; }

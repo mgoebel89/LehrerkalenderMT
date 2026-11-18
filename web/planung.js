@@ -7,7 +7,7 @@ const Planung = (() => {
   const LF_FARBEN = ['#00639C', '#7b4fa8', '#8a9c00', '#d99000', '#0f8a8a', '#D4005E', '#5d6b7a', '#c2571a'];
   let ort = null;
   let P = null;                                  // Antwort von /api/planung
-  const wahl = { schuljahr: null, klasse: null, gruppe: null, ansicht: 'schuljahr', bildungsgang: null };
+  const wahl = { schuljahr: null, klasse: null, gruppe: null, ansicht: 'schuljahr', bildungsgang: null, von: null };   // von: Kollegin (nur lesen)
   let ziehen = null;                             // Thema, das gerade in der Liste gezogen wird
   const auf = new Set();                         // Themen mit aufgeklappten Lernsituationen
   let gezeichnet = null;                         // Strang + Ansicht der letzten Zeichnung (Scrollstand halten)
@@ -28,7 +28,14 @@ const Planung = (() => {
     const q = [];
     if (wahl.schuljahr) q.push('schuljahr=' + wahl.schuljahr);
     if (wahl.klasse) q.push('klasse=' + wahl.klasse + (wahl.gruppe ? '&gruppe=' + wahl.gruppe : ''));
-    P = await L.api('GET', '/api/planung' + (q.length ? '?' + q.join('&') : ''));
+    if (wahl.von) q.push('lehrkraft=' + wahl.von);
+    try { P = await L.api('GET', '/api/planung' + (q.length ? '?' + q.join('&') : '')); }
+    catch (e) {
+      if (!wahl.von) throw e;
+      L.meldung(e.message, true);   // z. B. Teilen inzwischen aus: zurueck zur eigenen Planung
+      wahl.von = null;
+      return laden();
+    }
     wahl.schuljahr = P.schuljahr_id;
     if (!wahl.klasse && P.straenge.length) {
       const erster = P.straenge.find(s => s.themen) || P.straenge[0];
@@ -43,6 +50,7 @@ const Planung = (() => {
   }
 
   async function planungZeigen() {
+    wahl.von = null;
     await laden();
     zeichnen();
   }
@@ -78,7 +86,8 @@ const Planung = (() => {
         : el('button', { type: 'button', class: 'leicht auf-knopf', 'aria-expanded': offen ? 'true' : 'false',
           'aria-label': 'Lernsituationen ' + (offen ? 'zuklappen' : 'aufklappen'), onclick: ev => { ev.stopPropagation(); aufZu(t.id); } }, offen ? '▾' : '▸'),
       t.lernfeld ? el('span', { class: 'kz', style: 'color:' + lfFarbe(t.lernfeld_id), text: t.lernfeld }) : null,
-      el('button', { type: 'button', class: 'leicht thema-name', onclick: () => (t.pruefung_id ? (location.hash = '#pruefung-' + t.pruefung_id) : themaBearbeiten(t)) }, t.titel),
+      P.lesend ? el('span', { class: 'thema-name', text: t.titel })
+        : el('button', { type: 'button', class: 'leicht thema-name', onclick: () => (t.pruefung_id ? (location.hash = '#pruefung-' + t.pruefung_id) : themaBearbeiten(t)) }, t.titel),
       t.pruefung_id ? el('span', { class: 'chip rot klein', text: 'Prüfung' }) : null,
       ls.length ? el('span', { class: 'ls-zahl', title: t.verteilt + ' von ' + t.bloecke + ' Blöcken auf Lernsituationen verteilt', text: ls.length + ' LS' }) : null,
       el('span', { class: 'art', title: ls.length ? 'Umfang des Themas (Budget) · ' + t.verteilt + ' Bl verteilt' : 'Umfang des Themas',
@@ -88,6 +97,7 @@ const Planung = (() => {
       t.nadel === 'fehlt' ? el('span', { class: 'chip gelb klein', title: t.pruefung_id ? 'Zum Termin der Prüfung hast du keinen Unterricht in dieser Klasse – Termin unter Prüfungen ändern.'
         : 'Der festgesetzte Block findet nicht statt', text: t.pruefung_id ? 'kein Unterricht zum Termin' : 'Nadel?' }) : null);
     const tr = zelle;
+    if (P.lesend) return zelle;
     tr.draggable = true;
     tr.addEventListener('dragstart', ev => { ziehen = t.id; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(t.id)); });
     tr.addEventListener('dragover', ev => { if (ziehen && ziehen !== t.id) { ev.preventDefault(); tr.classList.add('ziel'); } });
@@ -103,7 +113,8 @@ const Planung = (() => {
 
   function lsZelle(t, ls) {
     return el('td', { class: 'auf ls-auf', title: ls.titel + (ls.von ? ' · ' + tagKurz(ls.von) + (ls.bis !== ls.von ? ' bis ' + tagKurz(ls.bis) : '') : '') },
-      el('button', { type: 'button', class: 'leicht thema-name ls-name', onclick: () => lsBearbeiten(t, ls) }, ls.titel),
+      P.lesend ? el('span', { class: 'thema-name ls-name', text: ls.titel })
+        : el('button', { type: 'button', class: 'leicht thema-name ls-name', onclick: () => lsBearbeiten(t, ls) }, ls.titel),
       el('span', { class: 'art', title: 'geplant ' + umfang(ls.bloecke), text: umfang(ls.bedarf) }),
       ls.bedarf > ls.bloecke ? el('span', { class: 'chip gelb klein', title: 'Per Ist verlängert', text: '+' + (ls.bedarf - ls.bloecke) }) : null,
       ls.zugeteilt < ls.bedarf ? el('span', { class: 'chip rot klein', title: 'Passt nicht mehr ins Schuljahr', text: '−' + (ls.bedarf - ls.zugeteilt) }) : null);
@@ -126,10 +137,12 @@ const Planung = (() => {
             el('span', { class: 'ls-name leise', text: 'noch offen' }), el('span', { class: 'art', text: umfang(t.offen_rest) })),
           zellen(reihe(p, t, c => c.thema_id === t.id && !c.ls_id, t.titel + ' (noch offen)'))));
       }
+      if (P.lesend) return;
       rows.push(el('tr', { class: 'ls-zeile neu-zeile' },
         el('td', { class: 'auf ls-auf' }, el('button', { type: 'button', class: 'leicht klein', onclick: () => lsBearbeiten(t, null) }, L.symbol('plus'), 'Lernsituation')),
         el('td', { colspan: 999 })));
     });
+    if (P.lesend) return rows;
     // letzte Zeile: Block antippen -> Pruefung zu diesem Termin anlegen
     const planen = { id: 0, titel: 'Prüfung planen', planen: true };
     rows.push(el('tr', { class: 'pruef-zeile', style: '--b:var(--rot)' },
@@ -173,11 +186,16 @@ const Planung = (() => {
     }
     const p = P.plan;
     const s = P.straenge.find(x => x.klasse_id === wahl.klasse && (x.gruppe_id || null) === (wahl.gruppe || null));
+    if (P.lesend) {
+      teile.push(el('div', { class: 'banner zeile' }, L.symbol('auge'),
+        el('span', {}, 'Planung von ', el('b', { text: P.lesend.name }), ' · nur ansehen'),
+        el('button', { type: 'button', class: 'klein rechts', onclick: () => { wahl.von = null; gezeichnet = null; neuLaden(); } }, L.symbol('zurueck' in L.SYMBOLE ? 'zurueck' : 'undo'), 'Zurück zu meiner Planung')));
+    }
     teile.push(el('div', { class: 'zeile' },
       el('h2', { text: s ? s.klasse : '' }), kopf.unter,
       el('span', { class: 'leise klein', text: p.summe.bloecke + ' Blöcke im Schuljahr · noch ' + p.summe.rest + ' · ' + p.summe.bedarf + ' verplant · ' + p.summe.frei + ' frei' }),
       p.summe.ueberlauf ? el('span', { class: 'chip rot', text: p.summe.ueberlauf + ' Bl passen nicht mehr' }) : null,
-      p.summe.ist_offen ? el('span', { class: 'chip gelb', title: 'Gehaltene Stunden ohne Ist-Bestätigung' }, L.symbol('offen'), p.summe.ist_offen + ' ohne Ist') : null,
+      p.summe.ist_offen && !P.lesend ? el('span', { class: 'chip gelb', title: 'Gehaltene Stunden ohne Ist-Bestätigung' }, L.symbol('offen'), p.summe.ist_offen + ' ohne Ist') : null,
       p.spuren.length ? el('span', { class: 'chip', title: 'Diese Lernfelder haben eigene Blöcke im Stundenplan', text: 'eigene Blöcke: ' + p.spuren.map(x => x.nummer).join(', ') }) : null,
       s && s.gruppen && s.gruppen.length ? el('span', { class: 'chip gr', title: 'Gruppenstunden am selben Tag bekommen denselben Stoff und zählen zusammen als ein Schritt der Klasse. ' +
         p.summe.geteilt + ' Schritte im Schuljahr sind geteilt.', text: s.gruppen.join(' + ') + ' · ' + p.summe.geteilt + ' geteilt' }) : null,
@@ -185,9 +203,11 @@ const Planung = (() => {
         el('div', { class: 'segment', role: 'group', 'aria-label': 'Ansicht' },
           [['bloecke', 'Doppelstunden'], ['tage', 'Tage'], ['schuljahr', 'Schuljahr']].map(([a, t]) =>
             el('button', { type: 'button', class: wahl.ansicht === a ? 'an' : null, onclick: () => { wahl.ansicht = a; zeichnen(); } }, t))),
-        el('button', { type: 'button', onclick: () => themaBearbeiten(null) }, L.symbol('plus'), 'Thema'),
-        el('a', { class: 'knopf', href: '#planung-bibliothek' }, L.symbol('pakete'), 'Aus Bibliothek'))));
-    if (!p.themen.length) {
+        P.lesend ? null : el('button', { type: 'button', onclick: () => themaBearbeiten(null) }, L.symbol('plus'), 'Thema'),
+        P.lesend ? null : el('a', { class: 'knopf', href: '#planung-bibliothek' }, L.symbol('pakete'), 'Aus Bibliothek'))));
+    if (!p.themen.length && P.lesend) {
+      teile.push(el('div', { class: 'leer', text: P.lesend.name + ' hat für diese Klasse noch keine Themen geplant.' }));
+    } else if (!p.themen.length) {
       teile.push(el('div', { class: 'leer' }, 'Noch keine Themen. Übernimm Lernsituationen aus der ',
         el('a', { href: '#planung-bibliothek', text: 'Bibliothek' }), ' oder lege mit „+ Thema“ eines an. Lernsituationen entwickelst du danach in den Themen.'));
     }
@@ -198,7 +218,7 @@ const Planung = (() => {
     const stand = [wahl.schuljahr, wahl.klasse, wahl.gruppe, wahl.ansicht].join(':');
     const gleich = stand === gezeichnet && altLinks !== null && !wahl.springe;
     gezeichnet = stand;
-    teile.push(scroll, legende(p), bilanz(p));
+    teile.push(scroll, legende(p), bilanz(p), kollegiumKarte());
     const y = window.scrollY;
     setzen();
     if (gleich) { scroll.scrollLeft = altLinks; window.scrollTo(0, y); return; }   // nach Aendern/Aufklappen an derselben Stelle bleiben
@@ -397,6 +417,27 @@ const Planung = (() => {
       el('p', { class: 'leise klein', style: 'margin-top:8px', text: 'Der Stundenansatz gilt für das ganze Lernfeld (1 Block = 2 Stunden). Teilen sich Gruppen oder Kolleginnen und Kollegen ein Lernfeld, ist die Abweichung nur ein Hinweis. ' + passt + ' von ' + p.summe.bedarf + ' verplanten Blöcken passen ins Schuljahr.' }));
   }
 
+  // Stufe E: Klassenansicht "Kollegium": wer die Klasse noch unterrichtet (deren Planung ansehen) und die geteilten
+  // Termine der naechsten Wochen. Nur, wenn der Admin das Teilen eingeschaltet hat.
+  function kollegiumKarte() {
+    const k = P.kollegium;
+    if (!k || P.lesend) return null;
+    const andere = k.lehrkraefte.filter(l => !l.ich);
+    return el('div', { class: 'karte stapel kollegium' },
+      el('h3', {}, L.symbol('klassen'), ' Kollegium dieser Klasse'),
+      andere.length ? el('div', { class: 'stapel', style: 'gap:6px' }, andere.map(l => el('div', { class: 'zeile' },
+        el('span', { text: l.name }),
+        el('button', { type: 'button', class: 'klein rechts', onclick: () => { wahl.von = l.id; gezeichnet = null; neuLaden(); window.scrollTo(0, 0); } },
+          L.symbol('auge'), 'Planung ansehen'))))
+        : el('p', { class: 'leise klein', text: 'Außer dir unterrichtet laut Stundenplan niemand diese Klasse.' }),
+      el('h4', { text: 'Geteilte Termine der nächsten ' + Math.round(k.tage / 7) + ' Wochen' }),
+      k.termine.length ? el('div', { class: 'stapel', style: 'gap:4px' }, k.termine.map(t => el('div', { class: 'zeile' },
+        el('span', { class: 'mono klein', text: tagKurz(t.datum) + (t.bis ? '–' + tagKurz(t.bis) : '') + (t.beginn ? ' ' + t.beginn : '') }),
+        el('span', { text: t.titel }), el('span', { class: 'leise klein', text: t.fremd ? 'von ' + t.von_name : 'von dir' }))))
+        : el('p', { class: 'leise klein', text: 'Keine.' }),
+      el('p', { class: 'leise klein', text: 'Einen Termin teilst du im Wochenplan: Termin mit dieser Klasse und dem Haken „für die Lehrkräfte der Klasse sichtbar“. Schülerlisten, Noten und Notizen bleiben immer privat.' }));
+  }
+
   function montagVon(iso) {
     const d = new Date(iso + 'T12:00:00');
     d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
@@ -409,6 +450,7 @@ const Planung = (() => {
   // c: ein Block oder eine Liste von Bloecken (Tagesansicht); Klick und Rechtsklick oeffnen dasselbe Menue
   function blockMenue(ev, t, c) {
     ev.preventDefault();
+    if (P.lesend) return;   // fremde Planung: nur ansehen
     const alt = document.getElementById('wp-menue');
     if (alt) alt.remove();
     const bloecke = (Array.isArray(c) ? c : [c]).filter(x => x.nutzbar);

@@ -21,7 +21,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, formulare, grunddaten, konten, moodle, ub, notenschluessel, paperless, planung, pruefungen, qr, schule, stundenplan, totp, updates, vpn, wiederherstellung
+from . import VERSION, abos, db, exporte, formulare, grunddaten, kollegium, konten, moodle, ub, notenschluessel, paperless, planung, pruefungen, qr, schule, stundenplan, totp, updates, vpn, wiederherstellung
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -254,7 +254,7 @@ class Handler(BaseHTTPRequestHandler):
             self.fehler(f.status, str(f))
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
-                updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler, vpn.VpnFehler,
+                updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler, vpn.VpnFehler, kollegium.KollegiumFehler,
                 wiederherstellung.WiederherstellungFehler) as f:
             self.fehler(400, str(f))
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
@@ -650,14 +650,38 @@ def api_planung(h, con, daten):
         jetzt = grunddaten.schuljahr_zum(con, db.heute())
         kuenftig = [j for j in jahre if j["beginn"] > db.heute().isoformat()]
         sid = jetzt["id"] if jetzt else (kuenftig[0]["id"] if kuenftig else (jahre[-1]["id"] if jahre else None))
-    antwort = {"schuljahre": jahre, "schuljahr_id": sid, "straenge": [], "plan": None}
+    antwort = {"schuljahre": jahre, "schuljahr_id": sid, "straenge": [], "plan": None, "lesend": None, "kollegium": None}
+    kid = _ganzzahl(h.abfrage("klasse")) if h.abfrage("klasse") else None
+    lid = k["id"]
+    if h.abfrage("lehrkraft"):   # Stufe E: Planung einer Kollegin/eines Kollegen derselben Klasse, nur lesen
+        antwort["lesend"] = kollegium.kollege(con, k["id"], _ganzzahl(h.abfrage("lehrkraft")), kid)
+        lid = antwort["lesend"]["id"]
     if sid:
-        antwort["straenge"] = planung.straenge(con, k["id"], sid)
-        kid = h.abfrage("klasse")
+        straenge = planung.straenge(con, lid, sid)
+        if antwort["lesend"]:
+            gemeinsam = kollegium.gemeinsame_klassen(con, k["id"], lid)
+            straenge = [x for x in straenge if x["klasse_id"] in gemeinsam]
+        antwort["straenge"] = straenge
         if kid:
             gid = h.abfrage("gruppe")
-            antwort["plan"] = planung.plan(con, k["id"], _ganzzahl(kid), _ganzzahl(gid) if gid else None, sid)
+            antwort["plan"] = planung.plan(con, lid, kid, _ganzzahl(gid) if gid else None, sid)
+            if not antwort["lesend"]:
+                antwort["kollegium"] = kollegium.klasse_uebersicht(con, k["id"], kid)
     h.antwort(200, antwort)
+
+
+def api_admin_kollegium(h, con, daten):
+    _admin(h, con)
+    h.antwort(200, kollegium.admin_stand(con))
+
+
+def api_admin_kollegium_setzen(h, con, daten):
+    a = _admin(h, con)
+    an = daten.get("an") is True
+    with db.transaktion(con):
+        kollegium.setzen(con, an)
+        db.protokoll(con, a["kuerzel"], "kollegium_teilen_" + ("an" if an else "aus"))
+    h.antwort(200, kollegium.admin_stand(con))
 
 
 def api_stunde(h, con, daten):
@@ -1500,6 +1524,8 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/admin/update", api_update),
     ("POST", r"/api/admin/update", api_update_anfordern),
     ("GET", r"/api/admin/vpn", api_vpn),
+    ("GET", r"/api/admin/kollegium", api_admin_kollegium),
+    ("POST", r"/api/admin/kollegium", api_admin_kollegium_setzen),
     ("POST", r"/api/admin/vpn", api_vpn_anfordern),
     ("GET", r"/api/admin/update/sicherung/(vor-(?:update|wiederherstellung)-[0-9_-]+\.zip)", api_update_sicherung),
     ("GET", r"/api/admin/wiederherstellung", api_wiederherstellung),

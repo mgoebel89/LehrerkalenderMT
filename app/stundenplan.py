@@ -550,7 +550,7 @@ def termin_speichern(con, lid, daten, tid=None):
     if not titel:
         raise StundenplanFehler("Bitte einen Text eingeben." if art == "merker" else "Bitte einen Titel eingeben.")
     datum = _datum(daten.get("datum")).isoformat()
-    bis, beginn, ende, kid = None, None, None, None
+    bis, beginn, ende, kid, geteilt = None, None, None, None, 0
     if art == "merker":
         beginn = _uhrzeit(daten.get("beginn"), "den Block")
         kid = _id(daten.get("klasse_id"))
@@ -568,12 +568,23 @@ def termin_speichern(con, lid, daten, tid=None):
                 ende = _uhrzeit(daten.get("ende"), "das Ende")
                 if ende <= beginn:
                     raise StundenplanFehler("Das Ende muss nach dem Beginn liegen.")
-    werte = (art, datum, bis, beginn, ende, kid, titel, _text(daten.get("notiz"), 2000))
+        if art == "dienst":   # Stufe E: Termin einer Klasse, auf Wunsch fuer die Lehrkraefte der Klasse sichtbar
+            kid = _id(daten.get("klasse_id"))
+            if kid is not None and con.execute("SELECT 1 FROM klasse WHERE id = ?", (kid,)).fetchone() is None:
+                raise StundenplanFehler("Diese Klasse gibt es nicht.")
+            if daten.get("geteilt"):
+                from . import kollegium
+                try:
+                    kollegium.teilen_pruefen(con, lid, kid)
+                except kollegium.KollegiumFehler as f:
+                    raise StundenplanFehler(str(f))
+                geteilt = 1
+    werte = (art, datum, bis, beginn, ende, kid, titel, _text(daten.get("notiz"), 2000), geteilt)
     if tid is None:
-        return con.execute("INSERT INTO termin (lehrkraft_id, art, datum, bis, beginn, ende, klasse_id, titel, notiz, erstellt) "
-                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (lid,) + werte + (db.jetzt(),)).lastrowid
-    con.execute("UPDATE termin SET art = ?, datum = ?, bis = ?, beginn = ?, ende = ?, klasse_id = ?, titel = ?, notiz = ? WHERE id = ?",
-                werte + (tid,))
+        return con.execute("INSERT INTO termin (lehrkraft_id, art, datum, bis, beginn, ende, klasse_id, titel, notiz, geteilt, erstellt) "
+                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (lid,) + werte + (db.jetzt(),)).lastrowid
+    con.execute("UPDATE termin SET art = ?, datum = ?, bis = ?, beginn = ?, ende = ?, klasse_id = ?, titel = ?, notiz = ?, geteilt = ? "
+                "WHERE id = ?", werte + (tid,))
     return tid
 
 
@@ -585,7 +596,7 @@ def termin_loeschen(con, lid, tid):
 
 def _termine(con, lid, von, bis):
     return [dict(t) for t in con.execute(
-        "SELECT id, art, datum, bis, beginn, ende, klasse_id, titel, notiz FROM termin WHERE lehrkraft_id = ? "
+        "SELECT id, art, datum, bis, beginn, ende, klasse_id, titel, notiz, geteilt FROM termin WHERE lehrkraft_id = ? "
         "AND datum <= ? AND COALESCE(bis, datum) >= ? ORDER BY datum, COALESCE(beginn, ''), id",
         (lid, bis.isoformat(), von.isoformat()))]
 
@@ -605,7 +616,11 @@ def woche(con, lid, montag, jetzt=None):
     klassen = _klassen(con)
     aend = _aenderungen(con, lid, montag, freitag)
     termine = _termine(con, lid, montag, freitag)
+    for t in termine:
+        t["geteilt"] = bool(t["geteilt"])
     merker = [t for t in termine if t["art"] == "merker"]
+    from . import kollegium   # Stufe E: geteilte Klassentermine der anderen Lehrkraefte meiner Klassen (nur lesen)
+    fremde = kollegium.geteilte_termine(con, lid, montag, freitag)
     weg = {(a["datum"], a["beginn"]): a for a in aend if a["art"] in ("ausfall", "vertreten", "verschoben")}
     eigene_gruppen = gruppen(con, lid)
     zeitraum = grunddaten.klassen_zeitraum(con)
@@ -663,8 +678,9 @@ def woche(con, lid, montag, jetzt=None):
     return {
         "montag": montag.isoformat(), "kw": montag.isocalendar()[1], "ab": ab_woche(montag, regel), "heute": heute,
         "tage": tage, "zeilen": zeilen, "bloecke": bloecke,
-        "termine": sorted([t for t in termine if t["art"] != "merker"] + abos.termine(con, lid, montag, freitag),
+        "termine": sorted([t for t in termine if t["art"] != "merker"] + abos.termine(con, lid, montag, freitag) + fremde,
                           key=lambda t: (t["datum"], t["beginn"] or "")), "merker": merker,
+        "teilen_klassen": kollegium.meine_klassen(con, lid),
         "farben": {str(k): f for k, f in farben(alle_klassen, klassen).items()},
         "hat_stundenplan": bool(liste),
         "sonderplan": next((v["name"] or "Sonderplan" for v in liste if v["sonder"] and v["ab"] <= freitag.isoformat()

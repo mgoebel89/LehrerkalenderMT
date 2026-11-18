@@ -585,6 +585,10 @@ MIGRATIONEN = [
         UNIQUE (pruefung_id, paperless_id));
     CREATE INDEX pruefung_dokument_pruefung ON pruefung_dokument (pruefung_id)
     """,
+    # 20: Stufe E: dienstlicher Termin einer Klasse, den die Lehrkraefte dieser Klasse sehen (siehe app/kollegium.py)
+    """
+    ALTER TABLE termin ADD COLUMN geteilt INTEGER NOT NULL DEFAULT 0
+    """,
 ]
 
 

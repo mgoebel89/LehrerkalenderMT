@@ -600,7 +600,7 @@ const Admin = (() => {
   // --- System: Update, Sicherung, VPN (vpn.js), Protokoll ---
 
   async function system() {
-    const [u, p] = await Promise.all([L.api('GET', '/api/admin/update'), L.api('GET', '/api/admin/protokoll')]);
+    const [u, p, kol] = await Promise.all([L.api('GET', '/api/admin/update'), L.api('GET', '/api/admin/protokoll'), L.api('GET', '/api/admin/kollegium')]);
     const pruefung = u.pruefung || {};
     L.setzen(ort,
       kopf('System'),
@@ -623,6 +623,7 @@ const Admin = (() => {
           u.sicherungen.length ? el('div', { class: 'stapel', style: 'gap:4px' }, u.sicherungen.map(s =>
             el('a', { href: '/api/admin/update/sicherung/' + s.name, class: 'klein', text: s.name + ' (' + Math.round(s.groesse / 1024) + ' KB)' }))) : null)),
       Vpn.karte(),
+      kollegiumKarte(kol),
       el('div', { class: 'karte stapel' },
         el('h2', { text: 'Änderungsprotokoll' }),
         p.protokoll.length ? el('div', { class: 'rollbar' }, el('table', { class: 'liste' }, el('tbody', {}, p.protokoll.map(z => el('tr', {},
@@ -631,6 +632,31 @@ const Admin = (() => {
           el('td', { class: 'leise klein', text: Object.entries(z.daten).filter(([, v]) => v !== null && v !== undefined && v !== '')
             .map(([k, v]) => k + ': ' + (Array.isArray(v) ? v.join(', ') : v)).join(' · ') }))))))
           : el('p', { class: 'leise', text: 'Noch keine Änderungen.' })));
+  }
+
+  // --- Teilen im Kollegium (Stufe E), siehe app/kollegium.py: Vorgabe aus, erst nach Freigabe einschalten ---
+  function kollegiumKarte(k) {
+    const umschalten = async () => {
+      if (!k.an) {
+        const ja = await L.dialog({ titel: 'Teilen im Kollegium einschalten?', knopf: 'Einschalten',
+          inhalt: el('div', { class: 'stapel', style: 'gap:8px' },
+            el('p', { text: 'Lehrkräfte, die dieselbe Klasse laut Stundenplan unterrichten, sehen dann gegenseitig ihre Themenplanung dieser Klasse (nur lesen) und die Termine, die sie ausdrücklich für die Klasse teilen.' }),
+            el('p', { text: 'Schülerlisten, Noten, Notizen, Merker, private Termine und Unterrichtsbesuche bleiben privat.' }),
+            el('p', { class: 'leise klein', text: 'Bitte erst einschalten, wenn Schulleitung und Datenschutzbeauftragter zugestimmt haben.' })),
+          speichern: () => true });
+        if (!ja) return;
+      }
+      try { await L.api('POST', '/api/admin/kollegium', { an: !k.an }); L.meldung(k.an ? 'Teilen ausgeschaltet.' : 'Teilen eingeschaltet.'); system(); }
+      catch (e) { L.meldung(e.message, true); }
+    };
+    return el('div', { class: 'karte stapel' },
+      el('div', { class: 'zeile' }, el('h2', { text: 'Teilen im Kollegium' }),
+        el('span', { class: 'chip ' + (k.an ? 'gruen' : ''), text: k.an ? 'an' : 'aus' })),
+      el('p', { class: 'leise klein', text: 'Gleiche Klasse = Themenplanung lesen und geteilte Klassentermine sehen. Alles andere bleibt privat.' }),
+      k.klassen.length ? el('div', { class: 'stapel', style: 'gap:4px' }, el('b', { class: 'klein', text: 'Klassen mit mehreren Lehrkräften' }),
+        k.klassen.map(x => el('div', { class: 'klein' }, el('b', { text: x.klasse + ': ' }), x.lehrkraefte.join(', '))))
+        : el('p', { class: 'leise klein', text: 'Noch keine Klasse steht im Stundenplan mehrerer Lehrkräfte.' }),
+      el('div', {}, el('button', { type: 'button', class: k.an ? '' : 'haupt', onclick: umschalten }, k.an ? 'Ausschalten' : 'Einschalten …')));
   }
 
   // --- Sicherung einspielen (z. B. Testinstanz -> Produktivsystem), siehe app/wiederherstellung.py ---

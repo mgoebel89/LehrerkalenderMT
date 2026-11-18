@@ -98,7 +98,8 @@ const Woche = (() => {
     if (heute) {
       const z = [];
       W.termine.filter(t => t.datum <= heute.datum && (t.bis || t.datum) >= heute.datum).forEach(t =>
-        z.push(el('div', { class: 'z' }, el('span', { class: 'mono', text: t.beginn || 'ganztags' }), el('span', { text: t.titel }))));
+        z.push(el('div', { class: 'z' }, el('span', { class: 'mono', text: t.beginn || 'ganztags' }),
+          el('span', { text: t.titel + (t.fremd ? ' (' + t.klasse + ', ' + t.von_name + ')' : '') }))));
       W.bloecke.filter(b => b.datum === heute.datum).forEach(b => b.merker.forEach(m =>
         z.push(el('div', { class: 'z' }, el('span', { class: 'mono', text: b.beginn }),
           el('span', {}, L.symbol('merker'), ' ', (b.klasse ? b.klasse.name + ': ' : ''), m.text)))));
@@ -155,9 +156,27 @@ const Woche = (() => {
 
   function terminKarte(t) {
     const abo = t.art === 'schule' || t.art === 'abo';
-    return el('button', { type: 'button', class: 'wp-ev ' + t.art, title: abo ? t.quelle : null, onclick: () => (abo ? aboTermin(t) : terminBearbeiten(t)) },
-      L.symbol(t.art === 'dienst' ? 'kalender' : t.art === 'schule' ? 'klassen' : t.art === 'abo' ? 'extern' : 'konto'),
+    if (t.fremd) {   // Stufe E: geteilter Klassentermin einer Kollegin/eines Kollegen, nur ansehen
+      return el('button', { type: 'button', class: 'wp-ev dienst fremd', title: t.klasse + ' · eingetragen von ' + t.von_name, onclick: () => fremderTermin(t) },
+        L.symbol('klassen'), el('span', { text: (t.beginn ? t.beginn + ' ' : '') + t.klasse + ': ' + t.titel }));
+    }
+    return el('button', { type: 'button', class: 'wp-ev ' + t.art + (t.geteilt ? ' geteilt' : ''),
+      title: abo ? t.quelle : t.geteilt ? 'Geteilt mit den Lehrkräften der Klasse' : null, onclick: () => (abo ? aboTermin(t) : terminBearbeiten(t)) },
+      L.symbol(t.geteilt ? 'klassen' : t.art === 'dienst' ? 'kalender' : t.art === 'schule' ? 'klassen' : t.art === 'abo' ? 'extern' : 'konto'),
       el('span', { text: (t.beginn ? t.beginn + ' ' : '') + t.titel }));
+  }
+
+  // Geteilter Termin einer anderen Lehrkraft derselben Klasse: aendern kann nur, wer ihn eingetragen hat
+  function fremderTermin(t) {
+    L.dialog({
+      titel: t.titel, knopf: 'Schließen', abbrechen: null, speichern: () => true,
+      inhalt: el('div', { class: 'stapel', style: 'gap:8px' },
+        el('p', {}, el('b', { text: L.tag(t.datum, true) + (t.bis ? ' – ' + L.tag(t.bis, true) : '') }),
+          t.beginn ? ' · ' + t.beginn + (t.ende ? '–' + t.ende : '') + ' Uhr' : ' · ganztags'),
+        el('p', {}, L.symbol('klassen'), ' ', t.klasse),
+        t.notiz ? el('p', { style: 'white-space:pre-wrap', text: t.notiz }) : null,
+        el('p', { class: 'leise klein', text: 'Geteilter Klassentermin von ' + t.von_name + '. Ändern kann ihn nur, wer ihn eingetragen hat.' })),
+    });
   }
 
   // Termin aus einem Kalender-Abo: nur anzeigen (geaendert wird er in seinem Kalender)
@@ -441,6 +460,23 @@ const Woche = (() => {
     const ende = el('input', { type: 'time', value: t && t.ende ? t.ende : '' });
     const notiz = el('textarea', { maxlength: 2000, rows: 2 });
     notiz.value = t ? t.notiz : '';
+    // Stufe E: Termin einer Klasse, auf Wunsch fuer deren Lehrkraefte sichtbar (nur wenn der Admin das Teilen eingeschaltet hat)
+    const meine = W.teilen_klassen || [];
+    const mitKlasse = t && t.klasse_id && !meine.some(k => k.id === t.klasse_id) ? [{ id: t.klasse_id, name: 'bisherige Klasse' }] : [];
+    const klasse = el('select', {}, el('option', { value: '', text: 'keine' }), meine.concat(mitKlasse).map(k =>
+      el('option', { value: k.id, text: k.name, selected: t && t.klasse_id === k.id ? true : null })));
+    const teilen = el('input', { type: 'checkbox', checked: t && t.geteilt ? true : null });
+    const teilenZeile = el('label', { class: 'haken' }, teilen, 'Für die Lehrkräfte der Klasse sichtbar (Titel, Zeit und Notiz)');
+    const teilenTeil = meine.length ? el('div', { class: 'stapel', style: 'gap:6px' }, L.feld('Klasse', klasse, 'freiwillig'), teilenZeile) : null;
+    const teilenPruefen = () => {
+      if (!teilenTeil) return;
+      teilenTeil.hidden = art.value !== 'dienst';
+      teilen.disabled = !klasse.value;
+      if (!klasse.value) teilen.checked = false;
+    };
+    art.addEventListener('change', teilenPruefen);
+    klasse.addEventListener('change', teilenPruefen);
+    teilenPruefen();
     const weitere = t ? [{ text: 'Löschen', klasse: 'warnen', speichern: () => L.api('POST', '/api/termin/' + t.id + '/loeschen', {}) }] : [];
     if (t && t.art === 'dienst') weitere.push({ text: 'Stundenplanänderung …', speichern: () => 'formular' });
     const ok = await L.dialog({
@@ -448,9 +484,11 @@ const Woche = (() => {
       inhalt: el('div', { class: 'felder' }, L.feld('Titel', titel),
         el('div', { class: 'felder zwei' }, L.feld('Art', art), L.feld('Tag', von)),
         el('div', { class: 'felder zwei' }, L.feld('von (Uhrzeit)', beginn, 'leer = ganztags'), L.feld('bis (Uhrzeit)', ende, 'freiwillig')),
-        L.feld('Letzter Tag', bis, 'nur bei mehrtägigen Terminen'), L.feld('Notiz', notiz)),
+        L.feld('Letzter Tag', bis, 'nur bei mehrtägigen Terminen'), L.feld('Notiz', notiz), teilenTeil),
       speichern: () => L.api('POST', t ? '/api/termin/' + t.id : '/api/termin', { art: art.value, titel: titel.value, datum: von.value,
-        bis: bis.value || null, beginn: beginn.value || null, ende: ende.value || null, notiz: notiz.value }),
+        bis: bis.value || null, beginn: beginn.value || null, ende: ende.value || null, notiz: notiz.value,
+        klasse_id: teilenTeil ? (klasse.value ? Number(klasse.value) : null) : (t ? t.klasse_id : null),
+        geteilt: teilenTeil ? teilen.checked : !!(t && t.geteilt) }),
     });
     if (ok === 'formular') { await Formulare.ausTermin(t); return; }
     if (ok) await laden();

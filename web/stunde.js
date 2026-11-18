@@ -210,7 +210,8 @@ const Stunde = (() => {
       }
       // Termine des Tages
       teile.push(abschnitt('kalender', 'Termine an diesem Tag', S.termine.length, S.termine.length
-        ? S.termine.map(t => el('div', { class: 'zeile' }, el('span', { class: 'mono leise klein', text: t.beginn || 'ganztags' }), el('span', { text: t.titel })))
+        ? S.termine.map(t => el('div', { class: 'zeile' }, el('span', { class: 'mono leise klein', text: t.beginn || 'ganztags' }), el('span', { text: t.titel }),
+          t.fremd ? el('span', { class: 'leise klein', text: t.klasse + ' · von ' + t.von_name }) : t.geteilt ? L.symbol('klassen') : null))
         : el('p', { class: 'leise klein', text: 'Keine.' })));
       L.setzen(rumpf, teile);
       if (gespeichert) status.textContent = gespeichert;
