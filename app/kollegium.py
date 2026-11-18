@@ -3,8 +3,9 @@
 Geteilt wird nur zwischen Lehrkraeften, die dieselbe Klasse laut ihrem Stundenplan unterrichten:
   - Termine der Klasse: ein dienstlicher Termin mit Klasse, ausdruecklich als "geteilt" markiert. Die anderen sehen
     ihn im Wochenplan und in der Stunde, aendern kann ihn nur, wer ihn eingetragen hat.
-  - Planung: die ganze Themenplanung einer Klasse, nur zum Lesen.
-Schuelerlisten, Noten, Notizen, Merker, private Termine und Besuchsprotokolle bleiben immer privat.
+  - Planung: die ganze Themenplanung einer Klasse, nur zum Lesen, dazu der Unterrichtsinhalt der gehaltenen Stunden
+    (Text fuers Klassenbuch) und Notizen einer Stunde, wenn dort der Haken "fuer das Kollegium sichtbar" gesetzt ist.
+Schuelerlisten, Noten, andere Notizen, Merker, private Termine und Besuchsprotokolle bleiben immer privat.
 
 Der Admin schaltet das Teilen unter Admin > System ein (Vorgabe: aus), sobald Schulleitung und Datenschutz zugestimmt
 haben. Solange es aus ist, sieht niemand etwas von anderen.
@@ -114,6 +115,22 @@ def klasse_uebersicht(con, lid, kid, heute=None):
     zeilen = con.execute(_SPALTEN + "AND t.klasse_id = ? AND t.datum <= ? AND COALESCE(t.bis, t.datum) >= ? "
                          "ORDER BY t.datum, COALESCE(t.beginn, ''), t.id", (kid, bis.isoformat(), heute.isoformat())).fetchall()
     return {"lehrkraefte": leute, "termine": _mit_klasse(con, zeilen, lid), "tage": VORSCHAU_TAGE}
+
+
+def unterricht(con, andere, kid, gid, von, bis, bloecke=(), themen=()):
+    """Fuer die lesende Planung: Unterrichtsinhalte der gehaltenen Stunden der anderen Lehrkraft in dieser Klasse (bei
+    einer Gruppe: deren Stunden und die der ganzen Klasse), neueste zuerst. Notizen nur, wenn sie geteilt sind."""
+    gnamen = {g["id"]: g["name"] for g in stundenplan.gruppen(con, andere)}
+    titel = {t["id"]: t["titel"] for t in themen}
+    thema = {(b["datum"], b["beginn"]): titel.get(b.get("thema_id")) for b in bloecke}
+    zeilen = con.execute(
+        "SELECT datum, beginn, gruppe_id, inhalt, CASE WHEN notizen_geteilt = 1 THEN notizen ELSE '' END AS notizen "
+        "FROM stunde_eintrag WHERE lehrkraft_id = ? AND klasse_id = ? AND datum BETWEEN ? AND ? "
+        "AND (inhalt != '' OR (notizen_geteilt = 1 AND notizen != '')) "
+        + ("AND COALESCE(gruppe_id, 0) IN (0, ?) " if gid else "") + "ORDER BY datum DESC, beginn DESC",
+        (andere, kid, von.isoformat(), bis.isoformat()) + ((gid,) if gid else ())).fetchall()
+    return [{"datum": z["datum"], "beginn": z["beginn"], "gruppe": gnamen.get(z["gruppe_id"], "") if z["gruppe_id"] else "",
+             "thema": thema.get((z["datum"], z["beginn"])) or "", "inhalt": z["inhalt"], "notizen": z["notizen"]} for z in zeilen]
 
 
 def admin_stand(con):

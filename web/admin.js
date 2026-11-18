@@ -641,7 +641,7 @@ const Admin = (() => {
         const ja = await L.dialog({ titel: 'Teilen im Kollegium einschalten?', knopf: 'Einschalten',
           inhalt: el('div', { class: 'stapel', style: 'gap:8px' },
             el('p', { text: 'Lehrkräfte, die dieselbe Klasse laut Stundenplan unterrichten, sehen dann gegenseitig ihre Themenplanung dieser Klasse (nur lesen) und die Termine, die sie ausdrücklich für die Klasse teilen.' }),
-            el('p', { text: 'Schülerlisten, Noten, Notizen, Merker, private Termine und Unterrichtsbesuche bleiben privat.' }),
+            el('p', { text: 'Dazu der Unterrichtsinhalt der gehaltenen Stunden; Notizen nur, wenn sie in der Stunde ausdrücklich freigegeben sind. Schülerlisten, Noten, Merker, private Termine und Unterrichtsbesuche bleiben privat.' }),
             el('p', { class: 'leise klein', text: 'Bitte erst einschalten, wenn Schulleitung und Datenschutzbeauftragter zugestimmt haben.' })),
           speichern: () => true });
         if (!ja) return;
@@ -652,7 +652,7 @@ const Admin = (() => {
     return el('div', { class: 'karte stapel' },
       el('div', { class: 'zeile' }, el('h2', { text: 'Teilen im Kollegium' }),
         el('span', { class: 'chip ' + (k.an ? 'gruen' : ''), text: k.an ? 'an' : 'aus' })),
-      el('p', { class: 'leise klein', text: 'Gleiche Klasse = Themenplanung lesen und geteilte Klassentermine sehen. Alles andere bleibt privat.' }),
+      el('p', { class: 'leise klein', text: 'Gleiche Klasse = Themenplanung und Unterrichtsinhalte lesen, geteilte Klassentermine und freigegebene Notizen sehen. Alles andere bleibt privat.' }),
       k.klassen.length ? el('div', { class: 'stapel', style: 'gap:4px' }, el('b', { class: 'klein', text: 'Klassen mit mehreren Lehrkräften' }),
         k.klassen.map(x => el('div', { class: 'klein' }, el('b', { text: x.klasse + ': ' }), x.lehrkraefte.join(', '))))
         : el('p', { class: 'leise klein', text: 'Noch keine Klasse steht im Stundenplan mehrerer Lehrkräfte.' }),

@@ -913,7 +913,7 @@ INHALT_MAX, NOTIZEN_MAX = 2000, 10000
 def _eintraege(con, lid, datum, beginn, kid, gid):
     """Unterrichtsinhalt und Notizen dieser Stunde, die letzte Stunde der Klasse mit Eintrag davor (bei einer Gruppe:
     deren Stunden und die der ganzen Klasse) und die Inhalte der anderen Gruppen am selben Tag."""
-    z = con.execute("SELECT inhalt, notizen, geaendert FROM stunde_eintrag WHERE lehrkraft_id = ? AND datum = ? AND beginn = ?",
+    z = con.execute("SELECT inhalt, notizen, notizen_geteilt, geaendert FROM stunde_eintrag WHERE lehrkraft_id = ? AND datum = ? AND beginn = ?",
                     (lid, datum, beginn)).fetchone()
     gnamen = {g["id"]: g["name"] for g in stundenplan.gruppen(con, lid)}
     v = con.execute("SELECT datum, beginn, gruppe_id, inhalt, notizen FROM stunde_eintrag WHERE lehrkraft_id = ? AND klasse_id = ? "
@@ -924,15 +924,18 @@ def _eintraege(con, lid, datum, beginn, kid, gid):
         {"gruppe": gnamen.get(y["gruppe_id"], ""), "beginn": y["beginn"], "inhalt": y["inhalt"]} for y in con.execute(
             "SELECT beginn, gruppe_id, inhalt FROM stunde_eintrag WHERE lehrkraft_id = ? AND klasse_id = ? AND datum = ? "
             "AND gruppe_id IS NOT NULL AND gruppe_id != ? AND inhalt != '' ORDER BY beginn", (lid, kid, datum, gid))]
-    return {"eintrag": {"inhalt": z["inhalt"] if z else "", "notizen": z["notizen"] if z else "", "geaendert": z["geaendert"] if z else None},
+    from . import kollegium   # Stufe E: wer den Unterrichtsinhalt (immer) und geteilte Notizen in meiner Planung sieht
+    return {"eintrag": {"inhalt": z["inhalt"] if z else "", "notizen": z["notizen"] if z else "",
+                        "notizen_geteilt": bool(z and z["notizen_geteilt"]), "geaendert": z["geaendert"] if z else None},
+            "kollegium": [l["name"] for l in kollegium.lehrkraefte_der_klasse(con, kid) if l["id"] != lid] if kollegium.aktiv(con) else [],
             "vorstunde": {"datum": v["datum"], "beginn": v["beginn"], "gruppe": gnamen.get(v["gruppe_id"], "") if v["gruppe_id"] else "",
                           "inhalt": v["inhalt"], "notizen": v["notizen"]} if v else None,
             "andere_gruppe": andere, "vorschlag": ""}
 
 
 def eintrag_setzen(con, lid, datum, beginn, daten):
-    """Unterrichtsinhalt und/oder Notizen einer gehaltenen Stunde speichern (fehlende Felder bleiben, wie sie sind).
-    Sind danach beide leer, verschwindet der Eintrag."""
+    """Unterrichtsinhalt und/oder Notizen einer gehaltenen Stunde speichern (fehlende Felder bleiben, wie sie sind),
+    dazu "notizen_geteilt" (Stufe E). Sind danach Inhalt und Notizen leer, verschwindet der Eintrag."""
     try:
         datetime.date.fromisoformat(datum)
     except (TypeError, ValueError):
@@ -951,13 +954,16 @@ def eintrag_setzen(con, lid, datum, beginn, daten):
         if len(wert) > grenze:
             raise PlanungFehler("%s darf höchstens %d Zeichen haben." % (name, grenze))
         neu[feld] = wert
+    geteilt = alt["notizen_geteilt"] if daten.get("notizen_geteilt") is None else daten.get("notizen_geteilt") is True
     if not neu["inhalt"] and not neu["notizen"]:
         con.execute("DELETE FROM stunde_eintrag WHERE lehrkraft_id = ? AND datum = ? AND beginn = ?", (lid, datum, s["beginn"]))
         return
-    con.execute("INSERT INTO stunde_eintrag (lehrkraft_id, datum, beginn, klasse_id, gruppe_id, inhalt, notizen, geaendert) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (lehrkraft_id, datum, beginn) DO UPDATE SET inhalt = excluded.inhalt, "
-                "notizen = excluded.notizen, klasse_id = excluded.klasse_id, gruppe_id = excluded.gruppe_id, geaendert = excluded.geaendert",
-                (lid, datum, s["beginn"], s["klasse"]["id"], s["gruppe"]["id"] if s["gruppe"] else None, neu["inhalt"], neu["notizen"], db.jetzt()))
+    con.execute("INSERT INTO stunde_eintrag (lehrkraft_id, datum, beginn, klasse_id, gruppe_id, inhalt, notizen, notizen_geteilt, geaendert) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (lehrkraft_id, datum, beginn) DO UPDATE SET inhalt = excluded.inhalt, "
+                "notizen = excluded.notizen, notizen_geteilt = excluded.notizen_geteilt, klasse_id = excluded.klasse_id, "
+                "gruppe_id = excluded.gruppe_id, geaendert = excluded.geaendert",
+                (lid, datum, s["beginn"], s["klasse"]["id"], s["gruppe"]["id"] if s["gruppe"] else None, neu["inhalt"], neu["notizen"],
+                 1 if geteilt else 0, db.jetzt()))
 
 
 def ist_setzen(con, lid, datum, beginn, stand):

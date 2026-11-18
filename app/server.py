@@ -650,7 +650,8 @@ def api_planung(h, con, daten):
         jetzt = grunddaten.schuljahr_zum(con, db.heute())
         kuenftig = [j for j in jahre if j["beginn"] > db.heute().isoformat()]
         sid = jetzt["id"] if jetzt else (kuenftig[0]["id"] if kuenftig else (jahre[-1]["id"] if jahre else None))
-    antwort = {"schuljahre": jahre, "schuljahr_id": sid, "straenge": [], "plan": None, "lesend": None, "kollegium": None}
+    antwort = {"schuljahre": jahre, "schuljahr_id": sid, "straenge": [], "plan": None, "lesend": None, "kollegium": None,
+               "unterricht": None}
     kid = _ganzzahl(h.abfrage("klasse")) if h.abfrage("klasse") else None
     lid = k["id"]
     if h.abfrage("lehrkraft"):   # Stufe E: Planung einer Kollegin/eines Kollegen derselben Klasse, nur lesen
@@ -665,6 +666,11 @@ def api_planung(h, con, daten):
         if kid:
             gid = h.abfrage("gruppe")
             antwort["plan"] = planung.plan(con, lid, kid, _ganzzahl(gid) if gid else None, sid)
+            if antwort["lesend"]:
+                p = antwort["plan"]
+                antwort["unterricht"] = kollegium.unterricht(
+                    con, lid, kid, _ganzzahl(gid) if gid else None, datetime.date.fromisoformat(p["schuljahr"]["beginn"]),
+                    datetime.date.fromisoformat(p["schuljahr"]["ende"]), p["bloecke"], p["themen"])
             if not antwort["lesend"]:
                 antwort["kollegium"] = kollegium.klasse_uebersicht(con, k["id"], kid)
     h.antwort(200, antwort)

@@ -168,3 +168,30 @@ class KollegiumUeberDenServer(MitKollegin):
         status, w, _ = self.anfrage("GET", "/api/woche?montag=2026-11-16", wer="gob")
         self.assertEqual([(t["titel"], t["von_kuerzel"]) for t in w["termine"] if t.get("fremd")], [("Praktikum", "rei")])
         self.assertEqual([k["name"] for k in w["teilen_klassen"]], ["BSMT 24a", "BSMT 25a"])
+
+    def test_unterricht_in_der_lesenden_planung(self):
+        """Unterrichtsinhalt sieht die Kollegin immer, Notizen nur mit Haken; ohne Freigabe gar nichts."""
+        with db.transaktion(self.con):
+            planung.eintrag_setzen(self.con, self.lid, "2026-11-16", "07:45", {"inhalt": "SPS Grundlagen", "notizen": "Ali fehlt"})
+            planung.eintrag_setzen(self.con, self.lid, "2026-11-20", "07:45", {"notizen": "Gruppe 2 hängt hinterher", "notizen_geteilt": True})
+        self.assertEqual(planung.stunde(self.con, self.lid, "2026-11-16", "07:45")["kollegium"], [])   # Teilen noch aus
+        self.anfrage("POST", "/api/admin/kollegium", {"an": True}, wer="gob")
+        s = planung.stunde(self.con, self.lid, "2026-11-16", "07:45")
+        self.assertEqual((s["kollegium"], s["eintrag"]["notizen_geteilt"]), (["Kollege Reiter"], False))
+        url = "/api/planung?schuljahr=%d&klasse=%d&lehrkraft=%d" % (self.sj, self.k24, self.lid)
+        status, a, _ = self.anfrage("GET", url, wer="rei")
+        self.assertEqual(status, 200, a)
+        self.assertEqual([(e["datum"], e["thema"], e["inhalt"], e["notizen"]) for e in a["unterricht"]],
+                         [("2026-11-20", "SPS", "", "Gruppe 2 hängt hinterher"), ("2026-11-16", "SPS", "SPS Grundlagen", "")])
+        self.assertNotIn("Ali fehlt", json.dumps(a, ensure_ascii=False))
+        # nur den Inhalt aendern: der Haken bleibt; Haken weg: Notiz weg, die Stunde ohne Inhalt ganz
+        with db.transaktion(self.con):
+            planung.eintrag_setzen(self.con, self.lid, "2026-11-20", "07:45", {"inhalt": "Wiederholung"})
+        self.assertTrue(planung.stunde(self.con, self.lid, "2026-11-20", "07:45")["eintrag"]["notizen_geteilt"])
+        with db.transaktion(self.con):
+            planung.eintrag_setzen(self.con, self.lid, "2026-11-20", "07:45", {"inhalt": "", "notizen_geteilt": False})
+        status, a, _ = self.anfrage("GET", url, wer="rei")
+        self.assertEqual([e["datum"] for e in a["unterricht"]], ["2026-11-16"])
+        # in der eigenen Planung gibt es keine Liste "Unterricht von"
+        status, a, _ = self.anfrage("GET", "/api/planung?schuljahr=%d&klasse=%d" % (self.sj, self.k24), wer="gob")
+        self.assertIsNone(a["unterricht"])

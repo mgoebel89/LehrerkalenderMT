@@ -39,7 +39,10 @@ const Stunde = (() => {
       const notizen = el('textarea', { rows: 4, maxlength: 10000, placeholder: 'Deine Notizen zu dieser Stunde (nur für dich).', 'aria-label': 'Notizen' });
       inhalt.value = e.inhalt || S.vorschlag || '';
       notizen.value = e.notizen;
-      F = { inhalt, notizen, stand: { inhalt: e.inhalt, notizen: e.notizen } };
+      // Stufe E: Notizen auf Wunsch fuer die anderen Lehrkraefte der Klasse sichtbar (nur bei eingeschaltetem Teilen)
+      const geteilt = S.kollegium && S.kollegium.length ? el('input', { type: 'checkbox', checked: e.notizen_geteilt ? true : null }) : null;
+      F = { inhalt, notizen, geteilt, stand: { inhalt: e.inhalt, notizen: e.notizen, geteilt: e.notizen_geteilt } };
+      if (geteilt) geteilt.addEventListener('change', () => textSpeichern());
       for (const t of [inhalt, notizen]) {
         t.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(textSpeichern, 900); status.textContent = ''; });
         t.addEventListener('blur', () => textSpeichern());
@@ -51,12 +54,15 @@ const Stunde = (() => {
       const f = F, neu = { inhalt: f.inhalt.value.trim(), notizen: f.notizen.value.trim() };
       // ein unveraenderter Pruefungs-Vorschlag wird erst gespeichert, wenn er geaendert oder kopiert wird
       const inhaltNeu = neu.inhalt === (S.vorschlag || '') && !f.stand.inhalt && !f.kopiert ? '' : neu.inhalt;
-      if (inhaltNeu === f.stand.inhalt && neu.notizen === f.stand.notizen) return laufend;
+      const geteiltNeu = f.geteilt ? f.geteilt.checked : f.stand.geteilt;
+      if (inhaltNeu === f.stand.inhalt && neu.notizen === f.stand.notizen &&
+          (geteiltNeu === f.stand.geteilt || (!inhaltNeu && !neu.notizen))) return laufend;
       const ort = { datum: S.datum, beginn: S.beginn };
+      if (f.geteilt) ort.notizen_geteilt = geteiltNeu;
       laufend = laufend.then(async () => {
         try {
           const r = await L.api('POST', '/api/stunde/eintrag', Object.assign({}, ort, { inhalt: inhaltNeu, notizen: neu.notizen }));
-          f.stand = { inhalt: r.eintrag.inhalt, notizen: r.eintrag.notizen };
+          f.stand = { inhalt: r.eintrag.inhalt, notizen: r.eintrag.notizen, geteilt: r.eintrag.notizen_geteilt };
           if (F === f) { S.eintrag = r.eintrag; status.textContent = 'gespeichert ' + new Date().toTimeString().slice(0, 5); }
         } catch (e) { L.meldung(e.message, true); }
       });
@@ -173,11 +179,13 @@ const Stunde = (() => {
           S.andere_gruppe.map(a => el('button', { type: 'button', class: 'klein', title: a.gruppe + ' ' + a.beginn + ': ' + a.inhalt, onclick: () => uebernehmen(a.inhalt) },
             L.symbol('rueck'), 'Von ' + a.gruppe + ' übernehmen'))),
         S.vorschlag && !S.eintrag.inhalt ? el('p', { class: 'leise klein', text: 'Vorschlag zur Prüfung: gespeichert wird er, sobald du ihn änderst oder kopierst.' }) : null,
+        F.geteilt ? el('p', { class: 'leise klein' }, L.symbol('klassen'), ' Sichtbar für ' + S.kollegium.join(', ') + ' in deiner Planung (Teilen im Kollegium).') : null,
       ]));
       teile.push(abschnitt('formular', 'Notizen', null, [
         v && v.notizen ? el('div', { class: 'stapel', style: 'gap:4px' }, el('span', { class: 'etikett', text: 'aus der Vorstunde · ' + vWann }),
           el('p', { class: 'klein hinweis-text', text: v.notizen })) : null,
         F.notizen,
+        F.geteilt ? el('label', { class: 'haken' }, F.geteilt, 'Auch für ' + S.kollegium.join(', ') + ' sichtbar (z. B. für eine Vertretung)') : null,
       ]));
       // Merker
       const neuerMerker = el('input', { maxlength: 200, placeholder: 'z. B. Aufgabe 4 besprechen', 'aria-label': 'Merker für die nächste Stunde' });

@@ -211,6 +211,7 @@ const Planung = (() => {
       teile.push(el('div', { class: 'leer' }, 'Noch keine Themen. Übernimm Lernsituationen aus der ',
         el('a', { href: '#planung-bibliothek', text: 'Bibliothek' }), ' oder lege mit „+ Thema“ eines an. Lernsituationen entwickelst du danach in den Themen.'));
     }
+    if (P.lesend) teile.push(unterrichtKarte());
     const tabelle = wahl.ansicht === 'schuljahr' ? rasterSchuljahr(p) : wahl.ansicht === 'tage' ? rasterTage(p) : rasterBloecke(p);
     const scroll = el('div', { class: 'r-scroll' }, tabelle);
     const alt = ort.querySelector('.r-scroll');
@@ -435,7 +436,27 @@ const Planung = (() => {
         el('span', { class: 'mono klein', text: tagKurz(t.datum) + (t.bis ? '–' + tagKurz(t.bis) : '') + (t.beginn ? ' ' + t.beginn : '') }),
         el('span', { text: t.titel }), el('span', { class: 'leise klein', text: t.fremd ? 'von ' + t.von_name : 'von dir' }))))
         : el('p', { class: 'leise klein', text: 'Keine.' }),
-      el('p', { class: 'leise klein', text: 'Einen Termin teilst du im Wochenplan: Termin mit dieser Klasse und dem Haken „für die Lehrkräfte der Klasse sichtbar“. Schülerlisten, Noten und Notizen bleiben immer privat.' }));
+      el('p', { class: 'leise klein', text: 'Einen Termin teilst du im Wochenplan: Termin mit dieser Klasse und dem Haken „für die Lehrkräfte der Klasse sichtbar“. ' +
+        'Den Unterrichtsinhalt deiner Stunden sehen sie in deiner Planung, Notizen nur mit dem Haken in der Stunde. Schülerlisten und Noten bleiben immer privat.' }));
+  }
+
+  // Stufe E, lesende Planung: was in den gehaltenen Stunden dran war (Unterrichtsinhalt, geteilte Notizen), neueste zuerst
+  function unterrichtKarte() {
+    const u = P.unterricht || [];
+    const zeile = e => el('div', { class: 'stapel unterricht-eintrag', style: 'gap:2px' },
+      el('div', { class: 'zeile' },
+        el('span', { class: 'mono klein', text: tagKurz(e.datum) + ' ' + e.beginn + (e.gruppe ? ' · ' + e.gruppe : '') }),
+        e.thema ? el('span', { class: 'leise klein', text: e.thema }) : null),
+      e.inhalt ? el('p', { class: 'vorzeilen', text: e.inhalt }) : null,
+      e.notizen ? el('p', { class: 'klein hinweis-text vorzeilen' }, el('b', { text: 'Notiz: ' }), e.notizen) : null);
+    const erste = u.slice(0, 3), rest = u.slice(3);
+    return el('div', { class: 'karte stapel kollegium' },
+      el('h3', {}, L.symbol('stift'), ' Unterricht von ' + P.lesend.name),
+      u.length ? el('div', { class: 'stapel', style: 'gap:10px' }, erste.map(zeile)) :
+        el('p', { class: 'leise klein', text: 'Noch keine Unterrichtsinhalte eingetragen.' }),
+      rest.length ? el('details', {}, el('summary', { class: 'klein', text: 'Ältere Stunden (' + rest.length + ')' }),
+        el('div', { class: 'stapel', style: 'gap:10px;margin-top:8px' }, rest.map(zeile))) : null,
+      el('p', { class: 'leise klein', text: 'Unterrichtsinhalt wie fürs Klassenbuch. Notizen nur, wenn ' + P.lesend.name + ' sie in der Stunde fürs Kollegium freigegeben hat.' }));
   }
 
   function montagVon(iso) {

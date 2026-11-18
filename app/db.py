@@ -589,6 +589,11 @@ MIGRATIONEN = [
     """
     ALTER TABLE termin ADD COLUMN geteilt INTEGER NOT NULL DEFAULT 0
     """,
+    # 21: Stufe E: Notizen einer Stunde auf Wunsch fuer die Lehrkraefte der Klasse sichtbar (der Unterrichtsinhalt ist es
+    #     bei eingeschaltetem Teilen immer, er steht ohnehin im Klassenbuch)
+    """
+    ALTER TABLE stunde_eintrag ADD COLUMN notizen_geteilt INTEGER NOT NULL DEFAULT 0
+    """,
 ]
 
 
