@@ -248,6 +248,68 @@ const L = {
     return { reiter, unter };
   },
 
+  // Kontextmenue (Gestaltung wie im Wochenplan): punkte = [[symbol, text, aktion, klasse?], ...]. ev: Maus- bzw.
+  // Tastaturereignis; ohne Mausposition erscheint es unter dem Element. Schliesst bei Klick daneben, Escape, Scrollen.
+  menue(ev, titel, punkte) {
+    L.menueZu();
+    const m = L.el('div', { class: 'wp-menue', id: 'lk-menue', role: 'menu', 'aria-label': titel },
+      titel ? L.el('div', { class: 'mk', text: titel }) : null,
+      punkte.filter(Boolean).map(([sym, text, aktion, klasse]) => L.el('button', { type: 'button', role: 'menuitem', class: klasse || null,
+        onclick: () => { L.menueZu(); aktion(); } }, L.symbol(sym), text)));
+    document.body.appendChild(m);
+    let x = ev.pageX, y = ev.pageY;
+    if (!x && !y && ev.currentTarget && ev.currentTarget.getBoundingClientRect) {
+      const r = ev.currentTarget.getBoundingClientRect();
+      x = r.left + scrollX + 24; y = r.bottom + scrollY;
+    }
+    m.style.left = Math.max(8, Math.min(x, document.documentElement.clientWidth + scrollX - m.offsetWidth - 8)) + 'px';
+    m.style.top = Math.max(8, Math.min(y + 4, scrollY + innerHeight - m.offsetHeight - 8)) + 'px';
+    const knoepfe = [...m.querySelectorAll('button')];
+    m.addEventListener('keydown', e => {
+      const i = knoepfe.indexOf(document.activeElement);
+      if (e.key === 'Escape') { e.preventDefault(); L.menueZu(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); knoepfe[(i + 1) % knoepfe.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); knoepfe[(i - 1 + knoepfe.length) % knoepfe.length].focus(); }
+    });
+    if (knoepfe[0]) knoepfe[0].focus();
+    setTimeout(() => {
+      L._menueWeg = e => { if (!e.target.closest || !e.target.closest('#lk-menue')) L.menueZu(); };
+      document.addEventListener('pointerdown', L._menueWeg, true);
+      window.addEventListener('scroll', L.menueZu, { once: true, passive: true });
+    }, 0);
+  },
+
+  menueZu() {
+    const m = document.getElementById('lk-menue');
+    if (m) m.remove();
+    if (L._menueWeg) { document.removeEventListener('pointerdown', L._menueWeg, true); L._menueWeg = null; }
+  },
+
+  // Kontextmenue an einem Element: Rechtsklick, langes Antippen (Tablet/Handy) und Menuetaste bzw. Umschalt+F10.
+  // Nach einem langen Antippen wird der folgende Klick (z. B. "Verlauf oeffnen") verschluckt.
+  kontext(element, oeffnen) {
+    element.addEventListener('contextmenu', ev => { ev.preventDefault(); oeffnen(ev); });
+    element.addEventListener('keydown', ev => {
+      if (ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey)) { ev.preventDefault(); oeffnen(ev); }
+    });
+    let timer = null, start = null;
+    element.addEventListener('pointerdown', ev => {
+      if (ev.pointerType !== 'touch') return;
+      start = [ev.clientX, ev.clientY];
+      timer = setTimeout(() => {
+        timer = null;
+        element.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); }, { capture: true, once: true });
+        oeffnen({ pageX: start[0] + scrollX, pageY: start[1] + scrollY, currentTarget: element, preventDefault() {} });
+      }, 550);
+    });
+    const abbrechen = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    element.addEventListener('pointerup', abbrechen);
+    element.addEventListener('pointercancel', abbrechen);
+    element.addEventListener('pointermove', ev => { if (timer && start && Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) > 10) abbrechen(); });
+    element.classList.add('mit-kontext');
+    return element;
+  },
+
   feld(beschriftung, eingabe, hilfe) {
     return L.el('label', { class: 'feld' }, beschriftung, eingabe, hilfe ? L.el('span', { class: 'hilfe', text: hilfe }) : null);
   },

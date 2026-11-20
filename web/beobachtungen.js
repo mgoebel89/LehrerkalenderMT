@@ -58,6 +58,26 @@ const Beobachtungen = (() => {
       e.stunde_datum ? el('span', { class: 'bo-quelle' }, L.symbol('kalender'), 'aus der Stunde ' + L.tag(e.stunde_datum) + (e.stunde_text ? ' · ' + e.stunde_text : '')) : null);
   }
 
+  // Schnell notieren (Rechtsklick in der Schuelerliste): kleines Fenster, Datum heute; Rueckgabe true bei Erfolg
+  async function schnell(s, nachher) {
+    const datum = el('input', { type: 'date', value: L.heute() });
+    const kat = kategorieWahl('');
+    const tend = tendenzWahl('neutral');
+    const text = el('textarea', { rows: 3, maxlength: 4000, placeholder: 'Was ist dir aufgefallen?' });
+    const r = await L.dialog({
+      titel: 'Beobachtung · ' + s.name, knopf: 'Notieren',
+      inhalt: el('div', { class: 'felder' }, L.feld('Beobachtung', text),
+        el('div', { class: 'felder zwei' }, L.feld('Kategorie (freiwillig)', kat), L.feld('Datum', datum)),
+        el('div', { class: 'stapel', style: 'gap:4px' }, el('span', { class: 'leise klein', style: 'font-weight:600', text: 'Tendenz' }), tend.teil),
+        el('p', { class: 'leise klein', text: PRIVAT })),
+      speichern: () => L.api('POST', '/api/beobachtung', { schueler_ids: [s.id], datum: datum.value, kategorie: kat.value, tendenz: tend.wert(), text: text.value }),
+    });
+    if (!r) return false;
+    L.meldung('Notiert.');
+    if (nachher) await nachher();
+    return true;
+  }
+
   // --- Verlauf eines Schuelers ---
 
   async function verlaufZeigen(ort, sid) {
@@ -234,5 +254,5 @@ const Beobachtungen = (() => {
     return karte;
   }
 
-  return { verlaufZeigen, uebersichtZeigen, stundeAbschnitt, aufraeumenHinweis, zaehler, zustand };
+  return { verlaufZeigen, uebersichtZeigen, stundeAbschnitt, aufraeumenHinweis, zaehler, zustand, schnell };
 })();

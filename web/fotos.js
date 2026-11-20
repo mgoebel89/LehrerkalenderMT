@@ -130,10 +130,13 @@ const Fotos = (() => {
         } }, 'Foto entfernen')) : null));
   }
 
-  // Fotoliste: Raster aus Karten mit Foto und Namen; waehlen(s) beim Antippen
-  function raster(schueler, waehlen) {
-    return el('div', { class: 'foto-raster' }, schueler.map(s => el('button', { type: 'button', class: 'foto-karte' + (s.aktiv ? '' : ' aus'),
-      onclick: () => waehlen(s) }, gross(s), el('b', { text: s.nachname }), el('span', { class: 'leise klein', text: s.vorname || '' }))));
+  // Fotoliste: Raster aus Karten mit Foto und Namen; waehlen(s) beim Antippen, menue(ev, s) per Rechtsklick/lange tippen
+  function raster(schueler, waehlen, menue) {
+    return el('div', { class: 'foto-raster' }, schueler.map(s => {
+      const k = el('button', { type: 'button', class: 'foto-karte' + (s.aktiv ? '' : ' aus'),
+        onclick: () => waehlen(s) }, gross(s), el('b', { text: s.nachname }), el('span', { class: 'leise klein', text: s.vorname || '' }));
+      return menue ? L.kontext(k, ev => menue(ev, s)) : k;
+    }));
   }
 
   return { avatar, gross, mitName, aufnehmen, feld, raster };
