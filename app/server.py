@@ -21,7 +21,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, formulare, grunddaten, kollegium, konten, moodle, ub, notenschluessel, paperless, planung, pruefungen, qr, schuelerliste, schule, stundenplan, totp, updates, vpn, wiederherstellung
+from . import VERSION, abos, db, exporte, formulare, fotos, grunddaten, kollegium, konten, moodle, ub, notenschluessel, paperless, planung, pruefungen, qr, schuelerliste, schule, stundenplan, totp, updates, vpn, wiederherstellung
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -1030,6 +1030,37 @@ def api_schueler_zusammenfuehren(h, con, daten):
     h.antwort(200, {"ok": True})
 
 
+def api_schueler_foto(h, con, daten, sid):
+    """Foto eines Schuelers (JPEG). Die Adresse traegt ?v=<Stand>, daher darf der Browser es lange behalten."""
+    k = h.konto(con)
+    bild = fotos.holen(con, k["id"], _ganzzahl(sid))
+    if not bild:
+        raise Fehler(404, "Kein Foto.")
+    h.antwort(200, bild, "image/jpeg", extra=[("Cache-Control", "private, max-age=604800")], cache=True)
+
+
+def api_schueler_foto_setzen(h, con, daten, sid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        fotos.setzen(con, k["id"], _ganzzahl(sid), daten.get("bild"))
+        db.protokoll(con, k["kuerzel"], "schueler_foto", schueler_id=int(sid))
+    h.antwort(200, {"ok": True})
+
+
+def api_schueler_foto_loeschen(h, con, daten, sid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        fotos.loeschen(con, k["id"], _ganzzahl(sid))
+        db.protokoll(con, k["kuerzel"], "schueler_foto_geloescht", schueler_id=int(sid))
+    h.antwort(200, {"ok": True})
+
+
+def api_fotoliste_pdf(h, con, daten):
+    k = h.konto(con)
+    inhalt, name = fotos.fotoliste_pdf(con, k["id"], _ganzzahl(h.abfrage("klasse")), k["name"])
+    h.herunterladen(inhalt, "application/pdf", name)
+
+
 def api_schueler_verschieden(h, con, daten):
     k = h.konto(con)
     with db.transaktion(con):
@@ -1526,6 +1557,10 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/schueler/moodle", api_moodle_csv),
     ("POST", r"/api/schueler/zusammenfuehren", api_schueler_zusammenfuehren),
     ("POST", r"/api/schueler/verschieden", api_schueler_verschieden),
+    ("GET", r"/api/schueler/" + ID + "/foto", api_schueler_foto),
+    ("POST", r"/api/schueler/" + ID + "/foto", api_schueler_foto_setzen),
+    ("POST", r"/api/schueler/" + ID + "/foto/loeschen", api_schueler_foto_loeschen),
+    ("GET", r"/api/schueler/fotoliste\.pdf", api_fotoliste_pdf),
     ("POST", r"/api/vorlage", _pr_schritt(lambda con, k, d, _: pruefungen.vorlage_speichern(con, k["id"], d))),
     ("POST", r"/api/vorlage/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.vorlage_speichern(con, k["id"], d, i))),
     ("POST", r"/api/vorlage/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.vorlage_loeschen(con, k["id"], i))),

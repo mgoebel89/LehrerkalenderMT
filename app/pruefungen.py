@@ -924,7 +924,7 @@ def ergebnis(con, lid, pid):
             for bereich in p["struktur"]["bereiche"]:
                 ks = [k for k in bereich["kriterien"] if k["typ"] == "check"]
                 versuche.append({"erledigt": sum(1 for k in ks if werte.get(k["key"])), "gesamt": len(ks)})
-        zeilen.append({"id": s["id"], "name": s["name"], "gruppe": s["gruppe"], "aktiv": s["aktiv"], "werte": werte, "fehlt": fehlt,
+        zeilen.append({"id": s["id"], "name": s["name"], "gruppe": s["gruppe"], "aktiv": s["aktiv"], "foto": s["foto"], "werte": werte, "fehlt": fehlt,
                        "team_id": team["id"] if team else None, "team": team["name"] if team else "", "versuche": versuche,
                        "protokoll": eintraege, "beginn": b["beginn"] if b else None, "ende": b["ende"] if b else None,
                        "dauer": _dauer(b["beginn"], b["ende"]) if b else None,

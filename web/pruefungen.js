@@ -441,7 +441,7 @@ const Pruefungen = (() => {
         return i;
       };
       const meine = [];
-      tr.appendChild(el('td', {}, el('b', { text: z.name }), z.gruppe ? el('span', { class: 'chip klein gr', text: z.gruppe }) : null,
+      tr.appendChild(el('td', {}, Fotos.mitName(z, 26), z.gruppe ? el('span', { class: 'chip klein gr', text: z.gruppe }) : null,
         z.team ? el('span', { class: 'chip klein team', text: z.team }) : null,
         z.dauer !== null && z.dauer !== undefined ? el('span', { class: 'leise klein mono', title: 'Dauer im Prüfungsmodus', text: ' ⏱ ' + mmss(z.dauer) }) : null,
         z.protokoll && z.protokoll.length ? el('span', { class: 'leise klein', title: z.protokoll.map(x => x.text + (x.stufe !== null ? ' (' + x.stufe + '/4)' : '')).join('\n'), text: ' · ' + z.protokoll.length + ' Fragen' }) : null,
@@ -494,7 +494,7 @@ const Pruefungen = (() => {
       p.teams.length ? el('div', { class: 'raster' }, p.teams.map(t => el('div', { class: 'karte stapel', style: 'gap:6px' },
         el('div', { class: 'zeile' }, el('h3', { text: t.name }), el('span', { class: 'leise klein', text: t.mitglieder.length + ' Schüler' }),
           !fertig ? el('span', { class: 'rechts' }, el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Team bearbeiten', onclick: () => teamDialog(t) }, L.symbol('stift'))) : null),
-        el('div', { class: 'zeile' }, t.mitglieder.map(id => el('span', { class: 'chip', text: name(id) }))))))
+        el('div', { class: 'zeile' }, t.mitglieder.map(id => el('span', { class: 'chip', style: 'padding-left:3px' }, Fotos.avatar(E.schueler.find(x => x.id === id), 20), name(id)))))))
         : el('div', { class: 'leer', text: 'Noch keine Teams. Lege sie an oder lass sie zufällig bilden. Ohne Team wird jeder einzeln bewertet.' }),
       ohne.length && p.teams.length ? el('p', { class: 'leise klein', text: 'Ohne Team (wird einzeln bewertet): ' + ohne.map(z => z.name).join(' · ') }) : null);
   }
@@ -539,7 +539,7 @@ const Pruefungen = (() => {
           el('span', { class: 'leise klein', text: ' Team-Haken gelten für alle ' + t.mitglieder.length }))));
       }
       teamVorher = z.team_id;
-      const tr = el('tr', { class: z.aktiv ? null : 'aus' }, el('td', {}, el('b', { text: z.name }), z.gruppe ? el('span', { class: 'chip klein gr', text: z.gruppe }) : null));
+      const tr = el('tr', { class: z.aktiv ? null : 'aus' }, el('td', {}, Fotos.mitName(z, 26), z.gruppe ? el('span', { class: 'chip klein gr', text: z.gruppe }) : null));
       versuche.forEach((v, i) => {
         const f = z.versuche[i];
         const art = f.erledigt === f.gesamt ? 'fertig' : f.erledigt ? 'teil' : 'offen';
@@ -848,7 +848,7 @@ const Pruefungen = (() => {
         el('button', { type: 'button', onclick: pmSchliessen }, L.symbol('zu'), 'Schließen')));
     const listeEl = el('div', { class: 'pm-liste' }, liste.map(e => el('button', { type: 'button',
       class: 'pm-eintrag ' + e.zustand + (e.id === PM.aktiv ? ' an' : ''), onclick: () => { PM.aktiv = e.id; PM.mitglied = e.mitglieder[0].id; pmZeichnen(); } },
-      el('span', { class: 'pm-name' }, e.team ? el('span', { class: 'chip klein team', text: e.name }) : el('b', { text: e.name }),
+      el('span', { class: 'pm-name' }, e.team ? el('span', { class: 'chip klein team', text: e.name }) : Fotos.mitName(e.mitglieder[0], 32),
         e.team ? el('span', { class: 'leise klein', text: ' ' + e.mitglieder.map(z => z.name.split(',')[0]).join(', ') }) : null),
       el('span', { class: 'pm-stand klein' }, e.zustand === 'fertig' && e.mitglieder[0].dauer !== null ? '✓ ' + mmss(e.mitglieder[0].dauer)
         : e.zustand === 'laeuft' ? '● läuft' : e.zustand === 'fehlt' ? 'fehlt' : '',
@@ -885,7 +885,7 @@ const Pruefungen = (() => {
       z0.ende ? el('span', { class: 'chip gruen', text: 'fertig nach ' + mmss(z0.dauer || 0) }) : null,
       z0.beginn || z0.ende ? el('button', { type: 'button', class: 'leicht klein', onclick: () => pmLauf(e, 'zuruecksetzen') }, L.symbol('undo'), 'Zeit zurücksetzen') : null) : null;
     const mitglieder = e.mitglieder.length > 1 ? el('div', { class: 'segment', role: 'group', 'aria-label': 'Wer wird bewertet' }, e.mitglieder.map(m =>
-      el('button', { type: 'button', class: m.id === z.id ? 'an' : null, onclick: () => { PM.mitglied = m.id; pmZeichnen(); } }, m.name.split(',')[0]))) : null;
+      el('button', { type: 'button', class: m.id === z.id ? 'an' : null, onclick: () => { PM.mitglied = m.id; pmZeichnen(); } }, Fotos.avatar(m, 22), m.name.split(',')[0]))) : null;
     // Fragen: ziehen, spontan notieren, Einschaetzung je Frage
     const st = p.einstellungen;
     const spontan = el('input', { maxlength: 1000, placeholder: 'Spontane Frage notieren …', 'aria-label': 'Spontane Frage' });
@@ -907,7 +907,7 @@ const Pruefungen = (() => {
             el('b', { text: String(i) }), el('span', { class: 'leise', text: name })))))),
         !fertig ? el('div', { class: 'zeile', style: 'flex-wrap:nowrap' }, spontan, el('button', { type: 'button', onclick: notieren }, 'notieren')) : null));
     return el('div', { class: 'stapel', style: 'gap:10px' },
-      el('div', { class: 'zeile' }, el('h2', { text: e.team ? e.name : z.name }), mitglieder, z.note ? el('span', { class: 'chip blau', text: z.note.text + ' · ' + fmt(z.prozent) + ' %' }) : null),
+      el('div', { class: 'zeile' }, Fotos.gross(z, 'pm-foto'), el('h2', { text: e.team ? e.name : z.name }), mitglieder, z.note ? el('span', { class: 'chip blau', text: z.note.text + ' · ' + fmt(z.prozent) + ' %' }) : null),
       steuerung, fragenEl, pmBewertung(z));
   }
 
@@ -1090,6 +1090,7 @@ const Pruefungen = (() => {
   // --- Schuelerlisten: eine gemeinsame Liste je Klasse fuer alle Lehrkraefte der Klasse (0.24.0) ---
 
   let listeKlasse = null;
+  let listeAnsicht = 'liste';                    // 'liste' oder 'fotos'
 
   async function schuelerZeigen() {
     const K = (await L.api('GET', '/api/schueler/klassen')).klassen;
@@ -1114,18 +1115,24 @@ const Pruefungen = (() => {
       datei.value = '';
     } });
     const wer = S.lehrkraefte.length ? 'gemeinsam mit ' + S.lehrkraefte.join(', ') : 'gemeinsame Liste der Lehrkräfte dieser Klasse';
+    const ansicht = el('div', { class: 'segment', role: 'group', 'aria-label': 'Ansicht' },
+      [['liste', 'Liste', 'klassen'], ['fotos', 'Fotos', 'fotos']].map(([w, t, sym]) => el('button', { type: 'button', class: listeAnsicht === w ? 'an' : null,
+        onclick: () => { listeAnsicht = w; schuelerZeigen(); } }, L.symbol(sym), t)));
+    const oeffnen = s => schuelerDialog(s, gruppen);
     L.setzen(ort,
       el('div', { class: 'zeile' }, auswahl, el('span', { class: 'leise klein', text: S.schueler.filter(s => s.aktiv).length + ' Schüler · ' + wer }),
-        el('span', { class: 'rechts' }, datei,
+        el('span', { class: 'rechts' }, ansicht, datei,
+          el('button', { type: 'button', title: 'Alle Schüler der Klasse mit Foto zum Ausdrucken', onclick: () => L.ansehen('/api/schueler/fotoliste.pdf?klasse=' + listeKlasse).catch(e => L.meldung(e.message, true)) }, L.symbol('formular'), 'Fotoliste'),
           el('button', { type: 'button', onclick: () => datei.click() }, L.symbol('hoch'), 'Moodle-CSV einlesen'),
           el('button', { type: 'button', class: 'haupt', onclick: () => schuelerDialog(null, gruppen) }, L.symbol('plus'), 'Schüler'))),
       el('p', { class: 'leise klein', text: 'Die Liste ist für alle Lehrkräfte dieser Klasse dieselbe: Namen, E-Mail und „in der Klasse“ ändert jede und jeder für alle. Deine Gruppeneinteilung, Prüfungen und Noten bleiben privat. Moodle: Kurs → Teilnehmer/innen → alle auswählen → „Download als CSV“; beim Einlesen kommen nur neue Schüler dazu, vorhandene Namen werden nie geändert.' }),
       S.doppelungen.length ? doppelungenKarte(S.doppelungen) : null,
+      S.schueler.length && listeAnsicht === 'fotos' ? Fotos.raster(S.schueler, oeffnen) :
       S.schueler.length ? el('div', { class: 'karte rollbar' }, el('table', { class: 'liste' },
         el('thead', {}, el('tr', {}, ['Name', 'E-Mail', gruppen.length ? 'Meine Gruppe' : '', ''].map(t => el('th', { text: t })))),
         el('tbody', {}, S.schueler.map(s => el('tr', { class: 'klickbar' + (s.aktiv ? '' : ' aus'), tabindex: '0', onclick: () => schuelerDialog(s, gruppen),
           onkeydown: ev => { if (ev.key === 'Enter') schuelerDialog(s, gruppen); } },
-          el('td', {}, el('b', { text: s.name })), el('td', { class: 'leise klein', text: s.email || '' }),
+          el('td', {}, Fotos.mitName(s, 30)), el('td', { class: 'leise klein', text: s.email || '' }),
           el('td', {}, s.gruppe ? el('span', { class: 'chip gr', text: s.gruppe }) : null),
           el('td', {}, s.aktiv ? null : el('span', { class: 'chip', text: 'nicht mehr in der Klasse' }))))))) :
         el('div', { class: 'leer', text: 'Noch keine Schüler. Lies die Teilnehmerliste aus Moodle ein oder lege Schüler von Hand an.' }));
@@ -1157,9 +1164,12 @@ const Pruefungen = (() => {
     const email = el('input', { maxlength: 120, value: s ? s.email : '', type: 'email' });
     const gruppe = el('select', {}, el('option', { value: '', text: '– keine –' }), gruppen.map(g => el('option', { value: g.id, text: g.name, selected: s && s.gruppe_id === g.id ? true : null })));
     const aktiv = el('input', { type: 'checkbox', checked: !s || s.aktiv ? true : null });
+    // nach einer Foto-Aenderung: Fenster schliessen, Liste neu laden und den Schueler mit neuem Foto wieder oeffnen
+    let fotoNeu = false;
+    const fotoFeld = s ? Fotos.feld(s, () => { fotoNeu = true; fotoFeld.closest('dialog').dispatchEvent(new Event('cancel')); }) : null;
     const r = await L.dialog({
       titel: s ? s.name : 'Neuer Schüler',
-      inhalt: el('div', { class: 'felder' }, el('div', { class: 'felder zwei' }, L.feld('Nachname', nachname), L.feld('Vorname', vorname)),
+      inhalt: el('div', { class: 'felder' }, fotoFeld, el('div', { class: 'felder zwei' }, L.feld('Nachname', nachname), L.feld('Vorname', vorname)),
         L.feld('E-Mail', email, 'freiwillig, hilft beim Abgleich mit Moodle'), gruppen.length ? L.feld('Meine Gruppe', gruppe, 'nur deine Einteilung, die anderen Lehrkräfte teilen selbst ein') : null,
         s ? el('label', { class: 'haken' }, aktiv, 'in der Klasse (sonst nur noch in alten Prüfungen sichtbar – gilt für alle Lehrkräfte der Klasse)') : null,
         s && s.angelegt_von ? el('p', { class: 'leise klein', text: 'Angelegt von ' + s.angelegt_von + '.' }) : null,
@@ -1173,6 +1183,12 @@ const Pruefungen = (() => {
         email: email.value, aktiv: aktiv.checked }, gruppen.length ? { gruppe_id: gruppe.value || null } : {})),
     });
     if (r) schuelerZeigen();
+    if (fotoNeu) {
+      const S = await L.api('GET', '/api/schueler?klasse=' + listeKlasse);
+      await schuelerZeigen();
+      const neu = S.schueler.find(x => x.id === s.id);
+      if (neu) schuelerDialog(neu, gruppen);
+    }
   }
 
   // --- Vorlagen (Feedbackbogen) ---
