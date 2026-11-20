@@ -1087,21 +1087,22 @@ const Pruefungen = (() => {
     try { E = await L.api('POST', '/api/pruefung/' + E.pruefung.id + '/oeffnen', {}); detailZeichnen(); } catch (e) { L.meldung(e.message, true); }
   }
 
-  // --- Schuelerlisten ---
+  // --- Schuelerlisten: eine gemeinsame Liste je Klasse fuer alle Lehrkraefte der Klasse (0.24.0) ---
 
   let listeKlasse = null;
 
   async function schuelerZeigen() {
-    const P = await strangLaden();
-    const meine = [...new Map(P.straenge.map(s => [s.klasse_id, s.klasse])).entries()];
-    const alle = G.klassen.filter(k => k.aktiv);
-    if (!listeKlasse) listeKlasse = wahl.klasse || (meine[0] && meine[0][0]) || (alle[0] && alle[0].id);
-    if (!listeKlasse) return L.setzen(ort, el('div', { class: 'leer', text: 'Es gibt noch keine Klassen.' }));
+    const K = (await L.api('GET', '/api/schueler/klassen')).klassen;
+    if (!K.length) return L.setzen(ort, el('div', { class: 'leer', text: 'Du hast noch keine Klassen. Trag sie zuerst in deinen Stundenplan ein (Einstellungen › Stundenplan); dann siehst du hier die Schülerliste der Klasse.' }));
+    const meine = K.filter(k => k.meine);
+    const weitere = K.filter(k => !k.meine);
+    if (!listeKlasse || !K.some(k => k.id === listeKlasse)) listeKlasse = (K.find(k => k.id === wahl.klasse) || meine[0] || K[0]).id;
     const [S, SP] = await Promise.all([L.api('GET', '/api/schueler?klasse=' + listeKlasse), L.api('GET', '/api/stundenplan')]);
     const gruppen = SP.gruppen.filter(g => g.klasse_id === listeKlasse);
+    const option = k => el('option', { value: k.id, text: k.name + (k.aktiv ? '' : ' (nicht aktiv)'), selected: k.id === listeKlasse ? true : null });
     const auswahl = el('select', { 'aria-label': 'Klasse', style: 'width:auto', onchange: () => { listeKlasse = Number(auswahl.value); schuelerZeigen(); } },
-      el('optgroup', { label: 'Meine Klassen' }, meine.map(([id, name]) => el('option', { value: id, text: name, selected: id === listeKlasse ? true : null }))),
-      el('optgroup', { label: 'Alle Klassen' }, alle.filter(k => !meine.some(([id]) => id === k.id)).map(k => el('option', { value: k.id, text: k.name, selected: k.id === listeKlasse ? true : null }))));
+      meine.length ? el('optgroup', { label: 'Meine Klassen' }, meine.map(option)) : null,
+      weitere.length ? el('optgroup', { label: meine.length ? 'Weitere Klassen' : 'Klassen' }, weitere.map(option)) : null);
     const datei = el('input', { type: 'file', accept: '.csv,text/csv', hidden: true, onchange: async () => {
       const f = datei.files[0];
       if (!f) return;
@@ -1112,20 +1113,42 @@ const Pruefungen = (() => {
       } catch (e) { L.meldung(e.message, true); }
       datei.value = '';
     } });
+    const wer = S.lehrkraefte.length ? 'gemeinsam mit ' + S.lehrkraefte.join(', ') : 'gemeinsame Liste der Lehrkräfte dieser Klasse';
     L.setzen(ort,
-      el('div', { class: 'zeile' }, auswahl, el('span', { class: 'leise klein', text: S.schueler.filter(s => s.aktiv).length + ' Schüler · nur für dich sichtbar' }),
+      el('div', { class: 'zeile' }, auswahl, el('span', { class: 'leise klein', text: S.schueler.filter(s => s.aktiv).length + ' Schüler · ' + wer }),
         el('span', { class: 'rechts' }, datei,
           el('button', { type: 'button', onclick: () => datei.click() }, L.symbol('hoch'), 'Moodle-CSV einlesen'),
           el('button', { type: 'button', class: 'haupt', onclick: () => schuelerDialog(null, gruppen) }, L.symbol('plus'), 'Schüler'))),
-      el('p', { class: 'leise klein', text: 'Moodle: Kurs → Teilnehmer/innen → alle auswählen → „Download als CSV“. Beim Einlesen kommen nur neue Schüler dazu; vorhandene Namen werden nie geändert.' }),
+      el('p', { class: 'leise klein', text: 'Die Liste ist für alle Lehrkräfte dieser Klasse dieselbe: Namen, E-Mail und „in der Klasse“ ändert jede und jeder für alle. Deine Gruppeneinteilung, Prüfungen und Noten bleiben privat. Moodle: Kurs → Teilnehmer/innen → alle auswählen → „Download als CSV“; beim Einlesen kommen nur neue Schüler dazu, vorhandene Namen werden nie geändert.' }),
+      S.doppelungen.length ? doppelungenKarte(S.doppelungen) : null,
       S.schueler.length ? el('div', { class: 'karte rollbar' }, el('table', { class: 'liste' },
-        el('thead', {}, el('tr', {}, ['Name', 'E-Mail', gruppen.length ? 'Gruppe' : '', ''].map(t => el('th', { text: t })))),
+        el('thead', {}, el('tr', {}, ['Name', 'E-Mail', gruppen.length ? 'Meine Gruppe' : '', ''].map(t => el('th', { text: t })))),
         el('tbody', {}, S.schueler.map(s => el('tr', { class: 'klickbar' + (s.aktiv ? '' : ' aus'), tabindex: '0', onclick: () => schuelerDialog(s, gruppen),
           onkeydown: ev => { if (ev.key === 'Enter') schuelerDialog(s, gruppen); } },
           el('td', {}, el('b', { text: s.name })), el('td', { class: 'leise klein', text: s.email || '' }),
           el('td', {}, s.gruppe ? el('span', { class: 'chip gr', text: s.gruppe }) : null),
           el('td', {}, s.aktiv ? null : el('span', { class: 'chip', text: 'nicht mehr in der Klasse' }))))))) :
         el('div', { class: 'leer', text: 'Noch keine Schüler. Lies die Teilnehmerliste aus Moodle ein oder lege Schüler von Hand an.' }));
+  }
+
+  // Gleicher Name oder gleiche E-Mail in der Klasse (z. B. aus den frueheren privaten Listen): zusammenfuehren oder
+  // als verschiedene Schueler bestaetigen
+  function doppelungenKarte(paare) {
+    const zeile = s => el('span', {}, el('b', { text: s.name }), el('span', { class: 'leise klein', text: ' ' + [s.email, s.angelegt_von ? 'angelegt von ' + s.angelegt_von : '', s.aktiv ? '' : 'nicht mehr in der Klasse'].filter(Boolean).join(' · ') }));
+    return el('div', { class: 'karte stapel', style: 'gap:8px;border-color:var(--gelb)' },
+      el('div', { class: 'zeile' }, L.symbol('warnung'), el('b', { text: 'Mögliche Doppelungen' }), el('span', { class: 'chip gelb', text: String(paare.length) })),
+      el('p', { class: 'leise klein', text: 'Diese Einträge sehen nach demselben Schüler aus. Beim Zusammenführen bleibt der obere mit seinem Namen; Bewertungen und Gruppen des unteren hängen danach an ihm.' }),
+      paare.map(p => el('div', { class: 'zeile', style: 'border-top:1px solid var(--linie);padding-top:8px' },
+        el('div', { class: 'stapel', style: 'gap:2px' }, zeile(p.a), zeile(p.b)),
+        el('span', { class: 'rechts' },
+          el('button', { type: 'button', class: 'klein', onclick: async () => {
+            try { await L.api('POST', '/api/schueler/zusammenfuehren', { ziel: p.a.id, quelle: p.b.id }); L.meldung('Zusammengeführt.'); schuelerZeigen(); }
+            catch (e) { L.meldung(e.message, true); }
+          } }, 'Zusammenführen'),
+          el('button', { type: 'button', class: 'leicht klein', onclick: async () => {
+            try { await L.api('POST', '/api/schueler/verschieden', { a: p.a.id, b: p.b.id }); schuelerZeigen(); }
+            catch (e) { L.meldung(e.message, true); }
+          } }, 'Sind verschiedene')))));
   }
 
   async function schuelerDialog(s, gruppen) {
@@ -1137,16 +1160,17 @@ const Pruefungen = (() => {
     const r = await L.dialog({
       titel: s ? s.name : 'Neuer Schüler',
       inhalt: el('div', { class: 'felder' }, el('div', { class: 'felder zwei' }, L.feld('Nachname', nachname), L.feld('Vorname', vorname)),
-        L.feld('E-Mail', email, 'freiwillig, hilft beim Abgleich mit Moodle'), gruppen.length ? L.feld('Gruppe', gruppe) : null,
-        s ? el('label', { class: 'haken' }, aktiv, 'in der Klasse (sonst nur noch in alten Prüfungen sichtbar)') : null,
+        L.feld('E-Mail', email, 'freiwillig, hilft beim Abgleich mit Moodle'), gruppen.length ? L.feld('Meine Gruppe', gruppe, 'nur deine Einteilung, die anderen Lehrkräfte teilen selbst ein') : null,
+        s ? el('label', { class: 'haken' }, aktiv, 'in der Klasse (sonst nur noch in alten Prüfungen sichtbar – gilt für alle Lehrkräfte der Klasse)') : null,
+        s && s.angelegt_von ? el('p', { class: 'leise klein', text: 'Angelegt von ' + s.angelegt_von + '.' }) : null,
         s ? el('div', {}, L.nebenknopf('Schüler löschen …', async () => {
           const ok = await L.dialog({ titel: s.name + ' löschen?', knopf: 'Löschen', gefaehrlich: true,
-            inhalt: el('p', { text: 'Geht nur ohne Bewertungen; sonst bitte „nicht mehr in der Klasse“.' }),
+            inhalt: el('p', { text: 'Der Schüler verschwindet für alle Lehrkräfte der Klasse. Geht nur ohne Bewertungen; sonst bitte „nicht mehr in der Klasse“.' }),
             speichern: () => L.api('POST', '/api/schueler/' + s.id + '/loeschen', {}) });
           if (ok) schuelerZeigen();
         })) : null),
-      speichern: () => L.api('POST', s ? '/api/schueler/' + s.id : '/api/schueler', { klasse_id: listeKlasse, nachname: nachname.value, vorname: vorname.value,
-        email: email.value, gruppe_id: gruppe.value || null, aktiv: aktiv.checked }),
+      speichern: () => L.api('POST', s ? '/api/schueler/' + s.id : '/api/schueler', Object.assign({ klasse_id: listeKlasse, nachname: nachname.value, vorname: vorname.value,
+        email: email.value, aktiv: aktiv.checked }, gruppen.length ? { gruppe_id: gruppe.value || null } : {})),
     });
     if (r) schuelerZeigen();
   }

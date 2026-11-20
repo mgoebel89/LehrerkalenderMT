@@ -19,15 +19,12 @@ Lehrkraft -> Konferenzschluessel des Bildungsgangs. Beim Abschliessen wird der S
 Zeitform: fester Termin (belegt als festgesetztes Thema der Planung seine Bloecke) oder Fenster mit Frist (belegt
 keine Bloecke, laeuft nebenher).
 """
-import csv
 import datetime
-import io
 import json
 import random
 import re
-import unicodedata
 
-from . import db, grunddaten, notenschluessel, stundenplan
+from . import db, grunddaten, notenschluessel, schuelerliste, stundenplan
 
 ARTEN = {"schriftlich": "schriftlich", "muendlich": "mündlich", "praktisch": "praktisch", "portfolio": "Portfolio"}
 ERFASSUNGEN = ("aufgaben", "gesamt", "bogen", "checkliste")
@@ -83,14 +80,17 @@ def _fmt(zahl, stellen=1):
     return ("%.*f" % (stellen, zahl)).replace(".", ",")
 
 
-def normalisiert(text):
-    """Namen robust vergleichen: Umlaute ausschreiben, Akzente weg, nur Buchstaben, klein."""
-    t = (text or "").lower().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss").replace("ı", "i").replace("ł", "l")
-    t = unicodedata.normalize("NFKD", t)
-    return re.sub(r"[^a-z]", "", "".join(c for c in t if not unicodedata.combining(c)))
+normalisiert = schuelerliste.normalisiert
 
 
-# --- Schuelerlisten ---
+# --- Schuelerlisten: gemeinsam je Klasse (app/schuelerliste.py); hier nur mit den Fehlern der Pruefungen ---
+
+def _sl(funktion, *args):
+    try:
+        return funktion(*args)
+    except schuelerliste.SchuelerFehler as f:
+        raise PruefungFehler(str(f))
+
 
 def _klasse(con, kid):
     if kid is None or con.execute("SELECT 1 FROM klasse WHERE id = ?", (kid,)).fetchone() is None:
@@ -99,97 +99,23 @@ def _klasse(con, kid):
 
 
 def schueler(con, lid, kid, nur_aktive=False):
-    zeilen = con.execute("SELECT s.*, g.name AS gruppe FROM schueler s LEFT JOIN gruppe g ON g.id = s.gruppe_id "
-                         "WHERE s.lehrkraft_id = ? AND s.klasse_id = ?" + (" AND s.aktiv = 1" if nur_aktive else ""), (lid, kid)).fetchall()
-    liste = [{"id": z["id"], "nachname": z["nachname"], "vorname": z["vorname"], "email": z["email"], "gruppe_id": z["gruppe_id"],
-              "gruppe": z["gruppe"], "aktiv": bool(z["aktiv"]), "name": z["nachname"] + (", " + z["vorname"] if z["vorname"] else "")}
-             for z in zeilen]
-    liste.sort(key=lambda s: (not s["aktiv"], normalisiert(s["nachname"]), normalisiert(s["vorname"])))
-    return liste
+    return _sl(schuelerliste.liste, con, lid, kid, nur_aktive)
 
 
 def _schueler_zeile(con, lid, sid):
-    z = con.execute("SELECT * FROM schueler WHERE id = ? AND lehrkraft_id = ?", (sid, lid)).fetchone()
-    if z is None:
-        raise PruefungFehler("Diesen Schüler gibt es nicht.")
-    return z
+    return _sl(schuelerliste.zeile, con, lid, sid)
 
 
 def schueler_speichern(con, lid, daten, sid=None):
-    if sid is None:
-        kid = _klasse(con, _id(daten.get("klasse_id")))
-    else:
-        kid = _schueler_zeile(con, lid, sid)["klasse_id"]
-    nachname = _text(daten.get("nachname"), "den Nachnamen", 80)
-    vorname = _text(daten.get("vorname"), "den Vornamen", 80, pflicht=False)
-    email = _text(daten.get("email"), "die E-Mail", 120, pflicht=False)
-    gid = _id(daten.get("gruppe_id"))
-    if gid is not None:
-        stundenplan._gruppe_pruefen(con, lid, kid, gid)
-    aktiv = 0 if daten.get("aktiv") is False else 1
-    if sid is None:
-        return con.execute("INSERT INTO schueler (lehrkraft_id, klasse_id, gruppe_id, nachname, vorname, email, aktiv, erstellt) "
-                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (lid, kid, gid, nachname, vorname, email, aktiv, db.jetzt())).lastrowid
-    con.execute("UPDATE schueler SET gruppe_id = ?, nachname = ?, vorname = ?, email = ?, aktiv = ? WHERE id = ?",
-                (gid, nachname, vorname, email, aktiv, sid))
-    return sid
+    return _sl(schuelerliste.speichern, con, lid, daten, sid)
 
 
 def schueler_loeschen(con, lid, sid):
-    _schueler_zeile(con, lid, sid)
-    if con.execute("SELECT 1 FROM bewertung WHERE schueler_id = ? AND (werte != '{}' OR fehlt = 1 OR notiz != '')", (sid,)).fetchone():
-        raise PruefungFehler("Für diesen Schüler gibt es Bewertungen. Bitte stattdessen auf „nicht mehr in der Klasse“ stellen.")
-    con.execute("DELETE FROM schueler WHERE id = ?", (sid,))
-
-
-SPALTEN = {
-    "vorname": ("vorname", "firstname", "first name"), "nachname": ("nachname", "lastname", "last name", "surname", "name"),
-    "email": ("emailadresse", "email", "emailaddress", "mail"),
-}
+    return _sl(schuelerliste.loeschen, con, lid, sid)
 
 
 def moodle_csv(con, lid, kid, text):
-    """Teilnehmerliste aus Moodle (CSV) einlesen: neue Schueler anlegen, vorhandene (gleiche E-Mail oder gleicher Name)
-    nur erkennen, nie umbenennen. Rueckgabe {neu: [namen], vorhanden: [namen], leer: anzahl}."""
-    kid = _klasse(con, kid)
-    text = (text or "").lstrip("﻿")
-    if not text.strip():
-        raise PruefungFehler("Die Datei ist leer.")
-    erste = text.splitlines()[0]
-    trenner = ";" if erste.count(";") > erste.count(",") else ("\t" if erste.count("\t") > erste.count(",") else ",")
-    leser = csv.reader(io.StringIO(text), delimiter=trenner)
-    kopf = [re.sub(r"[^a-z ]", "", (k or "").lower().replace("-", "")).strip() for k in next(leser, [])]
-    spalte = {}
-    for feld, namen in SPALTEN.items():
-        for i, k in enumerate(kopf):
-            if k.replace(" ", "") in [n.replace(" ", "") for n in namen] and feld not in spalte:
-                spalte[feld] = i
-    if "nachname" not in spalte:
-        raise PruefungFehler("In der Datei fehlt die Spalte „Nachname“ (Moodle: Teilnehmer/innen → Download als CSV).")
-    vorhanden = schueler(con, lid, kid)
-    nach_mail = {s["email"].lower(): s for s in vorhanden if s["email"]}
-    nach_name = {normalisiert(s["nachname"]) + "|" + normalisiert(s["vorname"]): s for s in vorhanden}
-    ergebnis = {"neu": [], "vorhanden": [], "leer": 0}
-    for zeile in leser:
-        wert = lambda f: zeile[spalte[f]].strip() if f in spalte and spalte[f] < len(zeile) else ""   # noqa: E731
-        nachname, vorname, email = wert("nachname"), wert("vorname"), wert("email")
-        if not nachname:
-            ergebnis["leer"] += 1
-            continue
-        treffer = nach_mail.get(email.lower()) if email else None
-        treffer = treffer or nach_name.get(normalisiert(nachname) + "|" + normalisiert(vorname))
-        if treffer:
-            if email and not treffer["email"]:   # nur fehlende E-Mail ergaenzen, Namen bleiben
-                con.execute("UPDATE schueler SET email = ? WHERE id = ?", (email[:120], treffer["id"]))
-            ergebnis["vorhanden"].append(treffer["name"])
-            continue
-        neu = schueler_speichern(con, lid, {"klasse_id": kid, "nachname": nachname, "vorname": vorname, "email": email})
-        s = {"id": neu, "nachname": nachname, "vorname": vorname, "email": email, "name": nachname + (", " + vorname if vorname else "")}
-        nach_name[normalisiert(nachname) + "|" + normalisiert(vorname)] = s
-        if email:
-            nach_mail[email.lower()] = s
-        ergebnis["neu"].append(s["name"])
-    return ergebnis
+    return _sl(schuelerliste.moodle_csv, con, lid, kid, text)
 
 
 # --- Struktur (Feedbackbogen bzw. Aufgaben) ---

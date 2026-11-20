@@ -101,7 +101,8 @@ class Schuelerlisten(MitPruefung):
         self.assertEqual((r["neu"], len(r["vorhanden"])), (["Neu, Tom"], 2))
         self.assertEqual(next(x for x in pruefungen.schueler(self.con, self.lid, self.kl) if x["vorname"] == "Clara")["nachname"], "Weiss")
         self.assertEqual(next(s for s in pruefungen.schueler(self.con, self.lid, self.kl) if s["nachname"] == "Schmitt")["email"], "lea@x.de")
-        self.assertEqual(pruefungen.schueler(self.con, self.r["id"], self.kl), [])                            # privat
+        with self.assertRaises(pruefungen.PruefungFehler):          # rei unterrichtet die Klasse nicht (gemeinsame Liste ab 0.24.0)
+            pruefungen.schueler(self.con, self.r["id"], self.kl)
         with self.assertRaises(pruefungen.PruefungFehler):
             pruefungen.moodle_csv(self.con, self.lid, self.kl, "Vorname;Mail\nA;b\n")
 

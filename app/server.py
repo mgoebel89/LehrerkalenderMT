@@ -21,7 +21,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, formulare, grunddaten, kollegium, konten, moodle, ub, notenschluessel, paperless, planung, pruefungen, qr, schule, stundenplan, totp, updates, vpn, wiederherstellung
+from . import VERSION, abos, db, exporte, formulare, grunddaten, kollegium, konten, moodle, ub, notenschluessel, paperless, planung, pruefungen, qr, schuelerliste, schule, stundenplan, totp, updates, vpn, wiederherstellung
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -255,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
                 updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler, vpn.VpnFehler, kollegium.KollegiumFehler,
-                wiederherstellung.WiederherstellungFehler) as f:
+                wiederherstellung.WiederherstellungFehler, schuelerliste.SchuelerFehler) as f:
             self.fehler(400, str(f))
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -983,17 +983,58 @@ def _pr_schritt(funktion, antwort=None):
     return schritt
 
 
+# --- Gemeinsame Schuelerliste je Klasse (0.24.0) ---
+
 def api_schueler(h, con, daten):
+    """Liste einer Klasse (mit der eigenen Gruppe), moegliche Doppelungen und wer die Klasse ausser mir unterrichtet."""
     k = h.konto(con)
     kid = h.abfrage("klasse")
-    h.antwort(200, {"schueler": pruefungen.schueler(con, k["id"], _ganzzahl(kid)) if kid else []})
+    if not kid:
+        return h.antwort(200, {"schueler": [], "doppelungen": [], "lehrkraefte": []})
+    kid = _ganzzahl(kid)
+    h.antwort(200, {"schueler": schuelerliste.liste(con, k["id"], kid), "doppelungen": schuelerliste.doppelungen(con, k["id"], kid),
+                    "lehrkraefte": [l["name"] for l in kollegium.lehrkraefte_der_klasse(con, kid) if l["id"] != k["id"]]})
+
+
+def api_schueler_klassen(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, {"klassen": schuelerliste.klassen(con, k["id"])})
+
+
+def _schueler_schritt(art, funktion):
+    """Aenderung an der gemeinsamen Liste mit Protokollzeile (Kuerzel, Schueler)."""
+    def schritt(h, con, daten, oid=None):
+        k = h.konto(con)
+        with db.transaktion(con):
+            neu = funktion(con, k["id"], daten, None if oid is None else _ganzzahl(oid))
+            sid = neu if isinstance(neu, int) else (oid and int(oid))
+            db.protokoll(con, k["kuerzel"], art, schueler_id=sid, **{x: daten[x] for x in ("nachname", "vorname", "aktiv") if x in daten})
+        h.antwort(200, {"ok": True, "id": neu if isinstance(neu, int) else sid})
+    return schritt
 
 
 def api_moodle_csv(h, con, daten):
     k = h.konto(con)
     with db.transaktion(con):
-        r = pruefungen.moodle_csv(con, k["id"], _ganzzahl(daten.get("klasse_id")), daten.get("text"))
+        r = schuelerliste.moodle_csv(con, k["id"], _ganzzahl(daten.get("klasse_id")), daten.get("text"))
+        db.protokoll(con, k["kuerzel"], "schueler_eingelesen", klasse_id=daten.get("klasse_id"), neu=len(r["neu"]))
     h.antwort(200, r)
+
+
+def api_schueler_zusammenfuehren(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        ziel, quelle = _ganzzahl(daten.get("ziel")), _ganzzahl(daten.get("quelle"))
+        schuelerliste.zusammenfuehren(con, k["id"], ziel, quelle)
+        db.protokoll(con, k["kuerzel"], "schueler_zusammengefuehrt", ziel=ziel, quelle=quelle)
+    h.antwort(200, {"ok": True})
+
+
+def api_schueler_verschieden(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        schuelerliste.verschieden_markieren(con, k["id"], _ganzzahl(daten.get("a")), _ganzzahl(daten.get("b")))
+    h.antwort(200, {"ok": True})
 
 
 def api_pruefungen(h, con, daten):
@@ -1478,10 +1519,13 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/woche", api_woche),
     ("GET", r"/api/abos", api_abos),
     ("GET", r"/api/schueler", api_schueler),
-    ("POST", r"/api/schueler", _pr_schritt(lambda con, k, d, _: pruefungen.schueler_speichern(con, k["id"], d))),
-    ("POST", r"/api/schueler/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.schueler_speichern(con, k["id"], d, i))),
-    ("POST", r"/api/schueler/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.schueler_loeschen(con, k["id"], i))),
+    ("GET", r"/api/schueler/klassen", api_schueler_klassen),
+    ("POST", r"/api/schueler", _schueler_schritt("schueler_angelegt", lambda con, lid, d, _: schuelerliste.speichern(con, lid, d))),
+    ("POST", r"/api/schueler/" + ID, _schueler_schritt("schueler_geaendert", lambda con, lid, d, i: schuelerliste.speichern(con, lid, d, i))),
+    ("POST", r"/api/schueler/" + ID + "/loeschen", _schueler_schritt("schueler_geloescht", lambda con, lid, d, i: schuelerliste.loeschen(con, lid, i))),
     ("POST", r"/api/schueler/moodle", api_moodle_csv),
+    ("POST", r"/api/schueler/zusammenfuehren", api_schueler_zusammenfuehren),
+    ("POST", r"/api/schueler/verschieden", api_schueler_verschieden),
     ("POST", r"/api/vorlage", _pr_schritt(lambda con, k, d, _: pruefungen.vorlage_speichern(con, k["id"], d))),
     ("POST", r"/api/vorlage/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.vorlage_speichern(con, k["id"], d, i))),
     ("POST", r"/api/vorlage/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.vorlage_loeschen(con, k["id"], i))),

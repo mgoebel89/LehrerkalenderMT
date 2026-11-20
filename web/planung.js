@@ -437,7 +437,7 @@ const Planung = (() => {
         el('span', { text: t.titel }), el('span', { class: 'leise klein', text: t.fremd ? 'von ' + t.von_name : 'von dir' }))))
         : el('p', { class: 'leise klein', text: 'Keine.' }),
       el('p', { class: 'leise klein', text: 'Einen Termin teilst du im Wochenplan: Termin mit dieser Klasse und dem Haken „für die Lehrkräfte der Klasse sichtbar“. ' +
-        'Den Unterrichtsinhalt deiner Stunden sehen sie in deiner Planung, Notizen nur mit dem Haken in der Stunde. Schülerlisten und Noten bleiben immer privat.' }));
+        'Den Unterrichtsinhalt deiner Stunden sehen sie in deiner Planung, Notizen nur mit dem Haken in der Stunde. Noten bleiben immer privat; die Schülerliste der Klasse nutzt ihr ohnehin gemeinsam.' }));
   }
 
   // Stufe E, lesende Planung: was in den gehaltenen Stunden dran war (Unterrichtsinhalt, geteilte Notizen), neueste zuerst

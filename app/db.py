@@ -599,6 +599,40 @@ MIGRATIONEN = [
     """
     ALTER TABLE lernfeld ADD COLUMN besitzer_id INTEGER REFERENCES lehrkraft(id) ON DELETE SET NULL
     """,
+    # 23: Gemeinsame Schuelerliste je Klasse (0.24.0): Schueler gehoeren der Klasse, nicht mehr der Lehrkraft
+    #     (erstellt_von nur zur Info, bleibt beim Loeschen eines Kontos leer stehen). Die Gruppeneinteilung bleibt je
+    #     Lehrkraft (schueler_gruppe). schueler_verschieden: Paare, die jemand als "verschiedene Schueler" bestaetigt hat.
+    (True, """
+    CREATE TABLE schueler_neu (
+        id INTEGER PRIMARY KEY,
+        klasse_id INTEGER NOT NULL REFERENCES klasse(id),
+        nachname TEXT NOT NULL,
+        vorname TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
+        aktiv INTEGER NOT NULL DEFAULT 1,
+        erstellt TEXT NOT NULL,
+        erstellt_von INTEGER REFERENCES lehrkraft(id) ON DELETE SET NULL);
+    INSERT INTO schueler_neu (id, klasse_id, nachname, vorname, email, aktiv, erstellt, erstellt_von)
+        SELECT id, klasse_id, nachname, vorname, email, aktiv, erstellt, lehrkraft_id FROM schueler;
+    CREATE TABLE schueler_gruppe (
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        schueler_id INTEGER NOT NULL REFERENCES schueler(id) ON DELETE CASCADE,
+        gruppe_id INTEGER NOT NULL REFERENCES gruppe(id) ON DELETE CASCADE,
+        PRIMARY KEY (lehrkraft_id, schueler_id));
+    INSERT INTO schueler_gruppe (lehrkraft_id, schueler_id, gruppe_id)
+        SELECT lehrkraft_id, id, gruppe_id FROM schueler WHERE gruppe_id IS NOT NULL;
+    CREATE TABLE schueler_verschieden (
+        a INTEGER NOT NULL REFERENCES schueler(id) ON DELETE CASCADE,
+        b INTEGER NOT NULL REFERENCES schueler(id) ON DELETE CASCADE,
+        PRIMARY KEY (a, b));
+    DROP TABLE schueler;
+    ALTER TABLE schueler_neu RENAME TO schueler;
+    CREATE INDEX schueler_klasse ON schueler (klasse_id)
+    """),
+    # 24: Die bisher privaten Listen derselben Klasse zusammenfuehren (gleiche E-Mail bzw. gleicher Name ohne
+    #     widersprechende E-Mail, nur ueber verschiedene Lehrkraefte). Unklare Faelle zeigt die Liste als "Moegliche
+    #     Doppelungen" an. Python-Schritt: app/schuelerliste.py
+    ("python", "schuelerliste.migration_zusammenfuehren"),
 ]
 
 
@@ -609,15 +643,22 @@ def migrieren(con):
     stand = con.execute("PRAGMA user_version").fetchone()[0]
     for nummer in range(stand, len(MIGRATIONEN)):
         eintrag = MIGRATIONEN[nummer]
-        ohne_fk = isinstance(eintrag, tuple)
+        python = isinstance(eintrag, tuple) and eintrag[0] == "python"
+        ohne_fk = isinstance(eintrag, tuple) and not python
         sql = eintrag[1] if ohne_fk else eintrag
         if ohne_fk:
             con.execute("PRAGMA foreign_keys = OFF")
         con.execute("BEGIN IMMEDIATE")
         try:
-            for befehl in sql.split(";"):
-                if befehl.strip():
-                    con.execute(befehl)
+            if python:
+                # ("python", "modul.funktion"): Datenschritt in Python, im selben Ablauf wie SQL
+                import importlib
+                modul, funktion = eintrag[1].rsplit(".", 1)
+                getattr(importlib.import_module("." + modul, __package__), funktion)(con)
+            else:
+                for befehl in sql.split(";"):
+                    if befehl.strip():
+                        con.execute(befehl)
             if ohne_fk and con.execute("PRAGMA foreign_key_check").fetchall():
                 raise RuntimeError("Migration %d: Fremdschluessel verletzt" % (nummer + 1))
             con.execute("PRAGMA user_version = %d" % (nummer + 1))
