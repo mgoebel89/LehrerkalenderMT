@@ -2,7 +2,7 @@
 // Stunden-Overlay (Stufe C2, Voransicht B, nach WebUntis-Vorbild): alles zu einer gehaltenen Stunde auf einen Blick.
 // Thema aus der Planung mit Ist-Stand (wie geplant / braucht 1 Block mehr / schon fertig, Rueckgaengig), Unterrichtsinhalt
 // (Text fuers Klassenbuch, in WebUntis kopieren) und eigene Notizen je Stunde, Merker dieser und der naechsten Stunde,
-// Termine des Tages; blaettern zur vorigen/naechsten Stunde der Klasse. Jeder Tipp wird sofort gespeichert, Texte kurz
+// Termine des Tages, Beobachtungen zu Schuelern (0.26.0); blaettern zur vorigen/naechsten Stunde der Klasse. Jeder Tipp wird sofort gespeichert, Texte kurz
 // nach dem Tippen.
 const Stunde = (() => {
   const el = L.el;
@@ -33,8 +33,10 @@ const Stunde = (() => {
     // --- Unterrichtsinhalt und Notizen: die Felder bleiben beim Neuzeichnen erhalten (Fokus, Getipptes). Gespeichert
     // wird kurz nach dem Tippen, beim Verlassen des Feldes, beim Blaettern und beim Schliessen ---
     let F = null, timer = null, laufend = Promise.resolve();
+    let BO = null;             // Abschnitt Beobachtungen (einmal je Stunde gebaut, damit Auswahl und Getipptes bleiben)
     function felderBauen() {
       const e = S.eintrag;
+      BO = Beobachtungen.stundeAbschnitt(S);
       const inhalt = el('textarea', { rows: 3, maxlength: 2000, placeholder: 'Was heute dran war – so steht es im Klassenbuch.', 'aria-label': 'Unterrichtsinhalt' });
       const notizen = el('textarea', { rows: 4, maxlength: 10000, placeholder: 'Deine Notizen zu dieser Stunde (nur für dich).', 'aria-label': 'Notizen' });
       inhalt.value = e.inhalt || S.vorschlag || '';
@@ -187,6 +189,8 @@ const Stunde = (() => {
         F.notizen,
         F.geteilt ? el('label', { class: 'haken' }, F.geteilt, 'Auch für ' + S.kollegium.join(', ') + ' sichtbar (z. B. für eine Vertretung)') : null,
       ]));
+      // Beobachtungen zu Schuelern (privat), mehrere Schueler auf einmal
+      teile.push(BO);
       // Merker
       const neuerMerker = el('input', { maxlength: 200, placeholder: 'z. B. Aufgabe 4 besprechen', 'aria-label': 'Merker für die nächste Stunde' });
       neuerMerker.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); merkerNeu(neuerMerker); } });

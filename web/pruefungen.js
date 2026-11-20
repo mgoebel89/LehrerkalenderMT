@@ -1101,6 +1101,7 @@ const Pruefungen = (() => {
     if (!listeKlasse || !K.some(k => k.id === listeKlasse)) listeKlasse = (K.find(k => k.id === wahl.klasse) || meine[0] || K[0]).id;
     const [S, SP] = await Promise.all([L.api('GET', '/api/schueler?klasse=' + listeKlasse), L.api('GET', '/api/stundenplan')]);
     const gruppen = SP.gruppen.filter(g => g.klasse_id === listeKlasse);
+    Beobachtungen.zustand.klasse = listeKlasse;
     const option = k => el('option', { value: k.id, text: k.name + (k.aktiv ? '' : ' (nicht aktiv)'), selected: k.id === listeKlasse ? true : null });
     const auswahl = el('select', { 'aria-label': 'Klasse', style: 'width:auto', onchange: () => { listeKlasse = Number(auswahl.value); schuelerZeigen(); } },
       meine.length ? el('optgroup', { label: 'Meine Klassen' }, meine.map(option)) : null,
@@ -1119,7 +1120,9 @@ const Pruefungen = (() => {
     const ansicht = el('div', { class: 'segment', role: 'group', 'aria-label': 'Ansicht' },
       [['liste', 'Liste', 'klassen'], ['fotos', 'Fotos', 'fotos']].map(([w, t, sym]) => el('button', { type: 'button', class: listeAnsicht === w ? 'an' : null,
         onclick: () => { listeAnsicht = w; schuelerZeigen(); } }, L.symbol(sym), t)));
-    const oeffnen = s => schuelerDialog(s, gruppen);
+    // Klick auf einen Schueler: Verlauf mit den eigenen Beobachtungen; Stammdaten ueber den Stift bzw. im Verlauf
+    const oeffnen = s => { location.hash = '#klassen-schueler-' + s.id; };
+    const bo = s => S.beobachtungen[s.id] || { anzahl: 0, positiv: 0, neutral: 0, negativ: 0, zuletzt: '' };
     L.setzen(ort,
       el('div', { class: 'zeile' }, auswahl, el('span', { class: 'leise klein', text: S.schueler.filter(s => s.aktiv).length + ' Schüler · ' + wer }),
         el('span', { class: 'rechts' }, ansicht, datei,
@@ -1130,12 +1133,16 @@ const Pruefungen = (() => {
       S.doppelungen.length ? doppelungenKarte(S.doppelungen) : null,
       S.schueler.length && listeAnsicht === 'fotos' ? Fotos.raster(S.schueler, oeffnen) :
       S.schueler.length ? el('div', { class: 'karte rollbar' }, el('table', { class: 'liste' },
-        el('thead', {}, el('tr', {}, ['Name', 'E-Mail', gruppen.length ? 'Meine Gruppe' : '', ''].map(t => el('th', { text: t })))),
-        el('tbody', {}, S.schueler.map(s => el('tr', { class: 'klickbar' + (s.aktiv ? '' : ' aus'), tabindex: '0', onclick: () => schuelerDialog(s, gruppen),
-          onkeydown: ev => { if (ev.key === 'Enter') schuelerDialog(s, gruppen); } },
-          el('td', {}, Fotos.mitName(s, 30)), el('td', { class: 'leise klein', text: s.email || '' }),
+        el('thead', {}, el('tr', {}, ['Name', 'E-Mail', gruppen.length ? 'Meine Gruppe' : '', 'Beobachtungen', 'Zuletzt', ''].map(t => el('th', { text: t })))),
+        el('tbody', {}, S.schueler.map(s => el('tr', { class: 'klickbar' + (s.aktiv ? '' : ' aus'), tabindex: '0', onclick: () => oeffnen(s),
+          onkeydown: ev => { if (ev.key === 'Enter') oeffnen(s); } },
+          el('td', {}, Fotos.mitName(s, 30), s.aktiv ? null : el('span', { class: 'chip klein', text: 'nicht mehr in der Klasse' })),
+          el('td', { class: 'leise klein', text: s.email || '' }),
           el('td', {}, s.gruppe ? el('span', { class: 'chip gr', text: s.gruppe }) : null),
-          el('td', {}, s.aktiv ? null : el('span', { class: 'chip', text: 'nicht mehr in der Klasse' }))))))) :
+          el('td', {}, bo(s).anzahl ? el('span', { class: 'zeile', style: 'gap:8px;flex-wrap:nowrap' }, el('span', { class: 'chip', text: String(bo(s).anzahl) }), Beobachtungen.zaehler(bo(s))) : el('span', { class: 'leise', text: '–' })),
+          el('td', { class: 'mono leise klein', text: bo(s).zuletzt ? L.tag(bo(s).zuletzt, true) : '' }),
+          el('td', { style: 'text-align:right' }, el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Stammdaten von ' + s.name,
+            onclick: ev => { ev.stopPropagation(); schuelerDialog(s, gruppen); } }, L.symbol('stift')))))))) :
         el('div', { class: 'leer', text: 'Noch keine Schüler. Lies die Teilnehmerliste aus Moodle ein oder lege Schüler von Hand an.' }));
   }
 
@@ -1159,7 +1166,19 @@ const Pruefungen = (() => {
           } }, 'Sind verschiedene')))));
   }
 
-  async function schuelerDialog(s, gruppen) {
+  // Stammdaten eines Schuelers aus anderen Ansichten (Verlauf): laedt Liste und eigene Gruppen der Klasse
+  async function schuelerBearbeiten(sid, nachher) {
+    try {
+      const z = await L.api('GET', '/api/beobachtungen?schueler=' + sid);
+      const [S, SP] = await Promise.all([L.api('GET', '/api/schueler?klasse=' + z.schueler.klasse_id), L.api('GET', '/api/stundenplan')]);
+      const s = S.schueler.find(x => x.id === sid);
+      if (!s) return;
+      listeKlasse = z.schueler.klasse_id;
+      await schuelerDialog(s, SP.gruppen.filter(g => g.klasse_id === listeKlasse), nachher);
+    } catch (e) { L.meldung(e.message, true); }
+  }
+
+  async function schuelerDialog(s, gruppen, nachher) {
     const nachname = el('input', { maxlength: 80, value: s ? s.nachname : '' });
     const vorname = el('input', { maxlength: 80, value: s ? s.vorname : '' });
     const email = el('input', { maxlength: 120, value: s ? s.email : '', type: 'email' });
@@ -1178,17 +1197,18 @@ const Pruefungen = (() => {
           const ok = await L.dialog({ titel: s.name + ' löschen?', knopf: 'Löschen', gefaehrlich: true,
             inhalt: el('p', { text: 'Der Schüler verschwindet für alle Lehrkräfte der Klasse. Geht nur ohne Bewertungen; sonst bitte „nicht mehr in der Klasse“.' }),
             speichern: () => L.api('POST', '/api/schueler/' + s.id + '/loeschen', {}) });
-          if (ok) schuelerZeigen();
+          if (ok) { if (nachher) location.hash = '#klassen'; else schuelerZeigen(); }
         })) : null),
       speichern: () => L.api('POST', s ? '/api/schueler/' + s.id : '/api/schueler', Object.assign({ klasse_id: listeKlasse, nachname: nachname.value, vorname: vorname.value,
         email: email.value, aktiv: aktiv.checked }, gruppen.length ? { gruppe_id: gruppe.value || null } : {})),
     });
-    if (r) schuelerZeigen();
+    const weiter = nachher || schuelerZeigen;
+    if (r) weiter();
     if (fotoNeu) {
       const S = await L.api('GET', '/api/schueler?klasse=' + listeKlasse);
-      await schuelerZeigen();
+      await weiter();
       const neu = S.schueler.find(x => x.id === s.id);
-      if (neu) schuelerDialog(neu, gruppen);
+      if (neu) schuelerDialog(neu, gruppen, nachher);
     }
   }
 
@@ -1306,5 +1326,5 @@ const Pruefungen = (() => {
       id => { if (danach) danach(); L.meldung('Prüfung angelegt.'); void id; });
   }
 
-  return { zeigen, ausWochenplan };
+  return { zeigen, ausWochenplan, schuelerBearbeiten };
 })();

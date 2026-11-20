@@ -639,6 +639,24 @@ MIGRATIONEN = [
     ALTER TABLE schueler ADD COLUMN foto BLOB;
     ALTER TABLE schueler ADD COLUMN foto_geaendert TEXT
     """,
+    # 26: Beobachtungen je Schueler (0.26.0): privat je Lehrkraft (nie geteilt), Verlauf mit Datum, optional Kategorie
+    #     und Tendenz; aus einer Stunde heraus mit Verweis auf sie (stunde_datum/-beginn, stunde_text zum Anzeigen).
+    """
+    CREATE TABLE beobachtung (
+        id INTEGER PRIMARY KEY,
+        lehrkraft_id INTEGER NOT NULL REFERENCES lehrkraft(id) ON DELETE CASCADE,
+        schueler_id INTEGER NOT NULL REFERENCES schueler(id) ON DELETE CASCADE,
+        datum TEXT NOT NULL,
+        kategorie TEXT NOT NULL DEFAULT '',
+        tendenz TEXT NOT NULL DEFAULT 'neutral' CHECK (tendenz IN ('positiv', 'neutral', 'negativ')),
+        text TEXT NOT NULL,
+        stunde_datum TEXT,
+        stunde_beginn TEXT,
+        stunde_text TEXT NOT NULL DEFAULT '',
+        erstellt TEXT NOT NULL,
+        geaendert TEXT NOT NULL);
+    CREATE INDEX beobachtung_schueler ON beobachtung (lehrkraft_id, schueler_id, datum)
+    """,
 ]
 
 

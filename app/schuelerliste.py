@@ -161,6 +161,9 @@ def loeschen(con, lid, sid):
     if con.execute("SELECT 1 FROM bewertung WHERE schueler_id = ? AND (werte != '{}' OR fehlt = 1 OR notiz != '')", (sid,)).fetchone():
         raise SchuelerFehler("Für diesen Schüler gibt es Bewertungen (auch von Kolleginnen und Kollegen). "
                              "Bitte stattdessen auf „nicht mehr in der Klasse“ stellen.")
+    if con.execute("SELECT 1 FROM beobachtung WHERE schueler_id = ? LIMIT 1", (sid,)).fetchone():
+        raise SchuelerFehler("Zu diesem Schüler gibt es Beobachtungen (vielleicht auch von Kolleginnen und Kollegen). "
+                             "Bitte stattdessen auf „nicht mehr in der Klasse“ stellen.")
     con.execute("DELETE FROM schueler WHERE id = ?", (sid,))
     return z
 

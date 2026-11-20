@@ -506,3 +506,23 @@ img.avatar { background: var(--knopf); }
 .zuschnitt img { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; user-select: none; -webkit-user-drag: none; }
 .zuschnitt.zieht { cursor: grabbing; }
 .pm-foto { width: 88px; }
+
+/* Beobachtungen je Schueler (0.26.0) */
+.tend { display: inline-flex; gap: 6px; font-family: var(--mono); font-size: .82em; font-weight: 700; white-space: nowrap; }
+.tend .p { color: #4f5b00; } .tend .n { color: var(--leise); } .tend .m { color: #b0004e; }
+.bo-spalten { display: grid; gap: 16px; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); align-items: start; }
+@media (max-width: 900px) { .bo-spalten { grid-template-columns: 1fr; } }
+.bo-eintrag { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--linie); }
+.bo-eintrag:first-child { border-top: none; }
+.bo-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.bo-quelle { display: inline-flex; gap: 6px; align-items: center; color: var(--leise); font-size: .82em; }
+.bo-quelle .symbol { width: 14px; height: 14px; color: var(--blau); }
+.bo-filter { display: flex; gap: 12px 20px; flex-wrap: wrap; align-items: end; }
+.bo-kopf { padding-bottom: 6px; border-bottom: 1px solid var(--linie-stark); }
+a.bo-name { color: var(--text); text-decoration: none; font-weight: 700; }
+a.bo-name:hover { color: var(--blau); }
+.bo-wahlen { display: flex; flex-wrap: wrap; gap: 6px; }
+button.bo-wahl { border-radius: 999px; min-height: 34px; padding: 3px 12px 3px 4px; font-size: .85em; }
+button.bo-wahl.an { background: var(--blau); border-color: var(--blau); color: #fff; }
+.bo-eingabe { display: grid; grid-template-columns: 190px auto minmax(0, 1fr); gap: 8px; align-items: center; }
+@media (max-width: 700px) { .bo-eingabe { grid-template-columns: 1fr; } }
