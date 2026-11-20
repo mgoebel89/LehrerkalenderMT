@@ -34,8 +34,10 @@ const Formulare = (() => {
           vorlage && !U.unterschrift ? el('div', { class: 'banner klein' }, 'Noch keine Unterschrift – das Formular entsteht dann ohne. ',
             el('a', { href: '#einstellungen-konto', text: 'Unterschrift zeichnen' })) : null,
           el('div', {}, el('button', { type: 'button', class: 'haupt', disabled: vorlage ? null : true, onclick: () => neu({}) }, L.symbol('plus'), 'Neu erstellen'))),
-        el('div', { class: 'karte stapel aus' }, el('div', { class: 'zeile' }, L.symbol('formular'), el('h3', { text: 'Abmeldung von Schülern' })),
-          el('p', { class: 'leise klein', text: 'Vorlage fehlt noch – folgt ohne Umbau, sobald die Schule sie liefert.' }), el('div', {}, el('span', { class: 'chip', text: 'folgt' }))),
+        el('div', { class: 'karte stapel' }, el('div', { class: 'zeile' }, L.symbol('formular'), el('h3', { text: 'Entlassung aus der Berufsschule' })),
+          el('p', { class: 'leise klein', text: 'Ausschulung während des Schuljahres: füllt den Teil Klassenleitung aus, der Teil der Abteilungsleitung bleibt ausfüllbar. Der Schüler ist danach nicht mehr in der Klasse.' }),
+          !U.vorlagen.entlassung ? el('div', { class: 'banner warnung klein', text: 'Die Schul-Vorlage fehlt noch. Der Admin lädt sie unter Grunddaten → Schule und Logo hoch.' }) : null,
+          el('div', {}, el('button', { type: 'button', class: 'haupt', disabled: U.vorlagen.entlassung ? null : true, onclick: () => entlassung(null, zeigenNeu) }, L.symbol('plus'), 'Ausschulung …'))),
         el('div', { class: 'karte stapel aus' }, el('div', { class: 'zeile' }, L.symbol('formular'), el('h3', { text: 'Weitere Formulare' })),
           el('p', { class: 'leise klein', text: 'z. B. Unterrichtsgang, Dienstreise' }), el('div', {}, el('span', { class: 'chip', text: 'später' })))),
       el('div', { class: 'zeile' }, el('h2', { text: 'Meine Formulare' }),
@@ -71,10 +73,78 @@ const Formulare = (() => {
   }
 
   async function loeschen(f) {
+    // Entlassung: nachfragen, ob der Schueler wieder in die Klasse soll
+    const zurueck = f.art === 'entlassung' ? el('input', { type: 'checkbox', checked: true }) : null;
     const r = await L.dialog({ titel: 'Formular löschen?', knopf: 'Löschen', gefaehrlich: true,
-      inhalt: el('p', { text: f.artname + ' · ' + f.betrifft + ' wird aus der Ablage gelöscht.' }),
-      speichern: () => L.api('POST', '/api/formular/' + f.id + '/loeschen', {}) });
+      inhalt: el('div', { class: 'stapel', style: 'gap:10px' }, el('p', { text: f.artname + ' · ' + f.betrifft + ' wird aus der Ablage gelöscht.' }),
+        zurueck ? el('label', { class: 'haken' }, zurueck, 'Schüler wieder in die Klasse aufnehmen (die Ausschulung gilt dann nicht mehr)') : null),
+      speichern: () => L.api('POST', '/api/formular/' + f.id + '/loeschen', { reaktivieren: zurueck ? zurueck.checked : false }) });
     if (r) { U.formulare = r.formulare; zeichnen(); }
+  }
+
+  const zeigenNeu = async () => { if (ort && document.body.contains(ort)) { await laden(); zeichnen(); } };
+
+  // --- Ausschulung: Formular "Entlassung aus der Berufsschule" (0.27.0) ---
+  // sid: Schueler (ohne: erst Klasse und Schueler waehlen); nachher() nach dem Erstellen
+  async function entlassung(sid, nachher) {
+    try {
+      if (!sid) sid = await schuelerWaehlen();
+      if (!sid) return false;
+      const V = await L.api('GET', '/api/entlassung/vorschlag?schueler=' + sid);
+      if (!V.vorlage) { L.meldung('Die Schul-Vorlage „Entlassung“ fehlt noch (Admin: Grunddaten → Schule und Logo).', true); return false; }
+      if (V.schueler.entlassen_zum) { L.meldung(V.schueler.name + ' ist schon zum ' + L.tag(V.schueler.entlassen_zum, true) + ' ausgeschult.', true); return false; }
+      const lehrer = el('input', { maxlength: 80, value: V.klassenlehrer });
+      const durch = el('select', {}, V.mitteilung_durch.map(m => el('option', { value: m, text: m })));
+      const zusatz = el('input', { maxlength: 120, placeholder: 'z. B. telefonisch am ' + L.tag(L.heute()).trim().slice(3) });
+      const letzter = el('input', { type: 'date', value: V.letzter_tag });
+      const datum = el('input', { type: 'date', value: V.datum });
+      const leistung = el('div', { class: 'stapel', style: 'gap:6px' }, [['moeglich', 'möglich'], ['nicht_moeglich', 'nicht möglich']].map(([w, t]) =>
+        el('label', { class: 'haken' }, el('input', { type: 'radio', name: 'leistung', value: w }), t)));
+      const grund = el('textarea', { rows: 2, maxlength: 2000, placeholder: 'z. B. Ausbildungsverhältnis gelöst' });
+      const r = await L.dialog({
+        titel: 'Ausschulung · ' + V.schueler.name, knopf: 'Formular erstellen',
+        inhalt: el('div', { class: 'felder' },
+          el('p', { class: 'leise klein', text: V.schueler.klasse + ' · Das Formular „Entlassung aus der Berufsschule“ wird mit deiner Unterschrift ausgefüllt (Teil Klassenleitung); den Teil der Abteilungsleitung füllt die Schulleitung im PDF aus.' }),
+          L.feld('Klassenlehrer(in)', lehrer),
+          el('div', { class: 'felder zwei' }, L.feld('Grund mitgeteilt durch', durch), L.feld('Zusatz (freiwillig)', zusatz)),
+          el('div', { class: 'felder zwei' }, L.feld('Letzter Unterrichtstag', letzter, 'Vorschlag: deine letzte Stunde in der Klasse'), L.feld('Datum', datum)),
+          el('div', { class: 'stapel', style: 'gap:4px' }, el('span', { class: 'leise klein', style: 'font-weight:600', text: 'Eine Leistungsbeurteilung (Zeugnisnoten) ist' }), leistung),
+          L.feld('Grund (nur für dich, kommt nicht aufs Formular)', grund, 'wird als Beobachtung im Verlauf des Schülers gespeichert'),
+          el('p', { class: 'banner klein', text: 'Nach dem letzten Unterrichtstag ist ' + V.schueler.name + ' für alle Lehrkräfte der Klasse „nicht mehr in der Klasse“; sie sehen einen Hinweis auf der Startseite.' })),
+        speichern: () => {
+          const l = leistung.querySelector('input:checked');
+          if (!l) throw new Error('Bitte wählen, ob eine Leistungsbeurteilung möglich ist.');
+          return L.api('POST', '/api/formulare/entlassung', { schueler_id: sid, klassenlehrer: lehrer.value, mitteilung: durch.value,
+            mitteilung_zusatz: zusatz.value, letzter_tag: letzter.value, leistung: l.value, datum: datum.value, grund: grund.value });
+        },
+      });
+      if (!r) return false;
+      if (U) U.formulare = r.formulare;
+      if (nachher) await nachher();
+      await L.dialog({ titel: 'Formular erstellt', knopf: 'PDF ansehen', abbrechen: 'Schließen', fokus: false,
+        inhalt: el('p', { text: 'Die Entlassung liegt im Formularcenter (Stand „erstellt“). Ausdrucken bzw. an die Schulleitung weitergeben.' }),
+        speichern: () => L.ansehen('/api/formular/' + r.id + '.pdf').then(() => true) });
+      return true;
+    } catch (e) { L.meldung(e.message, true); return false; }
+  }
+
+  // Klasse und Schueler waehlen (nur Schueler, die noch in der Klasse und nicht ausgeschult sind)
+  async function schuelerWaehlen() {
+    const K = (await L.api('GET', '/api/schueler/klassen')).klassen;
+    if (!K.length) { L.meldung('Du hast noch keine Klassen.', true); return null; }
+    const klasse = el('select', {}, K.map(k => el('option', { value: k.id, text: k.name, selected: k.meine ? true : null })));
+    const schueler = el('select', {});
+    const fuellen = async () => {
+      const S = await L.api('GET', '/api/schueler?klasse=' + klasse.value);
+      const offen = S.schueler.filter(s => s.aktiv && !s.entlassen_zum);
+      L.setzen(schueler, offen.length ? offen.map(s => el('option', { value: s.id, text: s.name })) : el('option', { value: '', text: '– keine Schüler –' }));
+    };
+    klasse.addEventListener('change', fuellen);
+    await fuellen();
+    const r = await L.dialog({ titel: 'Ausschulung', knopf: 'Weiter',
+      inhalt: el('div', { class: 'felder' }, L.feld('Klasse', klasse), L.feld('Schüler', schueler)),
+      speichern: () => { if (!schueler.value) throw new Error('Bitte einen Schüler wählen.'); return Number(schueler.value); } });
+    return r || null;
   }
 
   // Assistent: Woche waehlen -> Stunden aus dem Wochenplan, Zeitraum, Begruendung -> PDF erzeugen und ablegen.
@@ -201,5 +271,5 @@ const Formulare = (() => {
     return ort_;
   }
 
-  return { zeigen, neu, nachfragen, ausTermin, unterschriftKarte };
+  return { zeigen, neu, nachfragen, ausTermin, unterschriftKarte, entlassung };
 })();

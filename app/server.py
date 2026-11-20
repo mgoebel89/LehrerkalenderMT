@@ -1242,6 +1242,25 @@ def api_formular_erstellen(h, con, daten):
     h.antwort(200, {"id": fid, "formulare": formulare.liste(con, k["id"])})
 
 
+def api_entlassung_vorschlag(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, formulare.entlassung_vorschlag(con, k, _ganzzahl(h.abfrage("schueler"))))
+
+
+def api_entlassung_erstellen(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        fid = formulare.entlassung_erstellen(con, k, daten)
+        db.protokoll(con, k["kuerzel"], "schueler_ausgeschult", schueler_id=daten.get("schueler_id"), letzter_tag=daten.get("letzter_tag"))
+    h.antwort(200, {"id": fid, "formulare": formulare.liste(con, k["id"])})
+
+
+def api_entlassungen_kollegium(h, con, daten):
+    """Startseite: Ausschulungen in meinen Klassen durch andere Lehrkraefte (der letzten zwei Wochen und kuenftige)."""
+    k = h.konto(con)
+    h.antwort(200, {"entlassungen": schuelerliste.entlassungen_im_kollegium(con, k["id"])})
+
+
 def api_formular_pdf(h, con, daten, fid):
     k = h.konto(con)
     inhalt, name = formulare.pdf_von(con, k["id"], _ganzzahl(fid))
@@ -1258,7 +1277,7 @@ def api_formular_stand(h, con, daten, fid):
 def api_formular_loeschen(h, con, daten, fid):
     k = h.konto(con)
     with db.transaktion(con):
-        formulare.loeschen(con, k["id"], _ganzzahl(fid))
+        formulare.loeschen(con, k["id"], _ganzzahl(fid), reaktivieren=bool(daten.get("reaktivieren")))
     h.antwort(200, {"formulare": formulare.liste(con, k["id"])})
 
 
@@ -1558,6 +1577,9 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("GET", r"/api/formulare", api_formulare),
     ("GET", r"/api/formulare/vorschau", api_formular_vorschau),
     ("POST", r"/api/formulare/stundenplanaenderung", api_formular_erstellen),
+    ("GET", r"/api/entlassung/vorschlag", api_entlassung_vorschlag),
+    ("POST", r"/api/formulare/entlassung", api_entlassung_erstellen),
+    ("GET", r"/api/schueler/entlassungen", api_entlassungen_kollegium),
     ("GET", r"/api/formular/" + ID + r"\.pdf", api_formular_pdf),
     ("POST", r"/api/formular/" + ID + "/stand", api_formular_stand),
     ("POST", r"/api/formular/" + ID + "/loeschen", api_formular_loeschen),

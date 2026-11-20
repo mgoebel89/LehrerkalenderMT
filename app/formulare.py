@@ -1,4 +1,5 @@
 """Stufe F1: Formularcenter mit Ablage und Status (erstellt, abgegeben, genehmigt) und die Unterschrift je Konto.
+Zweites Formular (0.27.0): Entlassung aus der Berufsschule (Ausschulung), siehe unten.
 
 Erstes Formular: Stundenplanaenderung / Beurlaubung der DRS (aus dem alten Lehrerkalender uebernommen). Die
 Schul-Vorlage ist ein echtes AcroForm mit 201 benannten Feldern; wir befuellen sie direkt, so sieht das Ergebnis 1:1
@@ -25,12 +26,14 @@ import re
 
 from . import db, stundenplan
 
-ARTEN = {"stundenplanaenderung": "Stundenplanänderung / Beurlaubung"}
+ARTEN = {"stundenplanaenderung": "Stundenplanänderung / Beurlaubung", "entlassung": "Entlassung aus der Berufsschule"}
 STAENDE = ("erstellt", "abgegeben", "genehmigt")
 WOCHENTAGE_LANG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 _TAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa"]
 BLOCK_ZEILEN = [(0, 1), (2, 3), (4, 5), (6, 7), (10, 11), (12, 13)]
-PFLICHTFELDER = ("Antragsteller1", "Unterschrift der Lehrperson1", "am  von1", "bis1")
+PFLICHTFELDER = {"stundenplanaenderung": ("Antragsteller1", "Unterschrift der Lehrperson1", "am  von1", "bis1"),
+                 "entlassung": ("TextField1", "TextField_2", "TextField_1", "an die Schule durch1", "Schülerin / des  Schülers1",
+                                "Group1", "Datum2")}
 
 # Begruendung: Checkbox + Textfelder (Schluessel = Namen im Dialog)
 GRUENDE = {
@@ -123,7 +126,7 @@ def vorlage_setzen(con, art, inhalt, name=""):
         felder = pypdf.PdfReader(io.BytesIO(inhalt)).get_fields() or {}
     except Exception:
         raise FormularFehler("Das PDF lässt sich nicht lesen.")
-    fehlen = [f for f in PFLICHTFELDER if f not in felder]
+    fehlen = [f for f in PFLICHTFELDER[art] if f not in felder]
     if fehlen:
         raise FormularFehler("Das ist nicht das erwartete DRS-Formular (es fehlen Felder wie „%s“)." % fehlen[0])
     con.execute("INSERT INTO formularvorlage (art, pdf, name, hochgeladen) VALUES (?, ?, ?, ?) "
@@ -274,7 +277,7 @@ def _automatische_groesse(writer, namen):
         o[NameObject("/DA")] = TextStringObject(neu)
 
 
-def _unterschrift_overlay(bild, karte):
+def _unterschrift_overlay(bild, karte, hoehe_max=None):
     """Eine Seite mit dem Unterschriftsbild auf der Linie (sitzt auf, ragt nicht in die Tabelle)."""
     try:
         from reportlab.lib.utils import ImageReader
@@ -291,7 +294,7 @@ def _unterschrift_overlay(bild, karte):
     pw, ph = karte["seite"]
     x0, y0, x1, _ = karte["unterschrift"]
     unten = y0 - 1.0
-    hoehe_max = min(20.0, max(10.0, 146.0 - unten))
+    hoehe_max = hoehe_max or min(20.0, max(10.0, 146.0 - unten))
     breite_max = min((x1 - x0) - 6, 220.0)
     f = min(breite_max / iw, hoehe_max / ih)
     puffer = io.BytesIO()
@@ -427,6 +430,8 @@ def liste(con, lid):
 
 def pdf_von(con, lid, fid):
     z = _formular(con, lid, fid)
+    if z["art"] == "entlassung":
+        return bytes(z["pdf"]), "Entlassung %s.pdf" % z["betrifft"].split(" · ")[0].replace(",", "")
     return bytes(z["pdf"]), "%s %s.pdf" % ("Stundenplanaenderung", z["von"] or "")
 
 
@@ -437,14 +442,20 @@ def stand_setzen(con, lid, fid, stand):
     con.execute("UPDATE formular SET stand = ?, geaendert = ? WHERE id = ?", (stand, db.jetzt(), fid))
 
 
-def loeschen(con, lid, fid):
-    _formular(con, lid, fid)
+def loeschen(con, lid, fid, reaktivieren=False):
+    """Formular loeschen. Bei einer Entlassung mit reaktivieren=True ist der Schueler danach wieder in der Klasse."""
+    z = _formular(con, lid, fid)
+    if z["art"] == "entlassung" and reaktivieren:
+        sid = json.loads(z["daten"] or "{}").get("schueler_id")
+        if sid and con.execute("SELECT 1 FROM schueler WHERE id = ?", (sid,)).fetchone():
+            con.execute("UPDATE schueler SET aktiv = 1, entlassen_zum = NULL, entlassen_von = NULL WHERE id = ?", (sid,))
     con.execute("DELETE FROM formular WHERE id = ?", (fid,))
 
 
 def uebersicht(con, lid):
     """Fuer das Formularcenter: Ablage, ob Vorlage und Unterschrift da sind, Gruende mit ihren Feldern."""
     return {"formulare": liste(con, lid), "vorlagen": vorlagen(con), "unterschrift": bool(unterschrift(con, lid)),
+            "mitteilung_durch": MITTEILUNG_DURCH,
             "paraphe": bool(unterschrift(con, lid, "paraphe")),
             "gruende": [{"key": k, "name": g["name"], "felder": [{"key": fk, "name": fv[0]} for fk, fv in g["felder"].items()]}
                         for k, g in GRUENDE.items()]}
@@ -455,3 +466,122 @@ def woche_hat_formular(con, lid, datum):
     montag = stundenplan.montag_von(datetime.date.fromisoformat(datum)).isoformat()
     return con.execute("SELECT 1 FROM formular WHERE lehrkraft_id = ? AND art = 'stundenplanaenderung' AND json_extract(daten, '$.woche') = ?",
                        (lid, montag)).fetchone() is not None
+
+
+# --- Entlassung aus der Berufsschule (0.27.0) ---
+# Die Schul-Vorlage (AcroForm, 17 Felder) laedt der Admin hoch. Gefuellt wird nur der Teil Klassenleitung; der Teil
+# Abteilungsleitung (Frau/Herrn, Kaestchen 1-1.2, Termin) bleibt leer und im PDF-Reader ausfuellbar. Die Unterschrift
+# kommt als Bild auf die Linie "Unterschrift der Lehrperson" (Koordinaten aus der Vorlage, Stand 06/01/2024 B2_6).
+
+MITTEILUNG_DURCH = ["Ausbildungsbetrieb", "Schüler/in selbst", "Eltern", "Kammer (IHK/HWK)", "Agentur für Arbeit", "Sonstige"]
+ENTLASSUNG_FELDER = {"name": "TextField1", "klasse": "TextField_2", "klassenlehrer": "TextField_1",
+                     "mitteilung": "an die Schule durch1", "letzter_tag": "Schülerin / des  Schülers1", "datum": "Datum2"}
+_LEISTUNG = {"moeglich": "/0", "nicht_moeglich": "/1"}
+_ENTLASSUNG_UNTERSCHRIFT = {"seite": (595.56, 842.04), "unterschrift": (292.0, 519.0, 486.0, 548.0)}
+
+
+def _datum_de(iso):
+    return datetime.date.fromisoformat(iso).strftime("%d.%m.%Y")
+
+
+def letzte_stunde(con, lid, kid, heute=None):
+    """Letzter Tag bis heute, an dem die Lehrkraft die Klasse laut Wochenplan hatte (gehalten oder vertreten); sonst heute."""
+    heute = heute or db.heute()
+    tag = heute
+    for _ in range(10):
+        w = stundenplan.woche(con, lid, tag)
+        tage = [b["datum"] for b in w["bloecke"] if b["klasse"] and b["klasse"]["id"] == kid and b["datum"] <= heute.isoformat()
+                and b["zustand"] in (None, "vertreten")]
+        if tage:
+            return max(tage)
+        tag -= datetime.timedelta(days=7)
+    return heute.isoformat()
+
+
+def entlassung_vorschlag(con, konto, sid, heute=None):
+    """Vorbelegung des Dialogs: Schueler, Klasse, Klassenlehrer(in) = ich, letzter Unterrichtstag, Datum heute."""
+    from . import schuelerliste
+    try:
+        s = schuelerliste.zeile(con, konto["id"], sid)
+    except schuelerliste.SchuelerFehler as f:
+        raise FormularFehler(str(f))
+    klasse = con.execute("SELECT name FROM klasse WHERE id = ?", (s["klasse_id"],)).fetchone()["name"]
+    return {"schueler": {"id": s["id"], "name": s["nachname"] + (", " + s["vorname"] if s["vorname"] else ""), "klasse": klasse,
+                         "aktiv": bool(s["aktiv"]), "entlassen_zum": s["entlassen_zum"]},
+            "klassenlehrer": konto["name"], "letzter_tag": letzte_stunde(con, konto["id"], s["klasse_id"], heute),
+            "datum": (heute or db.heute()).isoformat(), "mitteilung_durch": MITTEILUNG_DURCH, "vorlage": bool(vorlage(con, "entlassung"))}
+
+
+def entlassung_ausfuellen(con, konto, werte_):
+    """Befuellte Entlassung als PDF-Bytes. werte_: name, klasse, klassenlehrer, mitteilung, letzter_tag, datum (Texte),
+    leistung ('moeglich'/'nicht_moeglich')."""
+    pdf_vorlage = vorlage(con, "entlassung")
+    if not pdf_vorlage:
+        raise FormularFehler("Die Schul-Vorlage „Entlassung aus der Berufsschule“ fehlt noch. Der Admin lädt sie unter Grunddaten → Schule und Logo hoch.")
+    pypdf = _pypdf()
+    reader = pypdf.PdfReader(io.BytesIO(pdf_vorlage))
+    writer = pypdf.PdfWriter()
+    writer.append(reader)
+    seite = writer.pages[0]
+    writer.update_page_form_field_values(seite, {ENTLASSUNG_FELDER[k]: v for k, v in werte_.items() if k in ENTLASSUNG_FELDER},
+                                         auto_regenerate=False)
+    _knopf_staende(writer, {"Group1": _LEISTUNG[werte_["leistung"]]})
+    # Ohne NeedAppearances: pypdf hat die Texte schon gezeichnet, die Auswahlkreise behalten das Aussehen der Vorlage.
+    # Die leeren Felder der Abteilungsleitung zeichnet der PDF-Reader beim Ausfuellen selbst.
+    bild = unterschrift(con, konto["id"])
+    if bild:
+        overlay = _unterschrift_overlay(bild, _ENTLASSUNG_UNTERSCHRIFT, hoehe_max=26.0)
+        if overlay is not None:
+            seite.merge_page(overlay)
+    puffer = io.BytesIO()
+    writer.write(puffer)
+    return puffer.getvalue()
+
+
+def entlassung_erstellen(con, konto, daten, heute=None):
+    """Entlassung erzeugen und ablegen, Schueler austragen (ab dem Tag nach dem letzten Unterrichtstag nicht mehr in der
+    Klasse), optional den Grund als private Beobachtung festhalten. daten: schueler_id, klassenlehrer, mitteilung (Art),
+    mitteilung_zusatz, letzter_tag, leistung, datum, grund. Rueckgabe: id des Formulars."""
+    from . import beobachtungen, schuelerliste
+    heute = heute or db.heute()
+    try:
+        sid = int(daten.get("schueler_id"))
+        s = schuelerliste.zeile(con, konto["id"], sid)
+    except (TypeError, ValueError, schuelerliste.SchuelerFehler):
+        raise FormularFehler("Bitte einen Schüler wählen.")
+    if s["entlassen_zum"]:
+        raise FormularFehler("Für diesen Schüler gibt es schon eine Ausschulung zum %s." % _datum_de(s["entlassen_zum"]))
+    klasse = con.execute("SELECT name FROM klasse WHERE id = ?", (s["klasse_id"],)).fetchone()["name"]
+    name = s["nachname"] + (", " + s["vorname"] if s["vorname"] else "")
+    lehrer = str(daten.get("klassenlehrer") or "").strip()[:80]
+    if not lehrer:
+        raise FormularFehler("Bitte die Klassenleitung angeben.")
+    art = daten.get("mitteilung")
+    if art not in MITTEILUNG_DURCH:
+        raise FormularFehler("Bitte wählen, wer den Grund mitgeteilt hat.")
+    zusatz = str(daten.get("mitteilung_zusatz") or "").strip()[:120]
+    mitteilung = art + (", " + zusatz if zusatz else "") if art != "Sonstige" else (zusatz or "Sonstige")
+    leistung = daten.get("leistung")
+    if leistung not in _LEISTUNG:
+        raise FormularFehler("Bitte wählen, ob eine Leistungsbeurteilung möglich ist.")
+    try:
+        letzter = datetime.date.fromisoformat(str(daten.get("letzter_tag") or ""))
+        datum = datetime.date.fromisoformat(str(daten.get("datum") or heute.isoformat()))
+    except ValueError:
+        raise FormularFehler("Bitte den letzten Unterrichtstag und das Datum angeben.")
+    pdf = entlassung_ausfuellen(con, konto, {"name": name, "klasse": klasse, "klassenlehrer": lehrer, "mitteilung": mitteilung,
+                                             "letzter_tag": letzter.strftime("%d.%m.%Y"), "datum": datum.strftime("%d.%m.%Y"),
+                                             "leistung": leistung})
+    con.execute("UPDATE schueler SET entlassen_zum = ?, entlassen_von = ?, aktiv = CASE WHEN ? < ? THEN 0 ELSE aktiv END WHERE id = ?",
+                (letzter.isoformat(), konto["id"], letzter.isoformat(), heute.isoformat(), sid))
+    grund = str(daten.get("grund") or "").strip()
+    if grund:
+        beobachtungen.anlegen(con, konto["id"], {"schueler_ids": [sid], "datum": datum.isoformat(), "kategorie": "Sonstiges",
+                                                 "tendenz": "neutral", "text": "Ausschulung zum %s: %s" % (letzter.strftime("%d.%m.%Y"), grund)})
+    jetzt = db.jetzt()
+    betrifft = "%s · %s · letzter Tag %s" % (name, klasse, letzter.strftime("%d.%m.%Y"))
+    return con.execute("INSERT INTO formular (lehrkraft_id, art, betrifft, von, bis, daten, pdf, stand, erstellt, geaendert) "
+                       "VALUES (?, 'entlassung', ?, ?, ?, ?, ?, 'erstellt', ?, ?)",
+                       (konto["id"], betrifft, letzter.isoformat(), letzter.isoformat(),
+                        json.dumps({"schueler_id": sid, "klassenlehrer": lehrer, "mitteilung": mitteilung, "leistung": leistung,
+                                    "datum": datum.isoformat()}, ensure_ascii=False), pdf, jetzt, jetzt)).lastrowid

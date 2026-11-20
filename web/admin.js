@@ -176,27 +176,33 @@ const Admin = (() => {
   }
 
   // Schul-Vorlagen der Formulare (PDF mit Formularfeldern); liegen nur in der Datenbank, nicht im Repo
+  const VORLAGEN = [['stundenplanaenderung', 'Stundenplanänderung / Beurlaubung'], ['entlassung', 'Entlassung aus der Berufsschule (Ausschulung)']];
+
   function vorlagenKarte() {
-    const v = (G.formularvorlagen || {}).stundenplanaenderung;
-    const datei = el('input', { type: 'file', accept: 'application/pdf,.pdf' });
-    const senden = async wert => {
-      try { G.formularvorlagen = (await L.api('POST', '/api/formularvorlage', { art: 'stundenplanaenderung', pdf: wert, name: datei.files[0] ? datei.files[0].name : '' })).vorlagen;
-        L.meldung(wert ? 'Vorlage gespeichert.' : 'Vorlage entfernt.'); grunddatenZeichnen(); }
-      catch (e) { L.meldung(e.message, true); }
+    const zeile = (art, titel) => {
+      const v = (G.formularvorlagen || {})[art];
+      const datei = el('input', { type: 'file', accept: 'application/pdf,.pdf' });
+      const senden = async wert => {
+        try { G.formularvorlagen = (await L.api('POST', '/api/formularvorlage', { art, pdf: wert, name: datei.files[0] ? datei.files[0].name : '' })).vorlagen;
+          L.meldung(wert ? 'Vorlage gespeichert.' : 'Vorlage entfernt.'); grunddatenZeichnen(); }
+        catch (e) { L.meldung(e.message, true); }
+      };
+      datei.addEventListener('change', () => {
+        const f = datei.files[0];
+        if (!f) return;
+        const leser = new FileReader();
+        leser.onload = () => senden(leser.result);
+        leser.readAsDataURL(f);
+      });
+      return el('div', { class: 'stapel', style: 'gap:6px;border-top:1px solid var(--linie);padding-top:10px' },
+        el('div', { class: 'zeile' }, el('b', { text: titel }),
+          v ? el('span', { class: 'chip gruen', text: 'hinterlegt' }) : el('span', { class: 'chip gelb', text: 'fehlt' })),
+        v ? el('p', { class: 'leise klein', text: (v.name || 'PDF') + ' · seit ' + L.tag(v.hochgeladen.slice(0, 10), true) }) : null,
+        el('div', { class: 'zeile' }, L.feld(v ? 'Andere Vorlage' : 'PDF hochladen', datei), v ? L.nebenknopf('Entfernen', () => senden('')) : null));
     };
-    datei.addEventListener('change', () => {
-      const f = datei.files[0];
-      if (!f) return;
-      const leser = new FileReader();
-      leser.onload = () => senden(leser.result);
-      leser.readAsDataURL(f);
-    });
     return el('div', { class: 'karte stapel' }, el('h3', { text: 'Formularvorlagen' }),
-      el('div', { class: 'zeile' }, el('b', { text: 'Stundenplanänderung / Beurlaubung' }),
-        v ? el('span', { class: 'chip gruen', text: 'hinterlegt' }) : el('span', { class: 'chip gelb', text: 'fehlt' })),
-      v ? el('p', { class: 'leise klein', text: (v.name || 'PDF') + ' · seit ' + L.tag(v.hochgeladen.slice(0, 10), true) }) : null,
-      el('p', { class: 'leise klein', text: 'Das ausfüllbare Schul-PDF (mit Formularfeldern). Es liegt nur hier in der Datenbank, nicht im öffentlichen Programmcode.' }),
-      el('div', { class: 'zeile' }, L.feld(v ? 'Andere Vorlage' : 'PDF hochladen', datei), v ? L.nebenknopf('Entfernen', () => senden('')) : null));
+      el('p', { class: 'leise klein', text: 'Die ausfüllbaren Schul-PDFs (mit Formularfeldern). Sie liegen nur hier in der Datenbank, nicht im öffentlichen Programmcode.' }),
+      VORLAGEN.map(([art, titel]) => zeile(art, titel)));
   }
 
   function schuleAnsicht() {

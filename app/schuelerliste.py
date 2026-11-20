@@ -12,6 +12,7 @@ Zugriff auf die Liste einer Klasse hat
 Grundregel wie bisher: ein Import legt nur neue Schueler an und aendert nie Namen.
 """
 import csv
+import datetime
 import io
 import re
 import unicodedata
@@ -99,18 +100,25 @@ def klassen(con, lid):
 
 # --- Lesen ---
 
+def entlassungen_nachziehen(con, heute=None):
+    """Ausgeschulte Schueler sind ab dem Tag nach dem letzten Unterrichtstag nicht mehr in der Klasse."""
+    con.execute("UPDATE schueler SET aktiv = 0 WHERE aktiv = 1 AND entlassen_zum IS NOT NULL AND entlassen_zum < ?",
+                ((heute or db.heute()).isoformat(),))
+
+
 def liste(con, lid, kid, nur_aktive=False):
     """Alle Schueler der Klasse mit der Gruppe DIESER Lehrkraft (gruppe_id, gruppe)."""
     klasse_pruefen(con, lid, kid)
+    entlassungen_nachziehen(con)
     zeilen = con.execute(
-        "SELECT s.id, s.nachname, s.vorname, s.email, s.aktiv, s.foto_geaendert, s.foto IS NOT NULL AS hat_foto, "
+        "SELECT s.id, s.nachname, s.vorname, s.email, s.aktiv, s.foto_geaendert, s.foto IS NOT NULL AS hat_foto, s.entlassen_zum, "
         "sg.gruppe_id, g.name AS gruppe, l.name AS angelegt_von FROM schueler s "
         "LEFT JOIN schueler_gruppe sg ON sg.schueler_id = s.id AND sg.lehrkraft_id = ? "
         "LEFT JOIN gruppe g ON g.id = sg.gruppe_id LEFT JOIN lehrkraft l ON l.id = s.erstellt_von "
         "WHERE s.klasse_id = ?" + (" AND s.aktiv = 1" if nur_aktive else ""), (lid, kid)).fetchall()
     ergebnis = [{"id": z["id"], "nachname": z["nachname"], "vorname": z["vorname"], "email": z["email"], "gruppe_id": z["gruppe_id"],
                  "gruppe": z["gruppe"], "aktiv": bool(z["aktiv"]), "name": _name(z), "angelegt_von": z["angelegt_von"] or "",
-                 "foto": z["foto_geaendert"] if z["hat_foto"] else None}
+                 "foto": z["foto_geaendert"] if z["hat_foto"] else None, "entlassen_zum": z["entlassen_zum"]}
                 for z in zeilen]
     ergebnis.sort(key=lambda s: (not s["aktiv"], normalisiert(s["nachname"]), normalisiert(s["vorname"])))
     return ergebnis
@@ -149,8 +157,11 @@ def speichern(con, lid, daten, sid=None):
         sid = con.execute("INSERT INTO schueler (klasse_id, nachname, vorname, email, aktiv, erstellt, erstellt_von) "
                           "VALUES (?, ?, ?, ?, ?, ?, ?)", (kid, nachname, vorname, email, aktiv, db.jetzt(), lid)).lastrowid
     else:
+        vorher = zeile(con, lid, sid)
         con.execute("UPDATE schueler SET nachname = ?, vorname = ?, email = ?, aktiv = ? WHERE id = ?",
                     (nachname, vorname, email, aktiv, sid))
+        if aktiv and not vorher["aktiv"]:   # wieder in der Klasse: eine Ausschulung gilt nicht mehr
+            con.execute("UPDATE schueler SET entlassen_zum = NULL, entlassen_von = NULL WHERE id = ?", (sid,))
     if "gruppe_id" in daten:
         _gruppe_setzen(con, lid, sid, kid, _id(daten.get("gruppe_id")))
     return sid
@@ -303,3 +314,17 @@ def migration_zusammenfuehren(con):
                 _zusammen(con, ziel, y["id"])
         db.protokoll(con, "system", "schuelerlisten_zusammengefuehrt", klasse_id=kid,
                      vorher=len(zeilen), nachher=con.execute("SELECT COUNT(*) FROM schueler WHERE klasse_id = ?", (kid,)).fetchone()[0])
+
+
+def entlassungen_im_kollegium(con, lid, heute=None, tage=14):
+    """Fuer die Startseite: Schueler meiner Klassen, die jemand anderes ausgeschult hat (letzter Tag ab vor tage Tagen)."""
+    heute = heute or db.heute()
+    meine = klassen_der_lehrkraft(con, lid)
+    if not meine:
+        return []
+    ab = (heute - datetime.timedelta(days=tage)).isoformat()
+    zeilen = con.execute("SELECT s.nachname, s.vorname, s.entlassen_zum, k.name AS klasse, k.id AS klasse_id, l.name AS von FROM schueler s "
+                         "JOIN klasse k ON k.id = s.klasse_id LEFT JOIN lehrkraft l ON l.id = s.entlassen_von "
+                         "WHERE s.entlassen_zum IS NOT NULL AND s.entlassen_zum >= ? AND COALESCE(s.entlassen_von, 0) != ? "
+                         "ORDER BY s.entlassen_zum DESC", (ab, lid)).fetchall()
+    return [{"name": _name(z), "klasse": z["klasse"], "zum": z["entlassen_zum"], "von": z["von"] or ""} for z in zeilen if z["klasse_id"] in meine]

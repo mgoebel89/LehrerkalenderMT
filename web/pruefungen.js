@@ -1136,13 +1136,17 @@ const Pruefungen = (() => {
         el('thead', {}, el('tr', {}, ['Name', 'E-Mail', gruppen.length ? 'Meine Gruppe' : '', 'Beobachtungen', 'Zuletzt', ''].map(t => el('th', { text: t })))),
         el('tbody', {}, S.schueler.map(s => el('tr', { class: 'klickbar' + (s.aktiv ? '' : ' aus'), tabindex: '0', onclick: () => oeffnen(s),
           onkeydown: ev => { if (ev.key === 'Enter') oeffnen(s); } },
-          el('td', {}, Fotos.mitName(s, 30), s.aktiv ? null : el('span', { class: 'chip klein', text: 'nicht mehr in der Klasse' })),
+          el('td', {}, Fotos.mitName(s, 30), s.aktiv ? null : el('span', { class: 'chip klein', text: 'nicht mehr in der Klasse' }),
+            s.aktiv && s.entlassen_zum ? el('span', { class: 'chip klein gelb', text: 'letzter Tag ' + L.tag(s.entlassen_zum).trim() }) : null),
           el('td', { class: 'leise klein', text: s.email || '' }),
           el('td', {}, s.gruppe ? el('span', { class: 'chip gr', text: s.gruppe }) : null),
           el('td', {}, bo(s).anzahl ? el('span', { class: 'zeile', style: 'gap:8px;flex-wrap:nowrap' }, el('span', { class: 'chip', text: String(bo(s).anzahl) }), Beobachtungen.zaehler(bo(s))) : el('span', { class: 'leise', text: '–' })),
           el('td', { class: 'mono leise klein', text: bo(s).zuletzt ? L.tag(bo(s).zuletzt, true) : '' }),
-          el('td', { style: 'text-align:right' }, el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Stammdaten von ' + s.name,
-            onclick: ev => { ev.stopPropagation(); schuelerDialog(s, gruppen); } }, L.symbol('stift')))))))) :
+          el('td', { style: 'text-align:right;white-space:nowrap' },
+            s.aktiv && !s.entlassen_zum ? el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Ausschulung von ' + s.name, title: 'Ausschulung …',
+              onclick: ev => { ev.stopPropagation(); Formulare.entlassung(s.id, schuelerZeigen); } }, L.symbol('abmelden')) : null,
+            el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Stammdaten von ' + s.name, title: 'Stammdaten',
+              onclick: ev => { ev.stopPropagation(); schuelerDialog(s, gruppen); } }, L.symbol('stift')))))))) :
         el('div', { class: 'leer', text: 'Noch keine Schüler. Lies die Teilnehmerliste aus Moodle ein oder lege Schüler von Hand an.' }));
   }
 
@@ -1193,6 +1197,8 @@ const Pruefungen = (() => {
         L.feld('E-Mail', email, 'freiwillig, hilft beim Abgleich mit Moodle'), gruppen.length ? L.feld('Meine Gruppe', gruppe, 'nur deine Einteilung, die anderen Lehrkräfte teilen selbst ein') : null,
         s ? el('label', { class: 'haken' }, aktiv, 'in der Klasse (sonst nur noch in alten Prüfungen sichtbar – gilt für alle Lehrkräfte der Klasse)') : null,
         s && s.angelegt_von ? el('p', { class: 'leise klein', text: 'Angelegt von ' + s.angelegt_von + '.' }) : null,
+        s && s.entlassen_zum ? el('p', { class: 'leise klein', text: 'Ausgeschult, letzter Unterrichtstag ' + L.tag(s.entlassen_zum, true) + '.' }) : null,
+        s && s.aktiv && !s.entlassen_zum ? el('div', {}, L.nebenknopf('Ausschulung …', () => Formulare.entlassung(s.id, nachher || schuelerZeigen), 'klein')) : null,
         s ? el('div', {}, L.nebenknopf('Schüler löschen …', async () => {
           const ok = await L.dialog({ titel: s.name + ' löschen?', knopf: 'Löschen', gefaehrlich: true,
             inhalt: el('p', { text: 'Der Schüler verschwindet für alle Lehrkräfte der Klasse. Geht nur ohne Bewertungen; sonst bitte „nicht mehr in der Klasse“.' }),

@@ -77,6 +77,14 @@ async function startZeigen() {
   teile.push(aufraeumen, wochenOrt);
   L.setzen(inhalt, teile);
   Beobachtungen.aufraeumenHinweis().then(k => { if (k) { aufraeumen.appendChild(k); aufraeumen.hidden = false; } });   // alte Beobachtungen zu Ehemaligen
+  // Ausschulungen in meinen Klassen durch Kolleginnen und Kollegen (gemeinsame Schuelerliste)
+  L.api('GET', '/api/schueler/entlassungen').then(r => {
+    if (!r.entlassungen.length) return;
+    aufraeumen.prepend(el('div', { class: 'banner', style: 'display:grid;gap:4px;margin-bottom:8px' },
+      el('div', { class: 'zeile' }, L.symbol('abmelden'), el('b', { text: 'Ausschulungen in deinen Klassen' })),
+      r.entlassungen.map(e => el('div', { class: 'klein', text: e.name + ' (' + e.klasse + ') · letzter Tag ' + L.tag(e.zum, true) + (e.von ? ' · durch ' + e.von : '') }))));
+    aufraeumen.hidden = false;
+  }).catch(() => {});
   await Woche.zeigen(wochenOrt);
 }
 

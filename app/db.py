@@ -657,6 +657,12 @@ MIGRATIONEN = [
         geaendert TEXT NOT NULL);
     CREATE INDEX beobachtung_schueler ON beobachtung (lehrkraft_id, schueler_id, datum)
     """,
+    # 27: Ausschulung (0.27.0): letzter Unterrichtstag und wer ausgeschult hat; ab dem Tag danach gilt der Schueler fuer
+    #     alle Lehrkraefte der Klasse als "nicht mehr in der Klasse" (app/schuelerliste.py zieht das nach).
+    """
+    ALTER TABLE schueler ADD COLUMN entlassen_zum TEXT;
+    ALTER TABLE schueler ADD COLUMN entlassen_von INTEGER REFERENCES lehrkraft(id) ON DELETE SET NULL
+    """,
 ]
 
 
