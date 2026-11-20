@@ -30,7 +30,7 @@ async function zeigen() {
     else if (bereich.a === 'einstellungen') await einstellungenZeigen(({ 'einstellungen-konto': 'konto', 'einstellungen-kalender': 'kalender',
       'einstellungen-lernfelder': 'lernfelder' })[ziel] || 'stundenplan');
     else if (bereich.a === 'planung') await planungZeigen(ziel === 'planung-bibliothek' ? 'bibliothek' : 'planung');
-    else if (bereich.a === 'klassen') await klassenZeigen();
+    else if (bereich.a === 'klassen') await klassenZeigen(ziel);
     else if (bereich.a === 'pruefungen') await pruefungenZeigen(ziel);
     else if (bereich.a === 'formulare') { titelSetzen('Formulare'); await Formulare.zeigen(inhalt); }
     else if (bereich.a === 'dokumente') { titelSetzen('Dokumente'); await Dokumente.zeigen(inhalt); }
@@ -73,8 +73,10 @@ async function startZeigen() {
           el('a', { href: '#' + ziel, class: ok ? 'ok' : null }, L.symbol(ok ? 'ok' : 'warnung'), el('span', { text }))))));
     }
   }
-  teile.push(wochenOrt);
+  const aufraeumen = el('div', { hidden: true });
+  teile.push(aufraeumen, wochenOrt);
   L.setzen(inhalt, teile);
+  Beobachtungen.aufraeumenHinweis().then(k => { if (k) { aufraeumen.appendChild(k); aufraeumen.hidden = false; } });   // alte Beobachtungen zu Ehemaligen
   await Woche.zeigen(wochenOrt);
 }
 
@@ -94,11 +96,22 @@ async function planungZeigen(reiter) {
 
 // --- Klassen: gemeinsame Schuelerliste je Klasse (mit Fotos) fuer alle Lehrkraefte der Klasse ---
 
-async function klassenZeigen() {
+// #klassen = Schuelerliste, #klassen-beobachtungen = Klassenuebersicht, #klassen-schueler-<id> = Verlauf eines Schuelers
+async function klassenZeigen(ziel) {
   titelSetzen('Klassen');
   const ort = el('div', { class: 'stapel' });
-  L.setzen(inhalt, el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: 'Klassen' })), ort);
-  await Pruefungen.zeigen(ort, 'schueler');
+  const schueler = ziel.match(/^klassen-schueler-(\d+)$/);
+  if (schueler) {
+    L.setzen(inhalt, ort);
+    return Beobachtungen.verlaufZeigen(ort, Number(schueler[1]));
+  }
+  const reiter = ziel === 'klassen-beobachtungen' ? 'beobachtungen' : 'liste';
+  const tab = (id, hash, text, sym) => el('a', { class: 'knopf' + (reiter === id ? ' an' : ''), href: '#' + hash }, L.symbol(sym), text);
+  L.setzen(inhalt, el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: reiter === 'beobachtungen' ? 'Beobachtungen' : 'Klassen' }),
+    el('div', { class: 'segment', role: 'group', 'aria-label': 'Klassen' },
+      tab('liste', 'klassen', 'Schülerliste', 'klassen'), tab('beobachtungen', 'klassen-beobachtungen', 'Beobachtungen', 'auge'))), ort);
+  if (reiter === 'beobachtungen') await Beobachtungen.uebersichtZeigen(ort);
+  else await Pruefungen.zeigen(ort, 'schueler');
 }
 
 // --- Pruefungen: Pruefungen, Vorlagen, Notenschluessel ---

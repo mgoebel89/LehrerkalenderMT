@@ -21,7 +21,7 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import VERSION, abos, db, exporte, formulare, fotos, grunddaten, kollegium, konten, moodle, ub, notenschluessel, paperless, planung, pruefungen, qr, schuelerliste, schule, stundenplan, totp, updates, vpn, wiederherstellung
+from . import VERSION, abos, beobachtungen, db, exporte, formulare, fotos, grunddaten, kollegium, konten, moodle, ub, notenschluessel, paperless, planung, pruefungen, qr, schuelerliste, schule, stundenplan, totp, updates, vpn, wiederherstellung
 
 BASIS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASIS, "web")
@@ -255,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
         except (konten.KontoFehler, grunddaten.GrunddatenFehler, notenschluessel.SchluesselFehler, qr.QrFehler,
                 stundenplan.StundenplanFehler, planung.PlanungFehler, abos.AboFehler, pruefungen.PruefungFehler,
                 updates.UpdateFehler, schule.SchuleFehler, formulare.FormularFehler, vpn.VpnFehler, kollegium.KollegiumFehler,
-                wiederherstellung.WiederherstellungFehler, schuelerliste.SchuelerFehler) as f:
+                wiederherstellung.WiederherstellungFehler, schuelerliste.SchuelerFehler, beobachtungen.BeobachtungFehler) as f:
             self.fehler(400, str(f))
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError, socket.timeout):
             pass
@@ -993,6 +993,7 @@ def api_schueler(h, con, daten):
         return h.antwort(200, {"schueler": [], "doppelungen": [], "lehrkraefte": []})
     kid = _ganzzahl(kid)
     h.antwort(200, {"schueler": schuelerliste.liste(con, k["id"], kid), "doppelungen": schuelerliste.doppelungen(con, k["id"], kid),
+                    "beobachtungen": {str(i): z for i, z in beobachtungen.zusammenfassung(con, k["id"], kid).items()},
                     "lehrkraefte": [l["name"] for l in kollegium.lehrkraefte_der_klasse(con, kid) if l["id"] != k["id"]]})
 
 
@@ -1059,6 +1060,68 @@ def api_fotoliste_pdf(h, con, daten):
     k = h.konto(con)
     inhalt, name = fotos.fotoliste_pdf(con, k["id"], _ganzzahl(h.abfrage("klasse")), k["name"])
     h.herunterladen(inhalt, "application/pdf", name)
+
+
+# --- Beobachtungen je Schueler (0.26.0), privat je Lehrkraft ---
+
+def _beobachtung_filter(h):
+    return {x: h.abfrage(x) or None for x in ("kategorie", "tendenz", "von", "bis", "suche")}
+
+
+def api_beobachtungen(h, con, daten):
+    """?schueler=ID: Verlauf eines Schuelers; ?klasse=ID (+ Filter): Klassenuebersicht."""
+    k = h.konto(con)
+    if h.abfrage("schueler"):
+        return h.antwort(200, beobachtungen.verlauf(con, k["id"], _ganzzahl(h.abfrage("schueler"))))
+    h.antwort(200, beobachtungen.klasse(con, k["id"], _ganzzahl(h.abfrage("klasse")), **_beobachtung_filter(h)))
+
+
+def api_beobachtungen_stunde(h, con, daten):
+    k = h.konto(con)
+    h.antwort(200, {"eintraege": beobachtungen.stunde(con, k["id"], h.abfrage("datum"), h.abfrage("beginn"))})
+
+
+def api_beobachtung_anlegen(h, con, daten):
+    k = h.konto(con)
+    with db.transaktion(con):
+        ids = beobachtungen.anlegen(con, k["id"], daten)
+    h.antwort(200, {"ok": True, "ids": ids})
+
+
+def api_beobachtung_aendern(h, con, daten, bid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        beobachtungen.aendern(con, k["id"], _ganzzahl(bid), daten)
+    h.antwort(200, {"ok": True})
+
+
+def api_beobachtung_loeschen(h, con, daten, bid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        beobachtungen.loeschen(con, k["id"], _ganzzahl(bid))
+    h.antwort(200, {"ok": True})
+
+
+def api_beobachtungen_schueler_pdf(h, con, daten, sid):
+    k = h.konto(con)
+    inhalt, name = beobachtungen.schueler_pdf(con, k["id"], _ganzzahl(sid), k["name"])
+    h.herunterladen(inhalt, "application/pdf", name)
+
+
+def api_beobachtungen_klasse_pdf(h, con, daten):
+    k = h.konto(con)
+    inhalt, name = beobachtungen.klasse_pdf(con, k["id"], _ganzzahl(h.abfrage("klasse")), k["name"], **_beobachtung_filter(h))
+    h.herunterladen(inhalt, "application/pdf", name)
+
+
+def api_beobachtungen_aufraeumen(h, con, daten):
+    k = h.konto(con)
+    if h.command == "GET":
+        return h.antwort(200, beobachtungen.aufraeumen_stand(con, k["id"]))
+    with db.transaktion(con):
+        n = beobachtungen.aufraeumen(con, k["id"])
+        db.protokoll(con, k["kuerzel"], "beobachtungen_aufgeraeumt", anzahl=n)
+    h.antwort(200, {"geloescht": n})
 
 
 def api_schueler_verschieden(h, con, daten):
@@ -1561,6 +1624,15 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/schueler/" + ID + "/foto", api_schueler_foto_setzen),
     ("POST", r"/api/schueler/" + ID + "/foto/loeschen", api_schueler_foto_loeschen),
     ("GET", r"/api/schueler/fotoliste\.pdf", api_fotoliste_pdf),
+    ("GET", r"/api/beobachtungen", api_beobachtungen),
+    ("GET", r"/api/beobachtungen/stunde", api_beobachtungen_stunde),
+    ("GET", r"/api/beobachtungen/schueler/" + ID + r"\.pdf", api_beobachtungen_schueler_pdf),
+    ("GET", r"/api/beobachtungen/klasse\.pdf", api_beobachtungen_klasse_pdf),
+    ("GET", r"/api/beobachtungen/aufraeumen", api_beobachtungen_aufraeumen),
+    ("POST", r"/api/beobachtungen/aufraeumen", api_beobachtungen_aufraeumen),
+    ("POST", r"/api/beobachtung", api_beobachtung_anlegen),
+    ("POST", r"/api/beobachtung/" + ID, api_beobachtung_aendern),
+    ("POST", r"/api/beobachtung/" + ID + "/loeschen", api_beobachtung_loeschen),
     ("POST", r"/api/vorlage", _pr_schritt(lambda con, k, d, _: pruefungen.vorlage_speichern(con, k["id"], d))),
     ("POST", r"/api/vorlage/" + ID, _pr_schritt(lambda con, k, d, i: pruefungen.vorlage_speichern(con, k["id"], d, i))),
     ("POST", r"/api/vorlage/" + ID + "/loeschen", _pr_schritt(lambda con, k, d, i: pruefungen.vorlage_loeschen(con, k["id"], i))),

@@ -75,7 +75,7 @@ def fotoliste_pdf(con, lid, kid, lehrkraft=""):
         if not seiten or y - zeilen_hoehe < 24 * MM and i % SPALTEN == 0:
             seite = Seite()
             seiten.append(seite)
-            y = _kopf(seite, kd, klasse, len(liste), len(bilder))
+            y = kopf(seite, kd, klasse, "Fotoliste " + klasse, "%d Schüler · %d mit Foto · nur für den Dienstgebrauch" % (len(liste), len(bilder)))
         spalte = i % SPALTEN
         x = 15 * MM + spalte * (BILD_B + luecke)
         oben = y
@@ -96,8 +96,9 @@ def fotoliste_pdf(con, lid, kid, lehrkraft=""):
     return pdf.dokument(seiten, titel="Fotoliste " + klasse), name
 
 
-def _kopf(seite, kd, klasse, anzahl, mit_foto):
-    """Kopf wie bei den Ergebnislisten: Logo links, rechts Klasse und Stand, feine Linie, Titel."""
+def kopf(seite, kd, rechts_oben, titel, unterzeile):
+    """DRS-Kopf wie bei den Ergebnislisten: Logo links, rechts oben Klasse und Stand, feine Linie, Titel und Unterzeile.
+    Rueckgabe: y unter dem Kopf. Auch fuer die Beobachtungs-PDFs (app/beobachtungen.py)."""
     b, h = A4
     oben = h - 12 * MM
     hoehe = 7 * MM
@@ -111,10 +112,10 @@ def _kopf(seite, kd, klasse, anzahl, mit_foto):
         seite.bild(kd["logo"], 15 * MM, oben - hoehe, breite, hoehe)
     else:
         seite.text(15 * MM, oben - 5 * MM, kuerzen(kd["name"], 12, 100 * MM, True), 12, True, exporte.BLAU)
-    exporte._rechts(seite, b - 15 * MM, oben - 3.5 * MM, klasse, 9.5, True)
+    exporte._rechts(seite, b - 15 * MM, oben - 3.5 * MM, kuerzen(rechts_oben, 9.5, 90 * MM, True), 9.5, True)
     exporte._rechts(seite, b - 15 * MM, oben - 8.5 * MM, "Stand %s" % datetime.date.today().strftime("%d.%m.%Y"), 9, farbe=exporte.LEISE)
     linie = oben - max(hoehe, 15 * MM) - 4 * MM
     seite.linie(15 * MM, linie, b - 15 * MM, linie, (0.88, 0.88, 0.88), 0.5)
-    seite.text(15 * MM, linie - 10 * MM, "Fotoliste " + klasse, 17, True)
-    seite.text(15 * MM, linie - 16 * MM, "%d Schüler · %d mit Foto · nur für den Dienstgebrauch" % (anzahl, mit_foto), 9, farbe=exporte.LEISE)
+    seite.text(15 * MM, linie - 10 * MM, kuerzen(titel, 17, b - 30 * MM, True), 17, True)
+    seite.text(15 * MM, linie - 16 * MM, kuerzen(unterzeile, 9, b - 30 * MM), 9, farbe=exporte.LEISE)
     return linie - 24 * MM
