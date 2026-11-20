@@ -1123,18 +1123,25 @@ const Pruefungen = (() => {
     // Klick auf einen Schueler: Verlauf mit den eigenen Beobachtungen; Stammdaten ueber den Stift bzw. im Verlauf
     const oeffnen = s => { location.hash = '#klassen-schueler-' + s.id; };
     const bo = s => S.beobachtungen[s.id] || { anzahl: 0, positiv: 0, neutral: 0, negativ: 0, zuletzt: '' };
+    // Rechtsklick bzw. lange tippen: Beobachtung notieren, Verlauf, Stammdaten, Foto, Ausschulung
+    const menue = (ev, s) => L.menue(ev, s.name, [
+      ['stift', 'Beobachtung notieren …', () => Beobachtungen.schnell(s, schuelerZeigen)],
+      ['auge', 'Verlauf öffnen', () => oeffnen(s)],
+      ['klassen', 'Stammdaten …', () => schuelerDialog(s, gruppen)],
+      ['kamera', s.foto ? 'Foto neu aufnehmen …' : 'Foto aufnehmen …', async () => { if (await Fotos.aufnehmen(s, true)) schuelerZeigen(); }],
+      s.aktiv && !s.entlassen_zum ? ['abmelden', 'Ausschulung …', () => Formulare.entlassung(s.id, schuelerZeigen), 'warnen'] : null]);
     L.setzen(ort,
       el('div', { class: 'zeile' }, auswahl, el('span', { class: 'leise klein', text: S.schueler.filter(s => s.aktiv).length + ' Schüler · ' + wer }),
         el('span', { class: 'rechts' }, ansicht, datei,
           el('button', { type: 'button', title: 'Alle Schüler der Klasse mit Foto zum Ausdrucken', onclick: () => L.ansehen('/api/schueler/fotoliste.pdf?klasse=' + listeKlasse).catch(e => L.meldung(e.message, true)) }, L.symbol('formular'), 'Fotoliste'),
           el('button', { type: 'button', onclick: () => datei.click() }, L.symbol('hoch'), 'Moodle-CSV einlesen'),
           el('button', { type: 'button', class: 'haupt', onclick: () => schuelerDialog(null, gruppen) }, L.symbol('plus'), 'Schüler'))),
-      el('p', { class: 'leise klein', text: 'Die Liste ist für alle Lehrkräfte dieser Klasse dieselbe: Namen, E-Mail und „in der Klasse“ ändert jede und jeder für alle. Deine Gruppeneinteilung, Prüfungen und Noten bleiben privat. Moodle: Kurs → Teilnehmer/innen → alle auswählen → „Download als CSV“; beim Einlesen kommen nur neue Schüler dazu, vorhandene Namen werden nie geändert.' }),
+      el('p', { class: 'leise klein', text: 'Rechtsklick auf einen Schüler (am Tablet: lange tippen) öffnet ein Menü, z. B. „Beobachtung notieren“. Die Liste ist für alle Lehrkräfte dieser Klasse dieselbe: Namen, E-Mail und „in der Klasse“ ändert jede und jeder für alle. Deine Gruppeneinteilung, Prüfungen und Noten bleiben privat. Moodle: Kurs → Teilnehmer/innen → alle auswählen → „Download als CSV“; beim Einlesen kommen nur neue Schüler dazu, vorhandene Namen werden nie geändert.' }),
       S.doppelungen.length ? doppelungenKarte(S.doppelungen) : null,
-      S.schueler.length && listeAnsicht === 'fotos' ? Fotos.raster(S.schueler, oeffnen) :
+      S.schueler.length && listeAnsicht === 'fotos' ? Fotos.raster(S.schueler, oeffnen, menue) :
       S.schueler.length ? el('div', { class: 'karte rollbar' }, el('table', { class: 'liste' },
         el('thead', {}, el('tr', {}, ['Name', 'E-Mail', gruppen.length ? 'Meine Gruppe' : '', 'Beobachtungen', 'Zuletzt', ''].map(t => el('th', { text: t })))),
-        el('tbody', {}, S.schueler.map(s => el('tr', { class: 'klickbar' + (s.aktiv ? '' : ' aus'), tabindex: '0', onclick: () => oeffnen(s),
+        el('tbody', {}, S.schueler.map(s => L.kontext(el('tr', { class: 'klickbar' + (s.aktiv ? '' : ' aus'), tabindex: '0', onclick: () => oeffnen(s),
           onkeydown: ev => { if (ev.key === 'Enter') oeffnen(s); } },
           el('td', {}, Fotos.mitName(s, 30), s.aktiv ? null : el('span', { class: 'chip klein', text: 'nicht mehr in der Klasse' }),
             s.aktiv && s.entlassen_zum ? el('span', { class: 'chip klein gelb', text: 'letzter Tag ' + L.tag(s.entlassen_zum).trim() }) : null),
@@ -1146,7 +1153,7 @@ const Pruefungen = (() => {
             s.aktiv && !s.entlassen_zum ? el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Ausschulung von ' + s.name, title: 'Ausschulung …',
               onclick: ev => { ev.stopPropagation(); Formulare.entlassung(s.id, schuelerZeigen); } }, L.symbol('abmelden')) : null,
             el('button', { type: 'button', class: 'leicht klein', 'aria-label': 'Stammdaten von ' + s.name, title: 'Stammdaten',
-              onclick: ev => { ev.stopPropagation(); schuelerDialog(s, gruppen); } }, L.symbol('stift')))))))) :
+              onclick: ev => { ev.stopPropagation(); schuelerDialog(s, gruppen); } }, L.symbol('stift')))), ev => menue(ev, s)))))) :
         el('div', { class: 'leer', text: 'Noch keine Schüler. Lies die Teilnehmerliste aus Moodle ein oder lege Schüler von Hand an.' }));
   }
 

@@ -526,3 +526,6 @@ button.bo-wahl { border-radius: 999px; min-height: 34px; padding: 3px 12px 3px 4
 button.bo-wahl.an { background: var(--blau); border-color: var(--blau); color: #fff; }
 .bo-eingabe { display: grid; grid-template-columns: 190px auto minmax(0, 1fr); gap: 8px; align-items: center; }
 @media (max-width: 700px) { .bo-eingabe { grid-template-columns: 1fr; } }
+
+/* Kontextmenue per langem Antippen: keine Text-/Bildauswahl des Browsers */
+@media (pointer: coarse) { .mit-kontext { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
