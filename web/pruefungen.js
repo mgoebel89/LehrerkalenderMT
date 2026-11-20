@@ -1,5 +1,6 @@
 'use strict';
-// Pruefungen und Bewertung (Stufe D1). Reiter: Pruefungen · Schuelerlisten · Vorlagen · Notenschluessel.
+// Pruefungen und Bewertung (Stufe D1). Reiter: Pruefungen · Vorlagen · Notenschluessel; die Schuelerliste zeigt der
+// Bereich Klassen (app.js) ueber zeigen(ort, 'schueler').
 // Eine Pruefung: fester Termin (belegt Bloecke der Planung) oder Fenster mit Frist; Erfassung als Punkte je Aufgabe,
 // Gesamtpunkte oder Feedbackbogen (je Schueler im Overlay). Jede Eingabe wird sofort gespeichert; Note und Rechenweg
 // rechnet der Server ueber den gueltigen Notenschluessel.
@@ -370,7 +371,7 @@ const Pruefungen = (() => {
 
   function zeichneRumpf(rumpf) {
     if (!E.schueler.length) {
-      return L.setzen(rumpf, el('div', { class: 'leer' }, 'Für diese Klasse gibt es noch keine Schülerliste. ', el('a', { href: '#pruefungen-schueler', text: 'Schülerliste anlegen' })));
+      return L.setzen(rumpf, el('div', { class: 'leer' }, 'Für diese Klasse gibt es noch keine Schülerliste. ', el('a', { href: '#klassen', text: 'Schülerliste anlegen (Klassen)' })));
     }
     if (reiter === 'teams' && !hatTeams(E.pruefung)) reiter = 'bewerten';
     if (reiter === 'fragen') return L.setzen(rumpf, fragenAnsicht());
