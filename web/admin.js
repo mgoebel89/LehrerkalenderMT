@@ -84,12 +84,36 @@ const Admin = (() => {
       inhalt: el('div', { class: 'felder' }, L.feld('Name', name), L.feld('Rolle', rolle),
         el('label', { class: 'haken' }, gesperrt, 'Konto gesperrt (alle Anmeldungen enden sofort)'),
         L.feld('Vorläufiges Passwort setzen', pw, 'Die Lehrkraft muss es bei der nächsten Anmeldung ändern.'),
-        k.zweiter_faktor ? el('label', { class: 'haken' }, faktor, 'Zweiten Faktor zurücksetzen (Handy verloren)') : null),
+        k.zweiter_faktor ? el('label', { class: 'haken' }, faktor, 'Zweiten Faktor zurücksetzen (Handy verloren)') : null,
+        k.gesperrt ? el('div', {}, L.nebenknopf('Konto löschen …', () => kontoLoeschen(k)))
+          : el('p', { class: 'leise klein', text: 'Löschen lässt sich ein Konto erst, wenn es gesperrt ist.' })),
       speichern: () => L.api('POST', '/api/admin/konten/' + k.id, {
         name: name.value, rolle: rolle.value, gesperrt: gesperrt.checked, passwort: pw.value || null,
         zweiter_faktor_zuruecksetzen: faktor.checked }),
     });
     if (r) { L.meldung('Gespeichert.'); konten(); }
+  }
+
+  // Endgueltig loeschen (nur gesperrte Konten): zeigt, was verschwindet und was bleibt; Bestaetigung mit Kuerzel und
+  // eigenem Passwort. Der Server legt vorher eine Sicherung an.
+  async function kontoLoeschen(k) {
+    let stand;
+    try { stand = await L.api('GET', '/api/admin/konten/' + k.id + '/loeschen'); } catch (e) { L.meldung(e.message, true); return; }
+    const liste = obj => el('ul', { class: 'klein', style: 'margin:0;padding-left:18px' },
+      Object.entries(obj).map(([was, n]) => el('li', { text: was + ': ' + n })));
+    const kuerzel = el('input', { autocomplete: 'off', placeholder: k.kuerzel, style: 'max-width:160px' });
+    const pw = el('input', { type: 'password', autocomplete: 'current-password' });
+    const r = await L.dialog({
+      titel: k.name + ' endgültig löschen?', knopf: 'Endgültig löschen', gefaehrlich: true,
+      inhalt: el('div', { class: 'stapel', style: 'gap:10px' },
+        el('div', { class: 'zwei-spalten' },
+          el('div', { class: 'stapel', style: 'gap:4px' }, el('b', { text: 'Wird gelöscht (alles Private)' }), liste(stand.weg)),
+          el('div', { class: 'stapel', style: 'gap:4px' }, el('b', { text: 'Bleibt für alle erhalten' }), liste(stand.bleibt))),
+        el('p', { class: 'banner klein', text: 'Vorher legt der Kalender automatisch eine Sicherung an (Admin › System › Sicherungen). Darüber lässt sich ein Versehen rückgängig machen.' }),
+        L.feld('Zur Bestätigung das Kürzel eintippen: ' + k.kuerzel, kuerzel), L.feld('Dein Passwort', pw)),
+      speichern: () => L.api('POST', '/api/admin/konten/' + k.id + '/loeschen', { kuerzel: kuerzel.value, passwort: pw.value }),
+    });
+    if (r) { L.meldung('Konto gelöscht. Sicherung: ' + r.sicherung); konten(); }
   }
 
   async function einladungNeu() {

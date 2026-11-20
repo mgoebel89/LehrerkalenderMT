@@ -133,6 +133,58 @@ def aendern(con, lehrkraft_id, name=None, rolle=None, gesperrt=None):
     return holen(con, lehrkraft_id)
 
 
+# --- Konto loeschen (0.28.0) ---
+# Nur der Admin, nur gesperrte Konten, nie das eigene und nie den letzten Admin; Bestaetigung mit dem eigenen Passwort
+# und dem Kuerzel des Kontos. Vorher legt der Server eine Sicherung an (server.api_konto_loeschen). Alles Private des
+# Kontos verschwindet ueber ON DELETE CASCADE; was andere nutzen, bleibt ohne Besitzer stehen (ON DELETE SET NULL):
+# Themen und Lernsituationen der Bibliothek, selbst angelegte Lernfelder, Schueler der gemeinsamen Liste, Einladungen.
+
+def loeschen_stand(con, lehrkraft_id):
+    """Was beim Loeschen verschwindet bzw. bleibt (Anzahlen fuer die Rueckfrage)."""
+    if holen(con, lehrkraft_id) is None:
+        raise KontoFehler("Dieses Konto gibt es nicht.")
+    zahl = lambda sql: con.execute(sql, (lehrkraft_id,)).fetchone()[0]   # noqa: E731
+    return {
+        "weg": {"Stundenplan-Versionen": zahl("SELECT COUNT(*) FROM stundenplan_version WHERE lehrkraft_id = ?"),
+                "Themen der Planung": zahl("SELECT COUNT(*) FROM plan_thema WHERE lehrkraft_id = ?"),
+                "eigene Termine": zahl("SELECT COUNT(*) FROM termin WHERE lehrkraft_id = ?"),
+                "Prüfungen mit Noten": zahl("SELECT COUNT(*) FROM pruefung WHERE lehrkraft_id = ?"),
+                "Beobachtungen": zahl("SELECT COUNT(*) FROM beobachtung WHERE lehrkraft_id = ?"),
+                "Formulare": zahl("SELECT COUNT(*) FROM formular WHERE lehrkraft_id = ?"),
+                "Unterrichtsbesuche": zahl("SELECT COUNT(*) FROM ub_besuch WHERE lehrkraft_id = ?")},
+        "bleibt": {"Themen/Lernsituationen der Bibliothek": zahl("SELECT COUNT(*) FROM baustein WHERE besitzer_id = ?"),
+                   "selbst angelegte Lernfelder": zahl("SELECT COUNT(*) FROM lernfeld WHERE besitzer_id = ?"),
+                   "angelegte Schüler (gemeinsame Liste)": zahl("SELECT COUNT(*) FROM schueler WHERE erstellt_von = ?")}}
+
+
+def loeschen_pruefen(con, admin_id, lehrkraft_id, passwort, kuerzel):
+    """Alle Bedingungen pruefen, ohne etwas zu aendern. Rueckgabe: das Konto."""
+    k = holen(con, lehrkraft_id)
+    if k is None:
+        raise KontoFehler("Dieses Konto gibt es nicht.")
+    if lehrkraft_id == admin_id:
+        raise KontoFehler("Das eigene Konto lässt sich nicht löschen.")
+    if not k["gesperrt"]:
+        raise KontoFehler("Bitte das Konto zuerst sperren; löschen lassen sich nur gesperrte Konten.")
+    if k["rolle"] == "admin" and _aktive_admins(con, ohne=lehrkraft_id) == 0:
+        raise KontoFehler("Das ist der letzte Admin.")
+    if (kuerzel or "").strip().lower() != k["kuerzel"].lower():
+        raise KontoFehler("Zur Bestätigung bitte das Kürzel %s eintippen." % k["kuerzel"])
+    eigen = con.execute("SELECT pw FROM lehrkraft WHERE id = ?", (admin_id,)).fetchone()
+    if eigen is None or not passwort_stimmt(eigen["pw"], passwort or ""):
+        raise KontoFehler("Dein Passwort stimmt nicht.")
+    return k
+
+
+def loeschen(con, lehrkraft_id):
+    """Konto endgueltig loeschen (nach loeschen_pruefen und der Sicherung). Laeuft in der Transaktion des Aufrufers."""
+    con.execute("UPDATE einladung SET erstellt_von = NULL WHERE erstellt_von = ?", (lehrkraft_id,))
+    con.execute("UPDATE einladung SET eingeloest_von = NULL WHERE eingeloest_von = ?", (lehrkraft_id,))
+    con.execute("DELETE FROM lehrkraft WHERE id = ?", (lehrkraft_id,))
+    if con.execute("PRAGMA foreign_key_check").fetchall():
+        raise KontoFehler("Beim Löschen blieben Verweise übrig; es wurde nichts gelöscht.")
+
+
 def passwort_setzen(con, lehrkraft_id, passwort, vorlaeufig):
     pw = passwort_hash(passwort)
     con.execute("UPDATE lehrkraft SET pw = ?, pw_vorlaeufig = ?, stand = stand + 1 WHERE id = ?",
