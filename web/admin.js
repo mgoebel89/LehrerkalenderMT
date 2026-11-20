@@ -644,7 +644,7 @@ const Admin = (() => {
         const ja = await L.dialog({ titel: 'Teilen im Kollegium einschalten?', knopf: 'Einschalten',
           inhalt: el('div', { class: 'stapel', style: 'gap:8px' },
             el('p', { text: 'Lehrkräfte, die dieselbe Klasse laut Stundenplan unterrichten, sehen dann gegenseitig ihre Themenplanung dieser Klasse (nur lesen) und die Termine, die sie ausdrücklich für die Klasse teilen.' }),
-            el('p', { text: 'Dazu der Unterrichtsinhalt der gehaltenen Stunden; Notizen nur, wenn sie in der Stunde ausdrücklich freigegeben sind. Schülerlisten, Noten, Merker, private Termine und Unterrichtsbesuche bleiben privat.' }),
+            el('p', { text: 'Dazu der Unterrichtsinhalt der gehaltenen Stunden; Notizen nur, wenn sie in der Stunde ausdrücklich freigegeben sind. Noten, Merker, private Termine und Unterrichtsbesuche bleiben privat. (Die Schülerliste ist ohnehin für alle Lehrkräfte der Klasse gemeinsam.)' }),
             el('p', { class: 'leise klein', text: 'Bitte erst einschalten, wenn Schulleitung und Datenschutzbeauftragter zugestimmt haben.' })),
           speichern: () => true });
         if (!ja) return;

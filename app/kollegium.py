@@ -5,7 +5,8 @@ Geteilt wird nur zwischen Lehrkraeften, die dieselbe Klasse laut ihrem Stundenpl
     ihn im Wochenplan und in der Stunde, aendern kann ihn nur, wer ihn eingetragen hat.
   - Planung: die ganze Themenplanung einer Klasse, nur zum Lesen, dazu der Unterrichtsinhalt der gehaltenen Stunden
     (Text fuers Klassenbuch) und Notizen einer Stunde, wenn dort der Haken "fuer das Kollegium sichtbar" gesetzt ist.
-Schuelerlisten, Noten, andere Notizen, Merker, private Termine und Besuchsprotokolle bleiben immer privat.
+Noten, andere Notizen, Merker, private Termine und Besuchsprotokolle bleiben immer privat. Die Schuelerliste
+ist seit 0.24.0 ohnehin je Klasse gemeinsam (app/schuelerliste.py, gilt auch ohne diesen Schalter).
 
 Der Admin schaltet das Teilen unter Admin > System ein (Vorgabe: aus), sobald Schulleitung und Datenschutz zugestimmt
 haben. Solange es aus ist, sieht niemand etwas von anderen.
