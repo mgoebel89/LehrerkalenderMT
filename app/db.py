@@ -594,6 +594,11 @@ MIGRATIONEN = [
     """
     ALTER TABLE stunde_eintrag ADD COLUMN notizen_geteilt INTEGER NOT NULL DEFAULT 0
     """,
+    # 22: Lehrkraefte legen fehlende Lernfelder selbst an (in Bildungsgaengen ihrer Klassen). besitzer_id NULL = vom
+    #     Admin angelegt (alle bisherigen); aendern/loeschen darf der Besitzer und der Admin.
+    """
+    ALTER TABLE lernfeld ADD COLUMN besitzer_id INTEGER REFERENCES lehrkraft(id) ON DELETE SET NULL
+    """,
 ]
 
 

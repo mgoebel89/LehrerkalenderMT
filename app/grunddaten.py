@@ -3,6 +3,8 @@ bzw. Module mit Stundenansatz (Module optional mit Anteilen je Semester), Zeitra
 Bildungsgang ein abweichendes), Ferien und Klassen.
 
 Lesen duerfen alle angemeldeten Lehrkraefte (Stundenplan und Planung brauchen die Daten), aendern nur Admins.
+Ausnahme Lernfelder: fehlende legt auch eine Lehrkraft an, in Bildungsgaengen ihrer Klassen (laut ihrem Stundenplan);
+ihre eigenen aendert und loescht sie selbst (loeschen nur, solange nichts daran haengt).
 """
 import datetime
 import re
@@ -11,6 +13,11 @@ from . import db
 
 UHRZEIT = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 EINHEITEN = ("lernfeld", "modul")
+# Ein neuer Bildungsgang mit Lernfeldern bekommt diese Stufen gleich mit (umbenennen/loeschen wie gewohnt)
+STANDARD_STUFEN = ("Grundstufe", "Fachstufe 1", "Fachstufe 2", "Fachstufe 3")
+# Tabellen, in denen ein Lernfeld benutzt wird (dann darf eine Lehrkraft es nicht mehr loeschen)
+_LERNFELD_BENUTZT = (("baustein", "der Bibliothek"), ("plan_thema", "einer Planung"),
+                     ("stundenplan_eintrag", "einem Stundenplan"), ("pruefung", "einer Prüfung"))
 
 
 def natuerlich(text):
@@ -81,11 +88,13 @@ def alles(con):
         stufen = [dict(s) for s in con.execute("SELECT id, name, reihenfolge FROM stufe WHERE bildungsgang_id = ? "
                                                "ORDER BY reihenfolge, name", (b["id"],))]
         lernfelder = []
-        for lf in sorted(con.execute("SELECT * FROM lernfeld WHERE bildungsgang_id = ?", (b["id"],)), key=lambda z: natuerlich(z["nummer"])):
+        for lf in sorted(con.execute("SELECT l.*, k.name AS besitzer FROM lernfeld l LEFT JOIN lehrkraft k ON k.id = l.besitzer_id "
+                                     "WHERE l.bildungsgang_id = ?", (b["id"],)), key=lambda z: natuerlich(z["nummer"])):
             anteile = {str(a["stufe_id"]): a["stunden"] for a in
                        con.execute("SELECT stufe_id, stunden FROM lernfeld_anteil WHERE lernfeld_id = ?", (lf["id"],))}
             lernfelder.append({"id": lf["id"], "nummer": lf["nummer"], "name": lf["name"], "stufe_id": lf["stufe_id"],
-                               "stunden": lf["stunden"], "aktiv": bool(lf["aktiv"]), "anteile": anteile})
+                               "stunden": lf["stunden"], "aktiv": bool(lf["aktiv"]), "anteile": anteile,
+                               "besitzer_id": lf["besitzer_id"], "besitzer": lf["besitzer"] or ""})
         bildungsgaenge.append({
             "id": b["id"], "name": b["name"], "kuerzel": b["kuerzel"], "einheit": b["einheit"], "aktiv": bool(b["aktiv"]),
             "stufen": stufen, "lernfelder": lernfelder, "zeitraster": zeitraster(con, b["id"], eigenes=True)})
@@ -108,9 +117,12 @@ def bildungsgang_speichern(con, daten, bid=None):
         raise GrunddatenFehler("Den Bildungsgang %s gibt es schon." % name)
     if bid is None:
         reihe = con.execute("SELECT COALESCE(MAX(reihenfolge), 0) + 1 FROM bildungsgang").fetchone()[0]
-        cur = con.execute("INSERT INTO bildungsgang (name, kuerzel, einheit, aktiv, reihenfolge) VALUES (?, ?, ?, ?, ?)",
-                          (name, kuerzel, einheit, aktiv, reihe))
-        return cur.lastrowid
+        bid = con.execute("INSERT INTO bildungsgang (name, kuerzel, einheit, aktiv, reihenfolge) VALUES (?, ?, ?, ?, ?)",
+                          (name, kuerzel, einheit, aktiv, reihe)).lastrowid
+        if einheit == "lernfeld":
+            for nr, stufe in enumerate(STANDARD_STUFEN, 1):
+                con.execute("INSERT INTO stufe (bildungsgang_id, name, reihenfolge) VALUES (?, ?, ?)", (bid, stufe, nr))
+        return bid
     _bildungsgang(con, bid)
     con.execute("UPDATE bildungsgang SET name = ?, kuerzel = ?, einheit = ?, aktiv = ? WHERE id = ?",
                 (name, kuerzel, einheit, aktiv, bid))
@@ -151,7 +163,8 @@ def stufe_loeschen(con, sid):
 
 # --- Lernfelder bzw. Module ---
 
-def lernfeld_speichern(con, daten, lid=None):
+def lernfeld_speichern(con, daten, lid=None, besitzer_id=None):
+    """Lernfeld anlegen bzw. aendern. besitzer_id gilt nur beim Anlegen (None = Admin)."""
     if lid is None:
         bid = _id_oder_none(daten.get("bildungsgang_id"))
         b = _bildungsgang(con, bid)
@@ -169,8 +182,8 @@ def lernfeld_speichern(con, daten, lid=None):
                    (b["id"], nummer, lid or -1)).fetchone():
         raise GrunddatenFehler("%s gibt es in diesem Bildungsgang schon." % nummer)
     if lid is None:
-        lid = con.execute("INSERT INTO lernfeld (bildungsgang_id, stufe_id, nummer, name, stunden, aktiv) VALUES (?, ?, ?, ?, ?, ?)",
-                          (b["id"], stufe_id, nummer, name, stunden, aktiv)).lastrowid
+        lid = con.execute("INSERT INTO lernfeld (bildungsgang_id, stufe_id, nummer, name, stunden, aktiv, besitzer_id) "
+                          "VALUES (?, ?, ?, ?, ?, ?, ?)", (b["id"], stufe_id, nummer, name, stunden, aktiv, besitzer_id)).lastrowid
     else:
         con.execute("UPDATE lernfeld SET stufe_id = ?, nummer = ?, name = ?, stunden = ?, aktiv = ? WHERE id = ?",
                     (stufe_id, nummer, name, stunden, aktiv, lid))
@@ -191,6 +204,49 @@ def lernfeld_speichern(con, daten, lid=None):
 def lernfeld_loeschen(con, lid):
     # Bibliothek haengt am Lernfeld (wird mitgeloescht); Planungen und Stundenplaene verlieren nur die Zuordnung
     con.execute("DELETE FROM lernfeld WHERE id = ?", (lid,))
+
+
+# --- Lernfelder durch Lehrkraefte ---
+
+def bildungsgaenge_der_lehrkraft(con, lehrkraft_id):
+    """Ids der Bildungsgaenge, in denen die Lehrkraft laut einer ihrer Stundenplan-Versionen Klassen hat."""
+    return {z[0] for z in con.execute(
+        "SELECT DISTINCT k.bildungsgang_id FROM stundenplan_eintrag e JOIN stundenplan_version v ON v.id = e.version_id "
+        "JOIN klasse k ON k.id = e.klasse_id WHERE v.lehrkraft_id = ?", (lehrkraft_id,))}
+
+
+def _lernfeld_der_lehrkraft(con, konto, lid):
+    zeile = con.execute("SELECT * FROM lernfeld WHERE id = ?", (lid,)).fetchone()
+    if zeile is None:
+        raise GrunddatenFehler("Dieses Lernfeld gibt es nicht.")
+    if konto["rolle"] != "admin" and zeile["besitzer_id"] != konto["id"]:
+        raise GrunddatenFehler("Dieses Lernfeld hat jemand anderes angelegt; ändern kann es nur diese Person oder der Admin.")
+    return zeile
+
+
+def lernfeld_der_lehrkraft_speichern(con, konto, daten, lid=None):
+    """Lernfeld durch eine Lehrkraft anlegen (nur in Bildungsgaengen ihrer Klassen) bzw. ein eigenes aendern."""
+    if lid is not None:
+        _lernfeld_der_lehrkraft(con, konto, lid)
+        daten = dict(daten, bildungsgang_id=None)
+        return lernfeld_speichern(con, daten, lid)
+    bid = _id_oder_none(daten.get("bildungsgang_id"))
+    b = _bildungsgang(con, bid)
+    if not b["aktiv"]:
+        raise GrunddatenFehler("Dieser Bildungsgang ist nicht aktiv.")
+    if konto["rolle"] != "admin" and bid not in bildungsgaenge_der_lehrkraft(con, konto["id"]):
+        raise GrunddatenFehler("Lernfelder kannst du nur in Bildungsgängen anlegen, in denen du laut Stundenplan Klassen hast.")
+    return lernfeld_speichern(con, daten, None, besitzer_id=konto["id"])
+
+
+def lernfeld_der_lehrkraft_loeschen(con, konto, lid):
+    """Eigenes Lernfeld loeschen, solange nichts daran haengt (der Admin loescht ueber die Grunddaten auch benutzte)."""
+    lf = _lernfeld_der_lehrkraft(con, konto, lid)
+    for tabelle, wo in _LERNFELD_BENUTZT:
+        if con.execute("SELECT 1 FROM %s WHERE lernfeld_id = ? LIMIT 1" % tabelle, (lid,)).fetchone():
+            raise GrunddatenFehler("%s wird schon in %s benutzt. Stell es stattdessen auf „nicht aktiv“." % (lf["nummer"], wo))
+    lernfeld_loeschen(con, lid)
+    return lf
 
 
 # --- Zeitraster ---

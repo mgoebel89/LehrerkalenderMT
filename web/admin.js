@@ -250,7 +250,9 @@ const Admin = (() => {
               el('th', { text: t, style: i === 3 ? 'text-align:right' : null })))),
             el('tbody', {}, b.lernfelder.length ? b.lernfelder.map(lf => el('tr', { class: 'klickbar' + (lf.aktiv ? '' : ' aus'), tabindex: 0,
               onclick: () => lernfeldBearbeiten(b, lf), onkeydown: ev => { if (ev.key === 'Enter') lernfeldBearbeiten(b, lf); } },
-              el('td', { class: 'mono' }, el('b', { text: lf.nummer })), el('td', { text: lf.name }), el('td', { text: stufeName(lf.stufe_id) }),
+              el('td', { class: 'mono' }, el('b', { text: lf.nummer })),
+              el('td', {}, lf.name, lf.besitzer ? el('span', { class: 'leise klein', text: ' · angelegt von ' + lf.besitzer }) : null),
+              el('td', { text: stufeName(lf.stufe_id) }),
               el('td', { class: 'mono', style: 'text-align:right' }, lf.stunden + ' Std',
                 Object.keys(lf.anteile).length ? el('div', { class: 'leise klein', text: Object.entries(lf.anteile).map(([sid, std]) => stufeName(Number(sid)) + ' ' + std).join(' · ') }) : null)))
               : el('tr', {}, el('td', { colspan: 4, class: 'leise', text: 'Noch keine ' + (b.einheit === 'modul' ? 'Module' : 'Lernfelder') + '.' }))))),
@@ -266,7 +268,8 @@ const Admin = (() => {
     const aktiv = el('input', { type: 'checkbox', checked: !b || b.aktiv ? true : null });
     const r = await L.dialog({
       titel: b ? b.name : 'Neuer Bildungsgang',
-      inhalt: el('div', { class: 'felder' }, L.feld('Name', name), L.feld('Kürzel', kuerzel), L.feld('Gegliedert in', einheit),
+      inhalt: el('div', { class: 'felder' }, L.feld('Name', name), L.feld('Kürzel', kuerzel),
+        L.feld('Gegliedert in', einheit, b ? null : 'bei Lernfeldern kommen die Stufen Grundstufe und Fachstufe 1–3 gleich mit'),
         el('label', { class: 'haken' }, aktiv, 'aktiv (nicht aktive erscheinen nirgends zur Auswahl)'),
         b ? L.nebenknopf('Bildungsgang löschen …', () => loeschenFragen('Bildungsgang „' + b.name + '“ löschen?',
           'Mit allen Stufen, Lernfeldern und dem eigenen Zeitraster. Geht nur, solange es keine Klassen dazu gibt.', '/api/admin/bildungsgang/' + b.id + '/loeschen')) : null),

@@ -470,6 +470,43 @@ def api_grunddaten(h, con, daten):
     h.antwort(200, alles)
 
 
+def _lernfelder_stand(con, k):
+    """Aktive Bildungsgaenge mit Stufen und Lernfeldern fuer die Lernfeld-Pflege durch Lehrkraefte; darf_anlegen je
+    Bildungsgang (Klassen laut eigenem Stundenplan, Admin immer), darf_aendern je Lernfeld (Besitzer, Admin)."""
+    meine = grunddaten.bildungsgaenge_der_lehrkraft(con, k["id"])
+    admin = k["rolle"] == "admin"
+    gaenge = []
+    for b in grunddaten.alles(con)["bildungsgaenge"]:
+        if not b["aktiv"]:
+            continue
+        for lf in b["lernfelder"]:
+            lf["darf_aendern"] = admin or lf["besitzer_id"] == k["id"]
+        gaenge.append({"id": b["id"], "name": b["name"], "kuerzel": b["kuerzel"], "einheit": b["einheit"], "stufen": b["stufen"],
+                       "lernfelder": b["lernfelder"], "darf_anlegen": admin or b["id"] in meine, "meiner": b["id"] in meine})
+    return {"bildungsgaenge": gaenge}
+
+
+def api_lernfelder(h, con, daten):
+    h.antwort(200, _lernfelder_stand(con, h.konto(con)))
+
+
+def api_lernfeld_speichern(h, con, daten, lid=None):
+    k = h.konto(con)
+    with db.transaktion(con):
+        neu = grunddaten.lernfeld_der_lehrkraft_speichern(con, k, daten, None if lid is None else _ganzzahl(lid))
+        db.protokoll(con, k["kuerzel"], "lernfeld_angelegt" if lid is None else "lernfeld_geaendert", id=neu,
+                     nummer=daten.get("nummer"), name=daten.get("name"))
+    h.antwort(200, dict(_lernfelder_stand(con, k), id=neu))
+
+
+def api_lernfeld_loeschen(h, con, daten, lid):
+    k = h.konto(con)
+    with db.transaktion(con):
+        lf = grunddaten.lernfeld_der_lehrkraft_loeschen(con, k, _ganzzahl(lid))
+        db.protokoll(con, k["kuerzel"], "lernfeld_geloescht", id=lf["id"], nummer=lf["nummer"])
+    h.antwort(200, _lernfelder_stand(con, k))
+
+
 def api_logo(h, con, daten):
     """Schullogo (oeffentlich, auch fuer die Anmeldeseite)."""
     daten_ = schule.logo(con)
@@ -1347,6 +1384,10 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/admin/einladungen", api_einladung_anlegen),
     ("POST", r"/api/admin/einladungen/" + ID + "/zurueckziehen", api_einladung_zurueckziehen),
     ("GET", r"/api/grunddaten", api_grunddaten),
+    ("GET", r"/api/lernfelder", api_lernfelder),
+    ("POST", r"/api/lernfeld", api_lernfeld_speichern),
+    ("POST", r"/api/lernfeld/" + ID, api_lernfeld_speichern),
+    ("POST", r"/api/lernfeld/" + ID + "/loeschen", api_lernfeld_loeschen),
     ("GET", r"/api/schule/logo", api_logo),
     ("GET", r"/api/schule/logo/da", api_logo_da),
     ("POST", r"/api/schule", api_schule),

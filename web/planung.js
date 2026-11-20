@@ -511,6 +511,14 @@ const Planung = (() => {
     const bloecke = el('input', { type: 'number', min: 1, max: 400, value: t ? t.bloecke : 2, style: 'width:110px' });
     const lf = el('select', {}, el('option', { value: '', text: '– ohne –' }), p.lernfelder.map(l =>
       el('option', { value: l.id, text: l.nummer + ' ' + l.name, selected: t && t.lernfeld_id === l.id ? true : null })));
+    const strang = P.straenge.find(x => x.klasse_id === wahl.klasse) || {};
+    // fehlendes Lernfeld gleich hier anlegen und auswaehlen
+    const lfNeu = Lernfelder.knopf(strang.bildungsgang_id, r => {
+      const b = r.bildungsgaenge.find(x => x.id === strang.bildungsgang_id);
+      const neu = b && b.lernfelder.find(x => x.id === r.id);
+      if (neu) lf.appendChild(el('option', { value: neu.id, text: neu.nummer + ' ' + neu.name, selected: true }));
+      lf.value = String(r.id);
+    }, 'Lernfeld anlegen');
     const hinweis = el('textarea', { maxlength: 4000, rows: 3, placeholder: 'Lehrstoff, Material, Hinweise (für „Lehrstoff kopieren“ in Stufe C2)' });
     hinweis.value = t ? t.hinweis : '';
     const weitere = t ? [
@@ -520,7 +528,8 @@ const Planung = (() => {
       titel: t ? 'Thema' : 'Neues Thema', weitere,
       inhalt: el('div', { class: 'felder' },
         L.feld('Titel', titel),
-        el('div', { class: 'felder zwei' }, L.feld('Umfang in Blöcken', bloecke, '1 Block = 1 Doppelstunde · Rahmen für die Lernsituationen'), L.feld('Lernfeld', lf)),
+        el('div', { class: 'felder zwei' }, L.feld('Umfang in Blöcken', bloecke, '1 Block = 1 Doppelstunde · Rahmen für die Lernsituationen'),
+          el('div', { class: 'stapel', style: 'gap:2px' }, L.feld('Lernfeld', lf), el('div', {}, lfNeu))),
         t && t.ls.length ? el('p', { class: 'leise klein', text: t.ls.length + (t.ls.length === 1 ? ' Lernsituation' : ' Lernsituationen') + ' mit ' + umfang(t.verteilt)
           + (t.verteilt > t.bloecke ? ' – mehr als der Umfang, das Thema wächst auf ' + umfang(t.verteilt) + '.' : t.verteilt < t.bloecke ? ' · noch offen ' + umfang(t.bloecke - t.verteilt) + '.' : ' · Umfang ganz verteilt.') }) : null,
         L.feld('Hinweis', hinweis),
@@ -597,7 +606,10 @@ const Planung = (() => {
     }
     teile.push(el('p', { class: 'leise', style: 'max-width:80ch', text: 'Themen je ' + (bg.einheit === 'modul' ? 'Modul' : 'Lernfeld') +
       ' mit ihrem Umfang, darin die Lernsituationen – für alle im Bildungsgang sichtbar. Ändern darf, wer etwas angelegt hat. „In Klasse übernehmen“ kopiert das Thema samt Lernsituationen in deine Planung; dort kannst du alles anpassen, ohne die Bibliothek zu verändern.' }));
-    if (!B.lernfelder.length) teile.push(el('div', { class: 'leer', text: 'In diesem Bildungsgang gibt es noch keine Lernfelder. Der Admin legt sie unter Grunddaten an.' }));
+    const einheit = bg.einheit === 'modul' ? 'Modul' : 'Lernfeld';
+    teile.push(el('div', { class: 'zeile' }, el('span', { class: 'leise klein', text: 'Fehlt ein ' + einheit + '?' }),
+      Lernfelder.knopf(bg.id, () => bibliothekZeigen(), einheit + ' anlegen')));
+    if (!B.lernfelder.length) teile.push(el('div', { class: 'leer', text: 'In diesem Bildungsgang gibt es noch keine ' + (bg.einheit === 'modul' ? 'Module' : 'Lernfelder') + '. Lege mit „' + einheit + ' anlegen“ eines an oder bitte den Admin darum.' }));
     const stufen = [{ id: null, name: 'ohne Stufe' }].concat(bg.stufen);
     for (const st of stufen) {
       const lfs = B.lernfelder.filter(l => (l.stufe_id || null) === st.id);
