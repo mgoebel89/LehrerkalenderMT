@@ -1,0 +1,37 @@
+/* Kopf und Seitenleiste der App auf den Seiten der Unterrichtsbesuche (web/rahmen.js, umUb). Eigene Klassen (lk-),
+   damit die Stile des alten Lehrerkalenders (ub-basis.css) nichts verschieben; Werte wie in stil.css. */
+.lk-kopf, .lk-rahmen {
+  --lk-blau: #00639C; --lk-blau-hell: #e8f2f9; --lk-blau-mittel: #7fb1cf; --lk-karte: #fff; --lk-text: #1d2433; --lk-leise: #5d6779;
+  --lk-linie: #e4e7ec; --lk-knopf: #f2f4f7;
+  font-family: 'DIN Pro', 'Segoe UI Variable Text', 'Segoe UI', Calibri, system-ui, -apple-system, Roboto, Arial, sans-serif;
+}
+body.lk-mit-rahmen { margin: 0; }
+.lk-kopf { background: var(--lk-karte); border-bottom: 2px solid var(--lk-blau); box-shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+  display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; min-height: 56px; padding: 6px 16px;
+  position: sticky; top: 0; z-index: 20; font-size: 15px; line-height: 1.45; color: var(--lk-text); }
+.lk-marke { display: flex; align-items: center; gap: 10px; color: var(--lk-blau); font-weight: 700; font-size: 1.15rem; text-decoration: none; white-space: nowrap; }
+.lk-marke img { width: 26px; height: 26px; display: block; }
+.lk-schul-logo { height: 30px; width: auto; max-width: 180px; object-fit: contain; display: block; padding-left: 12px; border-left: 1px solid var(--lk-linie); }
+.lk-unter { color: var(--lk-leise); font-weight: 600; padding-left: 12px; border-left: 1px solid var(--lk-linie); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lk-rechts { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.lk-wer { border-radius: 999px; padding: 2px 10px; font-size: .8em; font-weight: 600; background: var(--lk-knopf); border: 1px solid var(--lk-linie); white-space: nowrap; }
+.lk-abmelden { font: inherit; font-size: .9em; font-weight: 600; padding: 8px 14px; border-radius: 8px; border: 1px solid transparent; background: transparent;
+  color: var(--lk-text); cursor: pointer; min-height: 36px; }
+.lk-abmelden:hover { color: var(--lk-blau); background: var(--lk-blau-hell); }
+.lk-rahmen { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: calc(100vh - 58px); }
+.lk-seite { background: var(--lk-karte); border-right: 1px solid var(--lk-linie); padding: 14px 10px; display: grid; gap: 2px; align-content: start; }
+.lk-seite a { display: flex; gap: 10px; align-items: center; padding: 9px 12px; border-radius: 8px; color: var(--lk-text);
+  text-decoration: none; font-weight: 600; font-size: 15px; line-height: 1.45; }
+.lk-seite a:hover { background: var(--lk-knopf); }
+.lk-seite a.an { background: var(--lk-blau-hell); color: var(--lk-blau); }
+.lk-seite .etikett { display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: var(--lk-leise); }
+.lk-seite .symbol { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.lk-seite .chip { display: inline-flex; border-radius: 999px; padding: 0 6px; font-size: .68rem; font-weight: 600; margin-left: 4px;
+  background: #fdf1dc; border: 1px solid #F8B442; color: #7a4f00; }
+.lk-inhalt { min-width: 0; }
+@media (max-width: 760px) {
+  .lk-rahmen { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .lk-seite { display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--lk-linie); padding: 6px; }
+  .lk-seite a { white-space: nowrap; }
+  .lk-seite .etikett, .lk-schul-logo { display: none; }
+}

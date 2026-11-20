@@ -440,9 +440,9 @@ const Admin = (() => {
     const bg = id => G.bildungsgaenge.find(b => b.id === id);
     const schl = id => G.notenschluessel.find(s => s.id === id);
     L.setzen(ort,
-      kopf('Klassen', el('button', { type: 'button', class: 'haupt', onclick: () => klasseBearbeiten(null) }, L.symbol('plus'), 'Klasse')),
+      kopf('Klassenverwaltung', el('button', { type: 'button', class: 'haupt', onclick: () => klasseBearbeiten(null) }, L.symbol('plus'), 'Klasse')),
       G.bildungsgaenge.length ? null : el('div', { class: 'banner warnung', text: 'Zuerst unter Grunddaten einen Bildungsgang anlegen.' }),
-      el('p', { class: 'leise', style: 'max-width:75ch', text: 'Klassen gibt es einmal für alle Lehrkräfte. Daran hängen später geteilte Termine und der Themenstand. Die Schülerlisten führt jede Lehrkraft selbst (Stufe D).' }),
+      el('p', { class: 'leise', style: 'max-width:75ch', text: 'Klassen gibt es einmal für alle Lehrkräfte. Daran hängen später geteilte Termine und der Themenstand. Die Schülerliste einer Klasse pflegen die Lehrkräfte der Klasse gemeinsam im Bereich „Klassen“.' }),
       el('div', { class: 'karte rollbar' }, G.klassen.length ? el('table', { class: 'liste' },
         el('thead', {}, el('tr', {}, ['Klasse', 'Bildungsgang', 'Stufe', 'Unterricht', 'Notenschlüssel', ''].map(t => el('th', { text: t })))),
         el('tbody', {}, G.klassen.map(k => el('tr', { class: 'klickbar' + (k.aktiv ? '' : ' aus'), tabindex: 0, onclick: () => klasseBearbeiten(k),

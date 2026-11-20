@@ -6,20 +6,7 @@ const el = L.el;
 const inhalt = document.getElementById('inhalt');
 const S = { konto: null, update: null };
 
-const BEREICHE = [
-  { a: 'start', text: 'Start', sym: 'start' },
-  { a: 'planung', text: 'Planung', sym: 'plan' },
-  { a: 'pruefungen', text: 'Prüfungen', sym: 'pruefung' },
-  { a: 'formulare', text: 'Formulare', sym: 'formular' },
-  { a: 'unterrichtsbesuche', text: 'Unterrichtsbesuche', sym: 'auge', adresse: '/unterrichtsbesuche', nurUb: true },
-  { a: 'dokumente', text: 'Dokumente', sym: 'archiv', nurPaperless: true },
-  { a: 'einstellungen', text: 'Einstellungen', sym: 'einstellungen' },
-  { a: 'admin-konten', text: 'Konten', sym: 'lehrkraefte', admin: true, gruppe: 'Admin' },
-  { a: 'admin-grunddaten', text: 'Grunddaten', sym: 'pakete', admin: true },
-  { a: 'admin-klassen', text: 'Klassen', sym: 'klassen', admin: true },
-  { a: 'admin-noten', text: 'Notenschlüssel', sym: 'schluessel', admin: true },
-  { a: 'admin-system', text: 'System', sym: 'admin', admin: true },
-];
+const BEREICHE = Rahmen.BEREICHE;   // Bereiche der Seitenleiste: web/rahmen.js (auch fuer die Unterrichtsbesuche)
 
 function titelSetzen(text) {
   document.getElementById('unter').textContent = text;
@@ -27,29 +14,14 @@ function titelSetzen(text) {
 }
 
 function navigation(aktiv) {
-  const nav = document.getElementById('navigation');
-  const teile = [];
-  for (const b of BEREICHE) {
-    if (b.admin && S.konto.rolle !== 'admin') continue;
-    if (b.nurUb && !S.konto.ub_an) continue;
-    if (b.nurPaperless && !S.konto.paperless) continue;
-    if (b.adresse) { teile.push(el('a', { href: b.adresse }, L.symbol(b.sym), b.text)); continue; }
-    if (b.gruppe) teile.push(el('span', { class: 'etikett', style: 'padding:12px 12px 4px', text: b.gruppe }));
-    if (b.spaeter) {
-      teile.push(el('span', { class: 'nav-spaeter', title: 'kommt mit ' + b.spaeter }, L.symbol(b.sym), b.text,
-        el('span', { class: 'chip klein', text: b.spaeter })));
-      continue;
-    }
-    teile.push(el('a', { href: '#' + b.a, class: b.a === aktiv ? 'an' : null }, L.symbol(b.sym), b.text,
-      b.a === 'admin-system' && S.update ? el('span', { class: 'chip gelb klein', text: 'Update' }) : null));
-  }
-  L.setzen(nav, teile);
+  Rahmen.navigation(document.getElementById('navigation'), S.konto, S.update, aktiv);
 }
 
 async function zeigen() {
+  if (location.hash === '#pruefungen-schueler') { location.replace('#klassen'); return; }   // fruehere Adresse der Schuelerlisten
   const ziel = (location.hash || '#start').slice(1);
   const haupt = ziel.startsWith('einstellungen') ? 'einstellungen' : ziel.startsWith('planung') ? 'planung'
-    : ziel.startsWith('pruefung') ? 'pruefungen' : ziel;
+    : ziel.startsWith('pruefung') ? 'pruefungen' : ziel.startsWith('klassen') ? 'klassen' : ziel;
   const bereich = BEREICHE.find(b => b.a === haupt && !b.spaeter && !b.adresse && (!b.admin || S.konto.rolle === 'admin')) || BEREICHE[0];
   navigation(bereich.a);
   L.setzen(inhalt, el('p', { class: 'leise', text: 'Lädt …' }));
@@ -58,6 +30,7 @@ async function zeigen() {
     else if (bereich.a === 'einstellungen') await einstellungenZeigen(({ 'einstellungen-konto': 'konto', 'einstellungen-kalender': 'kalender',
       'einstellungen-lernfelder': 'lernfelder' })[ziel] || 'stundenplan');
     else if (bereich.a === 'planung') await planungZeigen(ziel === 'planung-bibliothek' ? 'bibliothek' : 'planung');
+    else if (bereich.a === 'klassen') await klassenZeigen();
     else if (bereich.a === 'pruefungen') await pruefungenZeigen(ziel);
     else if (bereich.a === 'formulare') { titelSetzen('Formulare'); await Formulare.zeigen(inhalt); }
     else if (bereich.a === 'dokumente') { titelSetzen('Dokumente'); await Dokumente.zeigen(inhalt); }
@@ -119,19 +92,28 @@ async function planungZeigen(reiter) {
   await Planung.zeigen(ort, reiter);
 }
 
-// --- Pruefungen: Pruefungen, Schuelerlisten, Vorlagen, Notenschluessel ---
+// --- Klassen: gemeinsame Schuelerliste je Klasse (mit Fotos) fuer alle Lehrkraefte der Klasse ---
+
+async function klassenZeigen() {
+  titelSetzen('Klassen');
+  const ort = el('div', { class: 'stapel' });
+  L.setzen(inhalt, el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: 'Klassen' })), ort);
+  await Pruefungen.zeigen(ort, 'schueler');
+}
+
+// --- Pruefungen: Pruefungen, Vorlagen, Notenschluessel ---
 
 async function pruefungenZeigen(ziel) {
-  const reiter = ziel.startsWith('pruefung-') ? 'pruefungen' : ({ 'pruefungen-schueler': 'schueler', 'pruefungen-vorlagen': 'vorlagen',
+  const reiter = ziel.startsWith('pruefung-') ? 'pruefungen' : ({ 'pruefungen-vorlagen': 'vorlagen',
     'pruefungen-schluessel': 'schluessel' })[ziel] || 'pruefungen';
-  const titel = { pruefungen: 'Prüfungen', schueler: 'Schülerlisten', vorlagen: 'Vorlagen', schluessel: 'Notenschlüssel' }[reiter];
+  const titel = { pruefungen: 'Prüfungen', vorlagen: 'Vorlagen', schluessel: 'Notenschlüssel' }[reiter];
   titelSetzen(titel);
   const ort = el('div', { class: 'stapel' });
   const tab = (id, hash, text, sym) => el('a', { class: 'knopf' + (reiter === id ? ' an' : ''), href: '#' + hash }, L.symbol(sym), text);
   L.setzen(inhalt,
     el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: titel }),
       el('div', { class: 'segment', role: 'group', 'aria-label': 'Prüfungen' },
-        tab('pruefungen', 'pruefungen', 'Prüfungen', 'pruefung'), tab('schueler', 'pruefungen-schueler', 'Schülerlisten', 'klassen'),
+        tab('pruefungen', 'pruefungen', 'Prüfungen', 'pruefung'),
         tab('vorlagen', 'pruefungen-vorlagen', 'Vorlagen', 'formular'), tab('schluessel', 'pruefungen-schluessel', 'Notenschlüssel', 'schluessel'))),
     ort);
   await Pruefungen.zeigen(ort, ziel.startsWith('pruefung-') ? ziel : reiter);
