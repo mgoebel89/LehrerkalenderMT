@@ -121,7 +121,7 @@ def verlauf(con, lid, sid):
     klasse = con.execute("SELECT name FROM klasse WHERE id = ?", (s["klasse_id"],)).fetchone()["name"]
     return {"schueler": {"id": s["id"], "nachname": s["nachname"], "vorname": s["vorname"], "email": s["email"], "aktiv": bool(s["aktiv"]),
                          "name": s["nachname"] + (", " + s["vorname"] if s["vorname"] else ""), "klasse_id": s["klasse_id"], "klasse": klasse,
-                         "foto": s["foto_geaendert"] if s["foto"] is not None else None},
+                         "foto": s["foto_geaendert"] if s["foto"] is not None else None, "entlassen_zum": s["entlassen_zum"]},
             "eintraege": [_zeile(z) for z in zeilen]}
 
 
