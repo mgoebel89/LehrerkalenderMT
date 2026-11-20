@@ -443,6 +443,29 @@ def api_konto_aendern(h, con, daten, lid):
     h.antwort(200, {"konto": konten.holen(con, lid)})
 
 
+def api_konto_loeschen_stand(h, con, daten, lid):
+    _admin(h, con)
+    h.antwort(200, konten.loeschen_stand(con, _ganzzahl(lid)))
+
+
+def api_konto_loeschen(h, con, daten, lid):
+    """Gesperrtes Konto endgueltig loeschen: pruefen (Passwort, Kuerzel), Sicherung ablegen, loeschen, protokollieren."""
+    a = _admin(h, con)
+    lid = _ganzzahl(lid)
+    try:
+        k = konten.loeschen_pruefen(con, a["id"], lid, daten.get("passwort"), daten.get("kuerzel"))
+    except konten.KontoFehler as f:
+        if "Passwort" in str(f):
+            SPERRE.fehlversuch(h.adresse())
+        raise
+    sicherung = updates.sicherung_ablegen(con, os.path.dirname(h.server.db_pfad), art="konto-loeschen")
+    with db.transaktion(con):
+        konten.loeschen(con, lid)
+        db.protokoll(con, a["kuerzel"], "konto_geloescht", konto=k["kuerzel"], name=k["name"], sicherung=os.path.basename(sicherung))
+    print("Konto %s geloescht durch %s (Sicherung %s)" % (k["kuerzel"], a["kuerzel"], sicherung), flush=True)
+    h.antwort(200, {"ok": True, "sicherung": os.path.basename(sicherung)})
+
+
 def api_einladung_anlegen(h, con, daten):
     a = _admin(h, con)
     with db.transaktion(con):
@@ -1535,6 +1558,8 @@ ROUTEN = [(m, re.compile(p), f) for m, p, f in [
     ("POST", r"/api/einladung/einloesen", api_einladung_einloesen),
     ("GET", r"/api/admin/konten", api_konten),
     ("POST", r"/api/admin/konten/" + ID, api_konto_aendern),
+    ("GET", r"/api/admin/konten/" + ID + "/loeschen", api_konto_loeschen_stand),
+    ("POST", r"/api/admin/konten/" + ID + "/loeschen", api_konto_loeschen),
     ("POST", r"/api/admin/einladungen", api_einladung_anlegen),
     ("POST", r"/api/admin/einladungen/" + ID + "/zurueckziehen", api_einladung_zurueckziehen),
     ("GET", r"/api/grunddaten", api_grunddaten),
