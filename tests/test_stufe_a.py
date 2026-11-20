@@ -152,7 +152,8 @@ class Grunddaten(MitDatenbank):
         with self.assertRaises(grunddaten.GrunddatenFehler):   # doppelte Nummer
             grunddaten.lernfeld_speichern(self.con, {"bildungsgang_id": bid, "nummer": "LF 7", "name": "Nochmal"})
         b = grunddaten.alles(self.con)["bildungsgaenge"][0]
-        self.assertEqual([s["name"] for s in b["stufen"]], ["Fachstufe I"])
+        # Grundstufe und Fachstufe 1-3 kommen beim Anlegen mit (0.23.0), eigene Stufen hinten dran
+        self.assertEqual([s["name"] for s in b["stufen"]], ["Grundstufe", "Fachstufe 1", "Fachstufe 2", "Fachstufe 3", "Fachstufe I"])
         self.assertEqual(b["lernfelder"][0]["stunden"], 80)
 
     def test_modul_mit_anteilen(self):

@@ -55,7 +55,8 @@ async function zeigen() {
   L.setzen(inhalt, el('p', { class: 'leise', text: 'Lädt …' }));
   try {
     if (bereich.a === 'start') await startZeigen();
-    else if (bereich.a === 'einstellungen') await einstellungenZeigen(ziel === 'einstellungen-konto' ? 'konto' : ziel === 'einstellungen-kalender' ? 'kalender' : 'stundenplan');
+    else if (bereich.a === 'einstellungen') await einstellungenZeigen(({ 'einstellungen-konto': 'konto', 'einstellungen-kalender': 'kalender',
+      'einstellungen-lernfelder': 'lernfelder' })[ziel] || 'stundenplan');
     else if (bereich.a === 'planung') await planungZeigen(ziel === 'planung-bibliothek' ? 'bibliothek' : 'planung');
     else if (bereich.a === 'pruefungen') await pruefungenZeigen(ziel);
     else if (bereich.a === 'formulare') { titelSetzen('Formulare'); await Formulare.zeigen(inhalt); }
@@ -142,14 +143,17 @@ async function einstellungenZeigen(reiter) {
   titelSetzen('Einstellungen');
   const ort = el('div', { class: 'stapel' });
   const tab = (id, ziel, text, sym) => el('a', { class: 'knopf' + (reiter === id ? ' an' : ''), href: '#' + ziel }, L.symbol(sym), text);
+  const titel = { konto: 'Mein Konto', kalender: 'Kalender', lernfelder: 'Lernfelder' }[reiter] || 'Stundenplan';
   L.setzen(inhalt,
-    el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: reiter === 'konto' ? 'Mein Konto' : reiter === 'kalender' ? 'Kalender' : 'Stundenplan' }),
+    el('div', { class: 'werkzeug' }, el('h1', { class: 'dreieck', text: titel }),
       el('div', { class: 'segment', role: 'group', 'aria-label': 'Einstellungen' },
-        tab('stundenplan', 'einstellungen', 'Stundenplan', 'spalten'), tab('kalender', 'einstellungen-kalender', 'Kalender', 'kalender'),
+        tab('stundenplan', 'einstellungen', 'Stundenplan', 'spalten'), tab('lernfelder', 'einstellungen-lernfelder', 'Lernfelder', 'pakete'),
+        tab('kalender', 'einstellungen-kalender', 'Kalender', 'kalender'),
         tab('konto', 'einstellungen-konto', 'Konto und Sicherheit', 'schloss'))),
     ort);
   if (reiter === 'konto') kontoZeigen(ort);
   else if (reiter === 'kalender') L.setzen(ort, el('div', { style: 'max-width:760px' }, Abos.karte(false)));
+  else if (reiter === 'lernfelder') await Lernfelder.seite(ort);
   else await Stundenplan.zeigen(ort);
 }
 

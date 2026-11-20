@@ -108,10 +108,19 @@ const Stundenplan = (() => {
       L.setzen(lfSel, el('option', { value: '', text: '– alle Themen der Folge –' }),
         lfs.map(l => el('option', { value: l.id, text: l.nummer + ' ' + l.name, selected: l.id === lfGewaehlt ? true : null })));
       lfFeld.hidden = !lfs.length;
+      lfNeu.hidden = !k;
     };
+    const bildungsgang = () => { const k = kSel.value ? klasse(Number(kSel.value)) : null; return k ? k.bildungsgang_id : null; };
+    // fehlendes Lernfeld anlegen: kommt in die Liste und ist gleich gewaehlt
+    const lfNeu = el('div', {}, Lernfelder.knopf(bildungsgang, r => {
+      const b = r.bildungsgaenge.find(x => x.id === bildungsgang());
+      const neu = b && b.lernfelder.find(x => x.id === r.id);
+      if (neu && !E.lernfelder.some(l => l.id === neu.id)) E.lernfelder.push(Object.assign({ bildungsgang_id: b.id }, neu));
+      fuellen(gSel.value ? Number(gSel.value) : null, r.id);
+    }, 'Lernfeld anlegen'));
     kSel.addEventListener('change', () => fuellen(null, null));
     fuellen(eintrag ? eintrag.gruppe_id : null, eintrag ? eintrag.lernfeld_id : null);
-    return { teil: el('div', { class: 'felder' }, el('div', { class: 'felder zwei' }, L.feld(beschriftung, kSel), gFeld), lfFeld),
+    return { teil: el('div', { class: 'felder' }, el('div', { class: 'felder zwei' }, L.feld(beschriftung, kSel), gFeld), lfFeld, lfNeu),
       wert: woche => ({ klasse_id: kSel.value || null, gruppe_id: gSel.value || null, lernfeld_id: lfSel.value || null, woche }) };
   }
 
