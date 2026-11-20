@@ -103,12 +103,14 @@ def liste(con, lid, kid, nur_aktive=False):
     """Alle Schueler der Klasse mit der Gruppe DIESER Lehrkraft (gruppe_id, gruppe)."""
     klasse_pruefen(con, lid, kid)
     zeilen = con.execute(
-        "SELECT s.*, sg.gruppe_id, g.name AS gruppe, l.name AS angelegt_von FROM schueler s "
+        "SELECT s.id, s.nachname, s.vorname, s.email, s.aktiv, s.foto_geaendert, s.foto IS NOT NULL AS hat_foto, "
+        "sg.gruppe_id, g.name AS gruppe, l.name AS angelegt_von FROM schueler s "
         "LEFT JOIN schueler_gruppe sg ON sg.schueler_id = s.id AND sg.lehrkraft_id = ? "
         "LEFT JOIN gruppe g ON g.id = sg.gruppe_id LEFT JOIN lehrkraft l ON l.id = s.erstellt_von "
         "WHERE s.klasse_id = ?" + (" AND s.aktiv = 1" if nur_aktive else ""), (lid, kid)).fetchall()
     ergebnis = [{"id": z["id"], "nachname": z["nachname"], "vorname": z["vorname"], "email": z["email"], "gruppe_id": z["gruppe_id"],
-                 "gruppe": z["gruppe"], "aktiv": bool(z["aktiv"]), "name": _name(z), "angelegt_von": z["angelegt_von"] or ""}
+                 "gruppe": z["gruppe"], "aktiv": bool(z["aktiv"]), "name": _name(z), "angelegt_von": z["angelegt_von"] or "",
+                 "foto": z["foto_geaendert"] if z["hat_foto"] else None}
                 for z in zeilen]
     ergebnis.sort(key=lambda s: (not s["aktiv"], normalisiert(s["nachname"]), normalisiert(s["vorname"])))
     return ergebnis
@@ -259,6 +261,8 @@ def _zusammen(con, ziel, quelle):
     z, q = (con.execute("SELECT * FROM schueler WHERE id = ?", (i,)).fetchone() for i in (ziel, quelle))
     con.execute("UPDATE schueler SET email = ?, aktiv = ? WHERE id = ?",
                 (z["email"] or q["email"], 1 if (z["aktiv"] or q["aktiv"]) else 0, ziel))
+    if "foto" in z.keys() and z["foto"] is None and q["foto"] is not None:   # Foto: das des Ziels, sonst das der Quelle
+        con.execute("UPDATE schueler SET foto = ?, foto_geaendert = ? WHERE id = ?", (q["foto"], q["foto_geaendert"], ziel))
     con.execute("DELETE FROM schueler WHERE id = ?", (quelle,))
 
 

@@ -633,6 +633,12 @@ MIGRATIONEN = [
     #     widersprechende E-Mail, nur ueber verschiedene Lehrkraefte). Unklare Faelle zeigt die Liste als "Moegliche
     #     Doppelungen" an. Python-Schritt: app/schuelerliste.py
     ("python", "schuelerliste.migration_zusammenfuehren"),
+    # 25: Fotos zu Schuelern (0.25.0): ein JPEG je Schueler (im Browser zugeschnitten und verkleinert), gemeinsam fuer
+    #     alle Lehrkraefte der Klasse wie die Liste; foto_geaendert dient als Versionsmarke fuer den Browser-Cache.
+    """
+    ALTER TABLE schueler ADD COLUMN foto BLOB;
+    ALTER TABLE schueler ADD COLUMN foto_geaendert TEXT
+    """,
 ]
 
 

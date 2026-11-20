@@ -484,3 +484,25 @@ span.thema-name { cursor: default; }
 .kollegium .vorzeilen { white-space: pre-wrap; margin: 0; }
 .kollegium .unterricht-eintrag { padding-left: 10px; border-left: 3px solid var(--linie); }
 .kollegium .unterricht-eintrag:first-child { border-left-color: var(--blau, #00639C); }
+
+/* Fotos zu Schuelern (0.25.0): Vorschaubild rund (ohne Foto: Initialen), Hochformat 4:5 in Fotoliste und Zuschnitt */
+.avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 50%; overflow: hidden;
+  background: var(--blau-hell); color: var(--blau); font-weight: 700; font-size: .72rem; vertical-align: middle; object-fit: cover; }
+img.avatar { background: var(--knopf); }
+.mit-avatar { display: inline-flex; align-items: center; gap: 8px; }
+.foto-gross { width: 120px; aspect-ratio: 4 / 5; border-radius: 12px 4px 4px 4px; object-fit: cover; background: var(--knopf);
+  display: flex; align-items: center; justify-content: center; color: var(--leise); font-weight: 700; font-size: 1.6rem; flex: none; }
+.foto-feld { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+.foto-raster { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.foto-karte { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; align-items: start; align-content: start;
+  gap: 4px; padding: 8px; border: 1px solid var(--linie); border-radius: 12px 4px 4px 4px; background: var(--karte);
+  text-align: left; font: inherit; color: inherit; cursor: pointer; white-space: normal; min-height: 0; }
+.foto-karte:hover { border-color: var(--blau-mittel); }
+.foto-karte .foto-gross { width: 100%; }
+.foto-karte.aus { opacity: .55; }
+.foto-karte b { line-height: 1.2; overflow-wrap: anywhere; }
+.zuschnitt { position: relative; width: 240px; height: 300px; overflow: hidden; border-radius: 12px 4px 4px 4px; background: #222;
+  touch-action: none; cursor: grab; margin: 0 auto; }
+.zuschnitt img { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; user-select: none; -webkit-user-drag: none; }
+.zuschnitt.zieht { cursor: grabbing; }
+.pm-foto { width: 88px; }
